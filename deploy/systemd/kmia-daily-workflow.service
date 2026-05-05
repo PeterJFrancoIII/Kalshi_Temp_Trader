@@ -1,0 +1,17 @@
+[Unit]
+Description=KMIA Daily Workflow (Forecasting, Comparison, Settlement)
+# NO REAL TRADING EXECUTION
+After=network.target
+
+[Service]
+Type=oneshot
+User=computer
+Group=computer
+WorkingDirectory=/opt/kmia-kalshi
+ExecStart=/bin/bash /opt/kmia-kalshi/scripts/run_kmia_daily_workflow.sh
+Environment="PYTHONPATH=/opt/kmia-kalshi/backend/src"
+StandardOutput=append:/opt/kmia-kalshi/backend/data/processed/logs/systemd_workflow.log
+StandardError=append:/opt/kmia-kalshi/backend/data/processed/logs/systemd_workflow.log
+
+[Install]
+WantedBy=multi-user.target

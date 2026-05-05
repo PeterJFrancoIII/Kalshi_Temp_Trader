@@ -1,0 +1,24 @@
+000
+CDUS42 KMFL 032023
+CLIMIA
+
+CLIMATE REPORT 
+NATIONAL WEATHER SERVICE MIAMI,FL
+423 PM EDT SUN MAY 03 2026
+
+...................................
+
+...THE MIAMI CLIMATE SUMMARY FOR MAY 3 2026...
+
+WEATHER ITEM   OBSERVED TIME   RECORD YEAR NORMAL DEPARTURE LAST
+                VALUE   (LST)  VALUE       VALUE  FROM      YEAR
+                                                  NORMAL
+...................................................................
+TEMPERATURE (F)
+ TODAY
+  MAXIMUM         91R  2:21 PM  91    1896  85       6       83
+  MINIMUM         72   8:50 AM  54    1940  72       0       73
+  AVERAGE         77                        79      -2       78
+
+PRECIPITATION (IN)
+  TODAY            T           2.88 2005   0.13    -0.13    0.13

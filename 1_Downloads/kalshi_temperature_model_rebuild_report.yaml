@@ -1,0 +1,196 @@
+report_type: kalshi_temperature_model_rebuild_spec
+version: 1.0
+created_date: 2026-05-05
+project: Miami maximum-temperature Kalshi bin prediction
+primary_station:
+  station_id: USW00012839
+  name: MIAMI INTERNATIONAL AIRPORT, FL US
+  target_variable: daily_TMAX_F
+  uploaded_dataset:
+    path: /mnt/data/4304210.csv
+    date_range: 1950-01-01_to_2026-04-30
+    rows: 27879
+
+user_reported_failure_case:
+  event_date: 2026-05-05
+  horizon: approximately_T_minus_12_hours
+  predicted_max_bin_F: 84-85
+  observed_max_F: 88
+  observed_bin_F: '>=88'
+  error_type: underforecast_tail_miss
+  miss_size_F: 3_to_4_degrees_from_predicted_bin_center
+  severity: high_for_binary_or_discrete_bin_contracts
+
+standard_bins_F:
+  - label: '<=79'
+    min_inclusive: null
+    max_inclusive: 79
+  - label: '80-81'
+    min_inclusive: 80
+    max_inclusive: 81
+  - label: '82-83'
+    min_inclusive: 82
+    max_inclusive: 83
+  - label: '84-85'
+    min_inclusive: 84
+    max_inclusive: 85
+  - label: '86-87'
+    min_inclusive: 86
+    max_inclusive: 87
+  - label: '>=88'
+    min_inclusive: 88
+    max_inclusive: null
+
+empirical_baselines:
+  all_history_1950_2026:
+    '<=79': 0.226
+    '80-81': 0.107
+    '82-83': 0.114
+    '84-85': 0.109
+    '86-87': 0.114
+    '>=88': 0.330
+  recent_2015_2026:
+    '<=79': 0.157
+    '80-81': 0.085
+    '82-83': 0.109
+    '84-85': 0.123
+    '86-87': 0.104
+    '>=88': 0.421
+  recent_apr_may_2015_2026:
+    '<=79': 0.026
+    '80-81': 0.081
+    '82-83': 0.124
+    '84-85': 0.190
+    '86-87': 0.185
+    '>=88': 0.394
+  recent_may5_plus_minus_7_days_2015_2026:
+    '<=79': 0.006
+    '80-81': 0.036
+    '82-83': 0.101
+    '84-85': 0.238
+    '86-87': 0.250
+    '>=88': 0.369
+    mean_TMAX_F: 86.35
+    std_TMAX_F: 2.89
+
+lessons_learned:
+  - Historical baseline must be time-weighted because Miami TMAX distribution has warmed materially across decades.
+  - For early May, the upper bin is not a rare tail; recent analogs near May 5 put >=88F around 37% before using forecast guidance.
+  - A single deterministic max bin is fragile. Output must be a full calibrated probability distribution over bins.
+  - T-12 hour forecasts must ingest live observations and nowcast features, not only model forecast highs.
+  - Forecast errors of 3-4F are large enough to move two bins, so uncertainty must be explicitly widened near bin boundaries.
+  - Market decisions should separate meteorological probability from price/edge/execution timing.
+
+known_project_conventions:
+  output_bins_F: ['<=79', '80-81', '82-83', '84-85', '86-87', '>=88']
+  preferred_price_windows_EDT:
+    - day_before_expiration_10:01_to_10:08
+    - day_before_expiration_10:02_to_10:07
+    - day_before_expiration_11:41_to_11:57
+    - expiration_day_01:42_to_02:43
+    - expiration_day_06:49_to_08:41
+    - expiration_day_08:11
+    - expiration_day_11:54_to_12:00
+
+recommended_rebuild_architecture:
+  modules:
+    data_ingestion:
+      responsibilities:
+        - Load NOAA daily station history.
+        - Fetch or accept forecast model guidance snapshots.
+        - Fetch same-day observations, including hourly temperature, dew point, wind, cloud cover, rainfall, and heat-index-relevant variables.
+        - Store all data snapshots with issued_at timestamps to avoid lookahead leakage.
+    feature_engineering:
+      responsibilities:
+        - Calendar features: day_of_year, month, seasonal windows, holiday/weekend optional.
+        - Climate features: rolling 10-year normals, same-day analogs, trend-adjusted normals.
+        - Forecast features: NWS/NBM/HRRR/GFS/ECMWF-style high forecasts where available, ensemble spread, forecast deltas.
+        - Observation nowcast features: current temp, morning low, temperature rise rate, dew point, wind direction/speed, cloud/rain flags.
+        - Boundary features: distance from forecast high to each 2F bin boundary.
+    modeling:
+      primary_output: calibrated_bin_probability_distribution
+      recommended_approach:
+        - Train a probabilistic residual model: observed_TMAX = guidance_high + residual.
+        - Model residual distribution conditional on season, horizon, current observations, and recent forecast bias.
+        - Convert continuous TMAX distribution into bin probabilities by integration over bin thresholds.
+        - Blend with analog climatology using horizon-dependent weights.
+      candidate_models:
+        - quantile_gradient_boosting
+        - distributional_random_forest_or_ngboost
+        - multinomial_logistic_calibration_layer
+        - isotonic_or_temperature_scaling_calibrator
+    calibration_and_validation:
+      required_backtests:
+        - walk_forward_by_year
+        - horizon_specific_backtest_T_minus_48_T_minus_24_T_minus_12_T_minus_6_T_minus_2
+        - seasonal_backtest_for_April_May
+        - bin_boundary_stress_test
+        - high_tail_recall_test_for_TMAX_ge_88
+      metrics:
+        - Brier_score_by_bin
+        - log_loss
+        - calibration_error_ECE
+        - sharpness
+        - top_bin_accuracy
+        - high_tail_recall_for_ge_88
+        - expected_value_vs_market_close
+    decision_layer:
+      responsibilities:
+        - Convert probabilities to fair prices.
+        - Compare fair prices to Kalshi bid/ask/orderbook.
+        - Include transaction fees, spread, and liquidity.
+        - Require margin of safety higher near unstable bin boundaries.
+
+minimum_viable_prediction_schema:
+  event_id: string
+  station_id: string
+  target_date: YYYY-MM-DD
+  generated_at: ISO8601_timestamp
+  horizon_hours: number
+  data_cutoff: ISO8601_timestamp
+  observed_so_far:
+    current_temp_F: number_or_null
+    high_so_far_F: number_or_null
+    low_so_far_F: number_or_null
+    dewpoint_F: number_or_null
+    wind_direction_deg: number_or_null
+    wind_speed_mph: number_or_null
+    cloud_or_rain_flag: boolean_or_null
+  guidance:
+    sources: list
+    deterministic_highs_F: object
+    ensemble_mean_high_F: number_or_null
+    ensemble_std_F: number_or_null
+  probabilities:
+    '<=79': number
+    '80-81': number
+    '82-83': number
+    '84-85': number
+    '86-87': number
+    '>=88': number
+  most_likely_bin: string
+  expected_TMAX_F: number
+  p_ge_88: number
+  uncertainty_notes: list
+  trade_recommendation:
+    fair_prices_by_bin: object
+    market_prices_by_bin: object_or_null
+    edges_by_bin: object_or_null
+    recommended_action: buy_sell_hold_or_no_trade
+    rationale: string
+
+critical_guardrails:
+  - Never output only one max bin without probabilities.
+  - Never train and evaluate using random splits across dates; use chronological walk-forward validation.
+  - Never use observations or finalized daily TMAX unavailable at prediction timestamp.
+  - Never allow full-history climatology to dominate recent-season analogs for warm-season Miami.
+  - Always report probability mass on adjacent bins and the upper tail.
+  - Always flag when the top two bins are within 10 percentage points.
+  - Always preserve generated_at, data_cutoff, source, and forecast issue time metadata.
+
+next_iteration_priorities:
+  - Add archived forecast snapshots so the model can learn guidance-specific bias by horizon.
+  - Add hourly observation ingestion for T-minus-day nowcasting.
+  - Backtest specifically on early-May Miami cases and >=88F misses.
+  - Calibrate the upper tail so that >=88F is not systematically underweighted.
+  - Build a reproducible CLI that emits one JSON prediction record per event and one backtest report per run.

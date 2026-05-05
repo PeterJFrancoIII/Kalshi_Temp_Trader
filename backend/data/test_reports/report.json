@@ -1,0 +1,47 @@
+{
+    "date": "2026-05-03",
+    "final_max_temp_f": 82,
+    "actual_bin": "81-82",
+    "rules_v1": {
+        "model_name": "rules_v1",
+        "actual_bin": "81-82",
+        "actual_bin_probability": 0.5,
+        "top_bin": "81-82",
+        "top_bin_probability": 0.5,
+        "brier_score": 0.32000000000000006,
+        "log_loss": 0.6931471805599453,
+        "top_bin_hit": true
+    },
+    "rules_v2_climatology": {
+        "model_name": "rules_v2_climatology",
+        "actual_bin": "81-82",
+        "actual_bin_probability": 0.4,
+        "top_bin": "83-84",
+        "top_bin_probability": 0.45,
+        "brier_score": 0.5724,
+        "log_loss": 0.916290731874155,
+        "top_bin_hit": false
+    },
+    "winner_by_brier": "rules_v1",
+    "winner_by_log_loss": "rules_v1",
+    "winner_by_top_bin": "rules_v1",
+    "brier_delta_v2_minus_v1": 0.25239999999999996,
+    "log_loss_delta_v2_minus_v1": 0.2231435513142097,
+    "summary": "Rules_v1 won by Brier score and log loss; only rules_v1 hit the top bin; rules_v2_climatology assigned lower probability to the actual bin.",
+    "v1": {
+        "final_max_temp_f": 82,
+        "actual_bin": "81-82",
+        "top_predicted_bin": "81-82",
+        "top_bin_hit": true,
+        "brier_score": 0.32000000000000006,
+        "log_loss": 0.6931471805599453
+    },
+    "v2": {
+        "final_max_temp_f": 82,
+        "actual_bin": "81-82",
+        "top_predicted_bin": "83-84",
+        "top_bin_hit": false,
+        "brier_score": 0.5724,
+        "log_loss": 0.916290731874155
+    }
+}

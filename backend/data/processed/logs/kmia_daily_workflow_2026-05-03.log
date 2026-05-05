@@ -1,0 +1,424 @@
+========================================================================
+KMIA Daily Workflow Started: Sun May  3 20:39:08 EDT 2026
+Project Root: /Users/computer/Desktop/App Development/Kalshi
+NO REAL TRADING EXECUTION
+========================================================================
+[1/4] Running daily v2 dry-run forecast...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:39:08,345 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: False)...
+2026-05-03 20:39:08,346 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:39:08,346 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:39:08,346 - __main__ - INFO - History file exists: True
+2026-05-03 20:39:08,406 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:39:08,418 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:39:08,419 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_203908.md
+2026-05-03 20:39:08,419 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_203908.html
+[2/4] Running model comparison dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:39:08,761 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: True)...
+2026-05-03 20:39:08,761 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:39:08,761 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:39:08,761 - __main__ - INFO - History file exists: True
+2026-05-03 20:39:08,818 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:39:08,830 - __main__ - INFO - Comparison reports saved as kmia_comparison_2026-05-03_203908
+2026-05-03 20:39:08,830 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:39:08,830 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v1_203908.md
+2026-05-03 20:39:08,830 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v1_203908.html
+2026-05-03 20:39:08,830 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:39:08,830 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_203908.md
+2026-05-03 20:39:08,830 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_203908.html
+[3/4] Running settlement check...
+Running settlement dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+--- CLIMIA Settlement Dry Run ---
+Loading mock prediction: {
+  "<=78": 0.05,
+  "79-80": 0.15,
+  "81-82": 0.5,
+  "83-84": 0.2,
+  "85-86": 0.05,
+  ">=87": 0.05
+}
+Loading sample CLIMIA from: sample_normal.txt
+
+--- Settlement Summary ---
+Final Max Temp:  82 F
+Actual Bin:      81-82
+Predicted Bin:   81-82
+Top Bin Hit:     True
+Brier Score:     0.3200
+Log Loss:        0.6931
+--------------------------
+[4/4] Generating weekly/aggregate calibration report...
+Generating Weekly Aggregate Calibration Report...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+Done. Aggregate reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration
+========================================================================
+KMIA Daily Workflow Completed: Sun May  3 20:39:09 EDT 2026
+Workflow Log: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/logs/kmia_daily_workflow_2026-05-03.log
+========================================================================
+========================================================================
+KMIA Daily Workflow Started: Sun May  3 20:40:24 EDT 2026
+Project Root: /Users/computer/Desktop/App Development/Kalshi
+NO REAL TRADING EXECUTION
+========================================================================
+[1/4] Running daily v2 dry-run forecast...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:40:25,188 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: False)...
+2026-05-03 20:40:25,188 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:40:25,188 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:40:25,188 - __main__ - INFO - History file exists: True
+2026-05-03 20:40:25,245 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:40:25,257 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:40:25,257 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_204025.md
+2026-05-03 20:40:25,257 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_204025.html
+[2/4] Running model comparison dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:40:25,557 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: True)...
+2026-05-03 20:40:25,557 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:40:25,557 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:40:25,557 - __main__ - INFO - History file exists: True
+2026-05-03 20:40:25,615 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:40:25,626 - __main__ - INFO - Comparison reports saved as kmia_comparison_2026-05-03_204025
+2026-05-03 20:40:25,626 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:40:25,626 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v1_204025.md
+2026-05-03 20:40:25,626 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v1_204025.html
+2026-05-03 20:40:25,627 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:40:25,627 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_204025.md
+2026-05-03 20:40:25,627 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_204025.html
+[3/4] Running settlement check...
+Running settlement dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+--- CLIMIA Settlement Dry Run ---
+Loading mock prediction: {
+  "<=78": 0.05,
+  "79-80": 0.15,
+  "81-82": 0.5,
+  "83-84": 0.2,
+  "85-86": 0.05,
+  ">=87": 0.05
+}
+Loading sample CLIMIA from: sample_normal.txt
+
+--- Settlement Summary ---
+Final Max Temp:  82 F
+Actual Bin:      81-82
+Predicted Bin:   81-82
+Top Bin Hit:     True
+Brier Score:     0.3200
+Log Loss:        0.6931
+--------------------------
+[4/4] Generating weekly/aggregate calibration report...
+Generating Weekly Aggregate Calibration Report...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+Done. Aggregate reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration
+========================================================================
+KMIA Daily Workflow Completed: Sun May  3 20:40:25 EDT 2026
+Workflow Log: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/logs/kmia_daily_workflow_2026-05-03.log
+========================================================================
+========================================================================
+KMIA Daily Workflow Started: Sun May  3 20:48:11 EDT 2026
+Project Root: /Users/computer/Desktop/App Development/Kalshi
+NO REAL TRADING EXECUTION
+========================================================================
+[1/4] Running daily v2 dry-run forecast...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:48:11,574 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: False)...
+2026-05-03 20:48:11,574 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:48:11,574 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:48:11,574 - __main__ - INFO - History file exists: True
+2026-05-03 20:48:11,636 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:48:11,650 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:48:11,650 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_204811.md
+2026-05-03 20:48:11,650 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_204811.html
+[2/4] Running model comparison dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:48:12,005 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: True)...
+2026-05-03 20:48:12,006 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:48:12,006 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:48:12,006 - __main__ - INFO - History file exists: True
+2026-05-03 20:48:12,065 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:48:12,077 - __main__ - INFO - Comparison reports saved as kmia_comparison_2026-05-03_204812
+2026-05-03 20:48:12,077 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:48:12,078 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v1_204812.md
+2026-05-03 20:48:12,078 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v1_204812.html
+2026-05-03 20:48:12,078 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:48:12,078 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_204812.md
+2026-05-03 20:48:12,078 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_204812.html
+[3/4] Running settlement check...
+Running settlement dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+--- CLIMIA Settlement Dry Run ---
+Loading mock prediction: {
+  "<=78": 0.05,
+  "79-80": 0.15,
+  "81-82": 0.5,
+  "83-84": 0.2,
+  "85-86": 0.05,
+  ">=87": 0.05
+}
+Loading sample CLIMIA from: sample_normal.txt
+
+--- Settlement Summary ---
+Final Max Temp:  82 F
+Actual Bin:      81-82
+Predicted Bin:   81-82
+Top Bin Hit:     True
+Brier Score:     0.3200
+Log Loss:        0.6931
+--------------------------
+[4/5] Generating weekly/aggregate calibration report...
+Generating Weekly Aggregate Calibration Report...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+Done. Aggregate reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration
+[5/5] Generating Daily Status Report...
+Daily status report generated:
+- /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/status/kmia_daily_status_2026-05-03.json
+- /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/status/kmia_daily_status_2026-05-03.md
+========================================================================
+KMIA Daily Workflow Completed: Sun May  3 20:48:12 EDT 2026
+Workflow Log: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/logs/kmia_daily_workflow_2026-05-03.log
+========================================================================
+========================================================================
+KMIA Daily Workflow Started: Sun May  3 20:49:31 EDT 2026
+Project Root: /Users/computer/Desktop/App Development/Kalshi
+NO REAL TRADING EXECUTION
+========================================================================
+[1/4] Running daily v2 dry-run forecast...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:49:31,813 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: False)...
+2026-05-03 20:49:31,814 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:49:31,814 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:49:31,814 - __main__ - INFO - History file exists: True
+2026-05-03 20:49:31,872 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:49:31,883 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:49:31,883 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_204931.md
+2026-05-03 20:49:31,883 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_204931.html
+[2/4] Running model comparison dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:49:32,198 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: True)...
+2026-05-03 20:49:32,198 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:49:32,198 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:49:32,199 - __main__ - INFO - History file exists: True
+2026-05-03 20:49:32,257 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:49:32,269 - __main__ - INFO - Comparison reports saved as kmia_comparison_2026-05-03_204932
+2026-05-03 20:49:32,269 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:49:32,269 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v1_204932.md
+2026-05-03 20:49:32,269 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v1_204932.html
+2026-05-03 20:49:32,270 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:49:32,270 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_204932.md
+2026-05-03 20:49:32,270 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_204932.html
+[3/4] Running settlement check...
+Running settlement dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+--- CLIMIA Settlement Dry Run ---
+Loading mock prediction: {
+  "<=78": 0.05,
+  "79-80": 0.15,
+  "81-82": 0.5,
+  "83-84": 0.2,
+  "85-86": 0.05,
+  ">=87": 0.05
+}
+Loading sample CLIMIA from: sample_normal.txt
+
+--- Settlement Summary ---
+Final Max Temp:  82 F
+Actual Bin:      81-82
+Predicted Bin:   81-82
+Top Bin Hit:     True
+Brier Score:     0.3200
+Log Loss:        0.6931
+--------------------------
+[4/5] Generating weekly/aggregate calibration report...
+Generating Weekly Aggregate Calibration Report...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+Done. Aggregate reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration
+[5/5] Generating Daily Status Report...
+Daily status report generated:
+- /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/status/kmia_daily_status_2026-05-03.json
+- /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/status/kmia_daily_status_2026-05-03.md
+========================================================================
+KMIA Daily Workflow Completed: Sun May  3 20:49:32 EDT 2026
+Workflow Log: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/logs/kmia_daily_workflow_2026-05-03.log
+========================================================================
+========================================================================
+KMIA Daily Workflow Started: Sun May  3 20:52:14 EDT 2026
+Project Root: /Users/computer/Desktop/App Development/Kalshi
+NO REAL TRADING EXECUTION
+========================================================================
+[1/4] Running daily v2 dry-run forecast...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:52:15,166 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: False)...
+2026-05-03 20:52:15,166 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:52:15,166 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:52:15,166 - __main__ - INFO - History file exists: True
+2026-05-03 20:52:15,225 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:52:15,237 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:52:15,237 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_205215.md
+2026-05-03 20:52:15,237 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_205215.html
+[2/4] Running model comparison dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:52:15,582 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: True)...
+2026-05-03 20:52:15,582 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:52:15,582 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:52:15,582 - __main__ - INFO - History file exists: True
+2026-05-03 20:52:15,642 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:52:15,654 - __main__ - INFO - Comparison reports saved as kmia_comparison_2026-05-03_205215
+2026-05-03 20:52:15,655 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:52:15,655 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v1_205215.md
+2026-05-03 20:52:15,655 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v1_205215.html
+2026-05-03 20:52:15,655 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:52:15,655 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_205215.md
+2026-05-03 20:52:15,655 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_205215.html
+[3/4] Running settlement check...
+Running settlement dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+--- CLIMIA Settlement Dry Run ---
+Loading mock prediction: {
+  "<=78": 0.05,
+  "79-80": 0.15,
+  "81-82": 0.5,
+  "83-84": 0.2,
+  "85-86": 0.05,
+  ">=87": 0.05
+}
+Loading sample CLIMIA from: sample_normal.txt
+
+--- Settlement Summary ---
+Final Max Temp:  82 F
+Actual Bin:      81-82
+Predicted Bin:   81-82
+Top Bin Hit:     True
+Brier Score:     0.3200
+Log Loss:        0.6931
+--------------------------
+[4/5] Generating weekly/aggregate calibration report...
+Generating Weekly Aggregate Calibration Report...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+Done. Aggregate reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration
+[5/5] Generating Daily Status Report...
+Daily status report generated:
+- /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/status/kmia_daily_status_2026-05-03.json
+- /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/status/kmia_daily_status_2026-05-03.md
+========================================================================
+KMIA Daily Workflow Completed: Sun May  3 20:52:15 EDT 2026
+Workflow Log: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/logs/kmia_daily_workflow_2026-05-03.log
+========================================================================
+========================================================================
+KMIA Daily Workflow Started: Sun May  3 20:53:07 EDT 2026
+Project Root: /Users/computer/Desktop/App Development/Kalshi
+NO REAL TRADING EXECUTION
+========================================================================
+[1/4] Running daily v2 dry-run forecast...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:53:07,276 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: False)...
+2026-05-03 20:53:07,276 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:53:07,276 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:53:07,276 - __main__ - INFO - History file exists: True
+2026-05-03 20:53:07,333 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:53:07,344 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:53:07,344 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_205307.md
+2026-05-03 20:53:07,344 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_205307.html
+[2/4] Running model comparison dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+2026-05-03 20:53:07,655 - __main__ - INFO - Starting prediction pipeline for 2026-05-03 (Dry Run: True, Model: rules_v2_climatology, Compare: True)...
+2026-05-03 20:53:07,655 - __main__ - INFO - Using mock features for dry run.
+2026-05-03 20:53:07,655 - __main__ - INFO - History path resolved to: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/history/kmia_daily_history.jsonl
+2026-05-03 20:53:07,655 - __main__ - INFO - History file exists: True
+2026-05-03 20:53:07,712 - __main__ - INFO - Loaded 27879 historical records for v2 integration.
+2026-05-03 20:53:07,722 - __main__ - INFO - Comparison reports saved as kmia_comparison_2026-05-03_205307
+2026-05-03 20:53:07,723 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:53:07,723 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v1_205307.md
+2026-05-03 20:53:07,723 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v1_205307.html
+2026-05-03 20:53:07,723 - __main__ - INFO - Reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/reports
+2026-05-03 20:53:07,723 - __main__ - INFO -   MD: kmia_forecast_2026-05-03_rules_v2_climatology_205307.md
+2026-05-03 20:53:07,723 - __main__ - INFO -   HTML: kmia_forecast_2026-05-03_rules_v2_climatology_205307.html
+[3/4] Running settlement check...
+Running settlement dry-run...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+--- CLIMIA Settlement Dry Run ---
+Loading mock prediction: {
+  "<=78": 0.05,
+  "79-80": 0.15,
+  "81-82": 0.5,
+  "83-84": 0.2,
+  "85-86": 0.05,
+  ">=87": 0.05
+}
+Loading sample CLIMIA from: sample_normal.txt
+
+--- Settlement Summary ---
+Final Max Temp:  82 F
+Actual Bin:      81-82
+Predicted Bin:   81-82
+Top Bin Hit:     True
+Brier Score:     0.3200
+Log Loss:        0.6931
+--------------------------
+[4/5] Generating weekly/aggregate calibration report...
+Generating Weekly Aggregate Calibration Report...
+Using Python: /Users/computer/Desktop/App Development/Kalshi/.venv/bin/python3
+PYTHONPATH: :/Users/computer/Desktop/App Development/Kalshi/backend/src
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+WARNING: Input directory does not exist: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/comparisons
+INFO: Saved aggregate JSON to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.json
+INFO: Saved aggregate Markdown to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration/aggregate_calibration.md
+Done. Aggregate reports saved to /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/aggregate_calibration
+[5/5] Generating Daily Status Report...
+Daily status report generated:
+- /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/status/kmia_daily_status_2026-05-03.json
+- /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/status/kmia_daily_status_2026-05-03.md
+========================================================================
+KMIA Daily Workflow Completed: Sun May  3 20:53:08 EDT 2026
+Workflow Log: /Users/computer/Desktop/App Development/Kalshi/backend/data/processed/logs/kmia_daily_workflow_2026-05-03.log
+========================================================================

@@ -1,0 +1,32 @@
+000
+CDUS42 KMFL 032023
+CLIMIA
+
+CLIMATE REPORT 
+NATIONAL WEATHER SERVICE MIAMI,FL
+423 PM EDT SUN MAY 03 2026
+
+...................................
+
+...THE MIAMI CLIMATE SUMMARY FOR MAY 3 2026...
+VALID TODAY AS OF 0400 PM LOCAL TIME.
+
+CLIMATE NORMAL PERIOD: 1991 TO 2020
+CLIMATE RECORD PERIOD: 1895 TO 2026
+
+WEATHER ITEM   OBSERVED TIME   RECORD YEAR NORMAL DEPARTURE LAST
+                VALUE   (LST)  VALUE       VALUE  FROM      YEAR
+                                                  NORMAL
+...................................................................
+TEMPERATURE (F)
+ TODAY
+  MAXIMUM         82   2:21 PM  91    1896  85      -3       83
+                                                               2023
+  MINIMUM         72   8:50 AM  54    1940  72       0       73
+  AVERAGE         77                        79      -2       78
+
+PRECIPITATION (IN)
+  TODAY            0.89          2.88 2005   0.13    0.76     0.13
+  MONTH TO DATE    0.89                      0.37    0.52     0.13
+  SINCE NOV 1     12.80                     16.14   -3.34     6.01
+  SINCE JAN 1     10.32                     10.17    0.15     4.36

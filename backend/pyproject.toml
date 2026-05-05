@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kalshi-kmia-predictor"
+version = "0.1.0"
+description = "KMIA Daily Maximum Temperature Predictor for Kalshi Markets"
+authors = [
+    { name = "Project Architect Agent" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0.0",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "python-dateutil>=2.8.2",
+    "sqlalchemy>=2.0.0",
+    "pytest>=7.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

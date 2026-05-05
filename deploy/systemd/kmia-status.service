@@ -1,0 +1,15 @@
+[Unit]
+Description=KMIA Daily Status Report Generator
+# NO REAL TRADING EXECUTION
+After=network.target
+
+[Service]
+Type=oneshot
+User=computer
+Group=computer
+WorkingDirectory=/opt/kmia-kalshi
+ExecStart=/bin/bash /opt/kmia-kalshi/scripts/generate_daily_status.sh
+Environment="PYTHONPATH=/opt/kmia-kalshi/backend/src"
+
+[Install]
+WantedBy=multi-user.target

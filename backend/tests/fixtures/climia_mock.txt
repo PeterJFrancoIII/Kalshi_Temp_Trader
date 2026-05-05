@@ -1,0 +1,28 @@
+000
+CDUS42 KMFL 031105
+CLIMIA
+
+CLIMATOLOGICAL REPORT 
+NATIONAL WEATHER SERVICE MIAMI FL
+0605 AM EDT SUN MAY 03 2026
+
+...................................
+
+...THE MIAMI FL CLIMATOLOGICAL SUMMARY FOR YESTERDAY...
+...MAY 02 2026...
+
+OBSERVED VALUE   TIME       NORMAL   RECORD    YEAR
+                VALUE      VALUE     VALUE
+
+TEMPERATURE (F)
+ YESTERDAY
+  MAXIMUM         82      322 PM     84       94     1991
+  MINIMUM         72      645 AM     70       55     1975
+  AVERAGE         77                 77
+
+PRECIPITATION (IN)
+  YESTERDAY        0.00               0.11     1.85    1965
+  MONTH TO DATE    0.05               0.22
+  SINCE JAN 1     12.45              15.33
+
+...................................

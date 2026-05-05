@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer for KMIA Status Report Generation
+# NO REAL TRADING EXECUTION
+
+[Timer]
+# Run every 6 hours
+OnCalendar=00/6:00:00
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
