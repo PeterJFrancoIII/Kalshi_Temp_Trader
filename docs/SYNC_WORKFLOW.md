@@ -1,52 +1,72 @@
-# Sync Workflow Guide
+# Sync Workflow: Mac <-> GitHub <-> Server
 
+This document outlines the synchronization process for the Kalshi Temp Trader project.
+
+## Important Disclaimer
 **NO REAL TRADING EXECUTION**
-**DRY-RUN / PAPER EVALUATION ONLY**
+This project is currently in RESEARCH_MVP status. Real-money trading is strictly forbidden.
 
-This document outlines the approved method for synchronizing code between the local Mac development environment, GitHub, and the production Linux server.
+## Source of Truth
+The **GitHub `main` branch** is the absolute source of truth for all code and configuration.
 
-## Overview
+## Environment Paths
+- **Mac Development:** `/Users/computer/Desktop/App Development/Kalshi`
+- **Server Deployment:** `/opt/kmia-kalshi`
 
-GitHub is the **source of truth**. All changes should be committed and pushed to GitHub before being pulled onto other environments. 
+## Normal Workflow
 
-**DO NOT use rsync** as the standard sync method. Use Git for auditability and consistency.
-
-## Sync Flow
-
-### 1. Server to GitHub
-If you made emergency configuration changes on the server (e.g., to `/opt/kmia-kalshi`):
-
-```bash
-cd /opt/kmia-kalshi
-git status
-git add .
-git commit -m "Emergency server config update"
-git push origin main
-```
-
-### 2. Mac Desktop from GitHub
-To pull the latest changes onto your Mac:
-
+### 1. Mac: Before Editing
+Always sync your local Mac environment with GitHub before making changes.
 ```bash
 cd "/Users/computer/Desktop/App Development/Kalshi"
 git fetch origin
 git status
 git pull --ff-only origin main
 ```
-*Note: If you have local changes on your Mac, use `git status` and `git diff` to review them before pulling. Do not overwrite local work without review.*
 
-### 3. Server Update from GitHub
-To update the production server with the latest code from GitHub:
-
+### 2. Mac: After Editing
+Push changes to GitHub once they are verified.
 ```bash
+git status
+git diff --stat
+git add .
+git commit -m "Describe the change"
+git push origin main
+```
+
+### 3. Server: Update
+Deploy the latest changes from GitHub to the production server.
+```bash
+ssh peterjfrancoiii@192.168.0.126
 cd /opt/kmia-kalshi
 git fetch origin
 git pull --ff-only origin main
+source .venv/bin/activate
+python -m pip install -r backend/requirements.txt
+bash scripts/run_tests.sh
+bash scripts/generate_daily_status.sh
 sudo systemctl restart kmia-web-console.service
+curl -I http://127.0.0.1:8501
 ```
 
-## Emergency Recovery
-Only use `rsync` for first-time bootstrapping or emergency recovery when Git is unavailable.
+## Verify Sync
+To ensure all environments are aligned, verify the commit hashes match.
 
----
-**Security Note**: Ensure `.env` files and other secrets are listed in `.gitignore` to prevent them from being pushed to GitHub.
+**Mac:**
+```bash
+git rev-parse HEAD
+```
+
+**Server:**
+```bash
+git rev-parse HEAD
+```
+
+The hashes must match exactly.
+
+## Warnings & Constraints
+- **Do Not Force Push:** Never use `git push --force`.
+- **Clean State Required:** Do not pull updates if you have uncommitted local changes.
+- **No Rsync:** Do not use `rsync` for normal workflows; it is reserved for emergency recovery only.
+- **Git Hygiene:** Generated data files and local `.env` files should generally not be committed.
+- **Secrets:** Keep all secrets out of Git; use `.env` files that are ignored.

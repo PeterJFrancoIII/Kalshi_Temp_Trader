@@ -21,9 +21,12 @@ STATUS_DIR = DATA / "status"
 REPORTS_DIR = DATA / "reports"
 LOGS_DIR = DATA / "logs"
 CAL_DIR = DATA / "aggregate_calibration"
+KALSHI_DIR = DATA / "kalshi_market_snapshots"
 HISTORY_FILE = DATA / "history" / "kmia_daily_history.jsonl"
 
 def get_latest_file(directory, pattern):
+    if not directory.exists():
+        return None
     files = list(Path(directory).glob(pattern))
     if not files:
         return None
@@ -50,6 +53,7 @@ latest_status_json = get_latest_file(STATUS_DIR, "kmia_daily_status_*.json")
 latest_status_md = get_latest_file(STATUS_DIR, "kmia_daily_status_*.md")
 latest_forecast_md = get_latest_file(REPORTS_DIR, "kmia_forecast_*.md")
 latest_comparison_md = get_latest_file(REPORTS_DIR, "kmia_comparison_*.md")
+latest_kalshi_json = KALSHI_DIR / "latest_kalshi_market_snapshot.json"
 latest_log = get_latest_file(LOGS_DIR, "kmia_daily_workflow_*.log")
 agg_cal_json = CAL_DIR / "aggregate_calibration.json"
 agg_cal_md = CAL_DIR / "aggregate_calibration.md"
@@ -74,8 +78,8 @@ st.sidebar.info(f"**Project Root:** `{ROOT}`")
 st.sidebar.info(f"**Last Dashboard Refresh:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 # Main Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "Status", "Forecast", "Model Comparison", "Calibration", "Logs", "Files", "Operator Notes"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    "Status", "Forecast", "Model Comparison", "Calibration", "Kalshi Market Data", "Logs", "Files", "Operator Notes"
 ])
 
 with tab1:
@@ -117,6 +121,35 @@ with tab4:
         st.info("Aggregate calibration data not found.")
 
 with tab5:
+    st.header("Kalshi Market Data")
+    st.warning("ℹ️ **READ-ONLY PUBLIC MARKET DATA — NO REAL TRADING EXECUTION**")
+    
+    if latest_kalshi_json.exists():
+        market_data = load_json(latest_kalshi_json)
+        st.write(f"**Latest Snapshot:** {market_data.get('fetched_at_utc', 'N/A')}")
+        st.write(f"**Markets Found:** {market_data.get('markets_found', 0)}")
+        
+        markets = market_data.get("markets", [])
+        if markets:
+            display_data = []
+            for m in markets:
+                display_data.append({
+                    "Ticker": m.get("ticker"),
+                    "Title": m.get("title"),
+                    "Subtitle": m.get("subtitle"),
+                    "Last Price": m.get("last_price"),
+                    "Yes Bid": m.get("yes_bid"),
+                    "Yes Ask": m.get("yes_ask")
+                })
+            st.dataframe(pd.DataFrame(display_data))
+        else:
+            st.info("No temperature markets found in the latest snapshot.")
+    else:
+        st.warning("No Kalshi market snapshots found.")
+        st.info("Run the following command to update market data:")
+        st.code("bash scripts/update_kalshi_market_data.sh")
+
+with tab6:
     st.header("Latest Workflow Logs")
     if latest_log:
         st.text(f"File: {latest_log}")
@@ -126,30 +159,37 @@ with tab5:
     else:
         st.info("No workflow logs found.")
 
-with tab6:
+with tab7:
     st.header("Discovered Files")
     file_info = []
-    for d in [STATUS_DIR, REPORTS_DIR, LOGS_DIR, CAL_DIR]:
-        for f in d.glob("*"):
-            if f.is_file():
-                file_info.append({
-                    "Name": f.name,
-                    "Path": str(f.relative_to(ROOT)),
-                    "Updated": datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
-                })
+    for d in [STATUS_DIR, REPORTS_DIR, LOGS_DIR, CAL_DIR, KALSHI_DIR]:
+        if d.exists():
+            for f in d.glob("*"):
+                if f.is_file():
+                    file_info.append({
+                        "Name": f.name,
+                        "Path": str(f.relative_to(ROOT)),
+                        "Updated": datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                    })
     if file_info:
         df = pd.DataFrame(file_info)
         st.table(df.sort_values(by="Updated", ascending=False))
     else:
         st.info("No files discovered in processed data directories.")
 
-with tab7:
+with tab8:
     st.header("Operator Notes & Commands")
     st.markdown("""
     ### Daily Workflow
     To refresh forecasts and calibration:
     ```bash
     bash scripts/run_kmia_daily_workflow.sh
+    ```
+
+    ### Market Data
+    To update read-only Kalshi market data:
+    ```bash
+    bash scripts/update_kalshi_market_data.sh
     ```
 
     ### Status Generation

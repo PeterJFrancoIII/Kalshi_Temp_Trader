@@ -75,6 +75,7 @@ def test_deployment_scripts_safety_markers():
     files_to_check = [
         "scripts/run_web_console.sh",
         "scripts/check_web_console.sh",
+        "scripts/update_kalshi_market_data.sh",
         "docs/WEB_CONSOLE_DEPLOYMENT.md",
         "deploy/systemd/kmia-web-console.service"
     ]

@@ -178,6 +178,12 @@ from test_daily_status_builder import (
     test_safety_trading_disabled
 )
 
+from test_kalshi_public_market_data import (
+    test_kalshi_client_no_auth_references,
+    test_kalshi_client_mocked_discovery,
+    test_kalshi_updater_logic
+)
+
 
 # Helper to run unittest classes in this runner
 def run_unittest_class(cls):
@@ -276,6 +282,9 @@ tests = [
     test_log_warning_status,
     test_normal_ok_status,
     test_safety_trading_disabled,
+    test_kalshi_client_no_auth_references,
+    test_kalshi_client_mocked_discovery,
+    test_kalshi_updater_logic,
     lambda: run_unittest_class(TestRulesModelV2),
     lambda: run_unittest_class(TestGenerateAggregateReport),
     lambda: run_unittest_class(TestOperationalScripts),

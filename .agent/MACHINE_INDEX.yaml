@@ -16,12 +16,17 @@ entry_points:
   status_generator: scripts/generate_daily_status.sh
   test_runner: scripts/run_tests.sh
   web_console: scripts/run_web_console.sh
+  market_data_updater: scripts/update_kalshi_market_data.sh
+  sync_checker: scripts/check_sync_status.sh
+  server_updater: scripts/update_server_from_github.sh
 
 critical_files:
   shared_types: backend/src/shared/types.py
   v1_model: backend/src/forecasting/rules_model.py
   v2_model: backend/src/forecasting/rules_model_v2.py
+  market_client: backend/src/market_data/kalshi_public_client.py
   data_processed: backend/data/processed/
+  sync_workflow: docs/SYNC_WORKFLOW.md
   governance: CODE_GOVERNANCE.md
 
 deployment:

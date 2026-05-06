@@ -1,0 +1,13 @@
+# NO REAL TRADING EXECUTION
+# DRY-RUN / PAPER EVALUATION ONLY
+
+[Unit]
+Description=KMIA Kalshi Market Data Update Timer - NO REAL TRADING EXECUTION
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,17 @@
+# NO REAL TRADING EXECUTION
+# DRY-RUN / PAPER EVALUATION ONLY
+
+[Unit]
+Description=KMIA Kalshi Market Data Update - NO REAL TRADING EXECUTION
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/kmia-kalshi
+ExecStart=/opt/kmia-kalshi/scripts/update_kalshi_market_data.sh
+User=peterjfrancoiii
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
