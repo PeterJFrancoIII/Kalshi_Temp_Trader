@@ -16,6 +16,10 @@ The **GitHub `main` branch** is the absolute source of truth for all code and co
 - **Mac Development:** `/Users/computer/Desktop/App Development/Kalshi`
 - **Server Deployment:** `/opt/kmia-kalshi`
 
+## Fast Deploy (Recommended)
+
+If you have already verified your changes on the Mac, you can use the [Simple Deploy Guide](DEPLOY_SIMPLE.md) to update the server in one command.
+
 ## Normal Workflow
 
 ### 1. Mac: Before Editing

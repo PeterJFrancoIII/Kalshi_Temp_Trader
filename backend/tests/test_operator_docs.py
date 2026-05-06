@@ -45,5 +45,17 @@ class TestOperatorDocs(unittest.TestCase):
         self.assertIn("run_paper_trading_loop.sh", content)
         self.assertIn("kmia-paper-trading-loop.timer", content)
 
+    def test_deploy_guide_exists(self):
+        """Verify that docs/DEPLOY_SIMPLE.md exists."""
+        self.assertTrue(os.path.exists(os.path.join(os.getcwd(), "docs", "DEPLOY_SIMPLE.md")))
+
+    def test_deploy_guide_content(self):
+        """Verify the content of docs/DEPLOY_SIMPLE.md."""
+        with open(os.path.join(os.getcwd(), "docs", "DEPLOY_SIMPLE.md"), "r") as f:
+            content = f.read()
+        self.assertIn("NO REAL TRADING EXECUTION", content)
+        self.assertIn("deploy_from_mac.sh", content)
+        self.assertIn("ssh kmia", content)
+
 if __name__ == "__main__":
     unittest.main()

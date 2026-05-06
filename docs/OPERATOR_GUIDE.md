@@ -3,6 +3,7 @@
 ## What to check
 
 For daily tasks, see the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
+To update the server from your Mac, see the [Simple Deploy Guide](DEPLOY_SIMPLE.md).
 
 1. Open the console.
 2. Check the status color. See [What The Colors Mean](WHAT_THE_COLORS_MEAN.md).
