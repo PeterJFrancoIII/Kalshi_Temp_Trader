@@ -38,3 +38,9 @@ backend/data/processed/kalshi_market_snapshots/*.json
 backend/tests/test_reports/
 backend/tests/test_history.jsonl
 backend/venv/
+
+# Paper Trading Data
+backend/data/processed/paper_trading/paper_signal_*.json
+backend/data/processed/paper_trading/latest_paper_signal.json
+backend/data/processed/paper_trading/latest_paper_trading_performance.json
+backend/data/processed/paper_trading/paper_trade_ledger.jsonl
