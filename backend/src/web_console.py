@@ -44,6 +44,47 @@ def load_json(path):
             return json.load(f)
     return None
 
+import re
+
+def load_latest_forecast_summary(report_path):
+    """
+    Extracts today's forecast and top bin from the latest markdown report.
+    """
+    if not report_path or not report_path.exists():
+        return "Unknown", "Unknown"
+    
+    content = load_text(report_path)
+    if not content:
+        return "Unknown", "Unknown"
+    
+    forecast_val = "Unknown"
+    top_bin = "Unknown"
+    
+    # Extract Best Single Number
+    # Look for: **Best Single-Number Estimate:** 85°F or **Forecast High:** 85°F
+    sn_match = re.search(r"\*\*(?:Best Single-Number Estimate|Forecast High):\*\*\s*([\d.]+)", content)
+    if sn_match:
+        forecast_val = sn_match.group(1)
+        
+    # Extract Probability Bins
+    bin_section = re.search(r"## Probability Bins(.*?)(?:##|\Z)", content, re.DOTALL)
+    if bin_section:
+        # Match table rows: | 85-86 | 37.2% |
+        rows = re.findall(r"\|\s*([^|]+?)\s*\|\s*([\d.]+)%\s*\|", bin_section.group(1))
+        bins = []
+        for b_label, b_prob in rows:
+            try:
+                bins.append((b_label.strip(), float(b_prob)))
+            except ValueError:
+                continue
+        
+        if bins:
+            # Sort by probability descending
+            bins.sort(key=lambda x: x[1], reverse=True)
+            top_bin = f"{bins[0][0]} ({bins[0][1]}%)"
+            
+    return forecast_val, top_bin
+
 # UI Header
 st.title("KMIA Kalshi Weather Console")
 st.error("🚨 **DRY-RUN / PAPER EVALUATION ONLY — NO REAL TRADING EXECUTION**")
@@ -51,7 +92,11 @@ st.error("🚨 **DRY-RUN / PAPER EVALUATION ONLY — NO REAL TRADING EXECUTION**
 # Discovery
 latest_status_json = get_latest_file(STATUS_DIR, "kmia_daily_status_*.json")
 latest_status_md = get_latest_file(STATUS_DIR, "kmia_daily_status_*.md")
-latest_forecast_md = get_latest_file(REPORTS_DIR, "kmia_forecast_*.md")
+# Specific discovery for the primary model reports
+latest_forecast_md = get_latest_file(REPORTS_DIR, "kmia_forecast_*rules_v2_climatology*.md")
+if not latest_forecast_md:
+    latest_forecast_md = get_latest_file(REPORTS_DIR, "kmia_forecast_*.md")
+
 latest_comparison_md = get_latest_file(REPORTS_DIR, "kmia_comparison_*.md")
 latest_kalshi_json = KALSHI_DIR / "latest_kalshi_market_snapshot.json"
 latest_log = get_latest_file(LOGS_DIR, "kmia_daily_workflow_*.log")
@@ -135,12 +180,28 @@ if system_status != "RED":
         action_needed = "Run: bash scripts/update_kalshi_market_data.sh"
 
 # Extract Forecast Info
+# Try Status JSON first
 if latest_status_json:
     status_data = load_json(latest_status_json)
     forecast_info = status_data.get("forecast", {})
+    if not forecast_info:
+        # Fallback to the 'forecasts' dict if 'forecast' is missing
+        f_dict = status_data.get("forecasts", {})
+        if f_dict:
+            # Pick first available or specific model
+            forecast_info = f_dict.get("rules_v2_climatology") or next(iter(f_dict.values()))
+            
     if forecast_info:
         forecast_val = str(forecast_info.get("best_single_number", "Unknown"))
         top_bin = forecast_info.get("top_probability_bin", "Unknown")
+
+# Fallback to Markdown parsing if still Unknown
+if forecast_val == "Unknown" or top_bin == "Unknown":
+    f_val, t_bin = load_latest_forecast_summary(latest_forecast_md)
+    if forecast_val == "Unknown":
+        forecast_val = f_val
+    if top_bin == "Unknown":
+        top_bin = t_bin
 
 # Display Summary Cards
 col1, col2, col3 = st.columns(3)
@@ -155,6 +216,8 @@ with col1:
 with col2:
     st.metric("TODAY'S FORECAST", f"{forecast_val}°F")
     st.write(f"**Top Bin:** {top_bin}")
+    if latest_forecast_md:
+        st.caption(f"Source: {latest_forecast_md.name}")
 
 with col3:
     st.metric("KALSHI MARKET", kalshi_status)
