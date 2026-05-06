@@ -22,7 +22,11 @@ bash scripts/update_kalshi_market_data.sh
 bash scripts/run_tests.sh
 ```
 
-## If Git sync is broken
+## If Git sync is broken or Health says Git Tree is Dirty
+
+If health says **Git Tree: Runtime outputs changed**, this is normal. See [Git Hygiene](GIT_HYGIENE.md).
+
+If health says **Git Tree: Dirty source changes**, that needs attention.
 
 Run: `bash scripts/check_sync_status.sh`
 

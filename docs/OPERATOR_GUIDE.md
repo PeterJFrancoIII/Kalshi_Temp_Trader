@@ -20,6 +20,7 @@ To update the server from your Mac, see the [Simple Deploy Guide](DEPLOY_SIMPLE.
 
 See the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).
 Specifically, check there if Today's Forecast says **Unknown**.
+For questions about generated files and Git status, see [Git Hygiene](GIT_HYGIENE.md).
 
 ## Paper Trading
 

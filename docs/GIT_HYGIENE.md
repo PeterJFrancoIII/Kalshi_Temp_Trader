@@ -7,6 +7,7 @@ This document outlines the Git hygiene rules for the KMIA Kalshi project to ensu
 > [!IMPORTANT]
 > **NO REAL TRADING EXECUTION.**
 > This project is for **DRY-RUN / PAPER EVALUATION ONLY**.
+>
 > - Do not add real trading logic.
 > - Do not add order execution.
 > - Do not add API keys or private keys to the repository.
@@ -32,6 +33,26 @@ Generated runtime and test outputs are **NOT** committed. These include:
 - `backend/tests/test_reports/`
 - `backend/tests/test_history.jsonl`
 - `__pycache__/`, `*.pyc`, `.venv/`
+
+## Runtime Output Files
+
+The bot creates reports, logs, market snapshots, paper signals, and paper ledgers while it runs.
+
+These files are generated automatically.
+
+They are not source code.
+
+They should not be committed to Git unless intentionally needed.
+
+If health says:
+Git Tree: Runtime outputs changed
+
+That is normal.
+
+If health says:
+Git Tree: Dirty source changes
+
+That needs attention.
 
 ## Syncing & Deployment
 
