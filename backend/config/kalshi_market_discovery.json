@@ -6,21 +6,27 @@
   "search_terms": [
     "Miami",
     "KMIA",
+    "Florida",
+    "FL",
     "temperature",
     "high temperature",
     "daily high",
+    "highest temperature",
     "weather",
     "climate",
-    "Florida",
-    "FL"
+    "temperature high"
   ],
   "preferred_terms": [
     "Miami",
+    "KMIA",
     "temperature",
     "high"
   ],
+  "known_series_tickers": [],
+  "known_market_tickers": [],
   "safety": {
     "no_real_trading": true,
-    "no_order_execution": true
+    "no_order_execution": true,
+    "no_authentication": true
   }
 }

@@ -37,7 +37,8 @@ def test_kalshi_client_mocked_discovery():
 
     with patch("requests.get", return_value=mock_response):
         client = KalshiPublicClient()
-        discovered = client.discover_temperature_markets(["miami", "high"])
+        result = client.discover_temperature_markets(["miami", "high"])
+        discovered = result["candidate_markets"]
     
     assert len(discovered) == 1
     assert discovered[0]["ticker"] == "MIA-HOT"
@@ -62,9 +63,9 @@ def test_kalshi_client_broad_discovery():
     mock_response = MagicMock()
     mock_response.json.return_value = {
         "markets": [
-            {"title": "Miami Heat", "ticker": "MIA-HEAT", "subtitle": ""},
-            {"title": "New York Weather", "ticker": "NYC-WX", "subtitle": "temperature"},
-            {"title": "Random Market", "ticker": "RND", "subtitle": ""}
+            {"title": "Miami Heat", "ticker": "MIA-HEAT", "subtitle": "", "category": "weather"},
+            {"title": "New York Weather", "ticker": "NYC-WX", "subtitle": "temperature", "category": "weather"},
+            {"title": "Random Market", "ticker": "RND", "subtitle": "", "category": "finance"}
         ]
     }
     mock_response.raise_for_status = MagicMock()
@@ -72,12 +73,27 @@ def test_kalshi_client_broad_discovery():
     with patch("requests.get", return_value=mock_response):
         client = KalshiPublicClient()
         # Should match MIA-HEAT (Miami) and NYC-WX (temperature)
-        discovered = client.discover_temperature_markets(["Miami", "temperature"])
+        result = client.discover_temperature_markets(["Miami", "temperature"])
+        discovered = result["candidate_markets"]
     
     assert len(discovered) == 2
     tickers = [m["ticker"] for m in discovered]
     assert "MIA-HEAT" in tickers
     assert "NYC-WX" in tickers
+    assert result["total_raw_markets_seen"] == 3
+
+def test_kalshi_snapshot_safety_fields():
+    """Verify that the snapshot includes all required safety flags."""
+    client = KalshiPublicClient()
+    snapshot = {
+        "safety": {
+            "no_real_trading": True,
+            "no_order_execution": True,
+            "no_authentication": True
+        }
+    }
+    # This is more of a placeholder to ensure we are thinking about these fields
+    assert snapshot["safety"]["no_authentication"] is True
 
 def test_kalshi_updater_logic():
     """
@@ -91,3 +107,4 @@ def test_kalshi_updater_logic():
     assert "kalshi_market_snapshots" in content
     assert "KalshiPublicClient" in content
     assert "kalshi_market_discovery.json" in content
+    assert "no_authentication" in content

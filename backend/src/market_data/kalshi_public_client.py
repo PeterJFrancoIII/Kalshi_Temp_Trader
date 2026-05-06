@@ -33,27 +33,41 @@ class KalshiPublicClient:
         """Fetch orderbook for a specific market ticker."""
         return self._get(f"/markets/{market_ticker}/orderbook")
 
-    def discover_temperature_markets(self, query_terms: List[str]) -> List[Dict[str, Any]]:
+    def discover_temperature_markets(self, query_terms: List[str]) -> Dict[str, Any]:
         """
-        Broadly discover markets matching query terms (e.g., ['miami', 'temperature']).
-        Returns any market that matches ANY of the query terms.
+        Broadly discover markets matching query terms.
+        Returns a dict with discovery metadata and the discovered markets.
         """
-        # Fetch all open markets and filter locally for robust discovery
-        response = self._get("/markets", params={"status": "open"})
-        all_markets = response.get("markets", [])
+        attempts = []
+        all_markets = []
         
+        # Attempt 1: Get all open markets
+        path = "/markets"
+        params = {"status": "open", "limit": 1000}
+        attempts.append({"path": path, "params": params})
+        
+        try:
+            response = self._get(path, params=params)
+            all_markets = response.get("markets", [])
+        except Exception as e:
+            attempts[-1]["error"] = str(e)
+
         discovered = []
         for market in all_markets:
             search_text = (
                 f"{market.get('title', '')} {market.get('subtitle', '')} "
-                f"{market.get('ticker', '')}"
+                f"{market.get('ticker', '')} {market.get('category', '')}"
             ).lower()
             
-            # Match ANY term for broad discovery
+            # Match ANY term for broad candidate discovery
             if any(term.lower() in search_text for term in query_terms):
                 discovered.append(market)
                 
-        return discovered
+        return {
+            "endpoint_attempts": attempts,
+            "total_raw_markets_seen": len(all_markets),
+            "candidate_markets": discovered
+        }
 
     def save_market_snapshot(self, snapshot: Dict[str, Any], output_dir: Path) -> Path:
         """
@@ -65,7 +79,7 @@ class KalshiPublicClient:
         filename = f"kalshi_market_snapshot_{timestamp}.json"
         filepath = output_dir / filename
         
-        # Also maintain a 'latest' symlink or file
+        # Also maintain a 'latest' file
         latest_path = output_dir / "latest_kalshi_market_snapshot.json"
         
         with open(filepath, 'w') as f:
