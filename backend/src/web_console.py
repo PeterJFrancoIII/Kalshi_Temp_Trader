@@ -77,9 +77,101 @@ st.sidebar.divider()
 st.sidebar.info(f"**Project Root:** `{ROOT}`")
 st.sidebar.info(f"**Last Dashboard Refresh:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
+# --- OPERATOR HOME SUMMARY ---
+st.header("🏠 Operator Home")
+
+# Initialize state
+system_status = "GREEN"
+status_color = "success"
+action_needed = "None. System is working."
+forecast_val = "Unknown"
+top_bin = "Unknown"
+kalshi_status = "CONNECTED"
+kalshi_msg = "Market data is up to date."
+
+# Check for Red Flags
+if not latest_status_json or not latest_forecast_md or not DATA.exists():
+    system_status = "RED"
+    status_color = "error"
+    action_needed = "Run: bash scripts/run_kmia_daily_workflow.sh"
+
+# Check logs for Error
+log_content = load_text(latest_log) or ""
+if "ERROR" in log_content:
+    system_status = "RED"
+    status_color = "error"
+    action_needed = "Check latest workflow log for ERROR details."
+
+# Check for Yellow Flags (if not already Red)
+if system_status != "RED":
+    if not agg_cal_json.exists():
+        system_status = "YELLOW"
+        status_color = "warning"
+        action_needed = "Calibration data missing. Run the daily workflow."
+    
+    if "WARNING" in log_content:
+        system_status = "YELLOW"
+        status_color = "warning"
+        action_needed = "Review warnings in the Logs tab."
+
+    if latest_kalshi_json.exists():
+        mkts = load_json(latest_kalshi_json)
+        if mkts.get("markets_found", 0) == 0:
+            system_status = "YELLOW"
+            status_color = "warning"
+            kalshi_status = "NO MARKET FOUND"
+            action_needed = "Kalshi updater ran, but no matching market was found. Review market discovery terms."
+    else:
+        system_status = "YELLOW"
+        status_color = "warning"
+        kalshi_status = "MISSING"
+        action_needed = "Run: bash scripts/update_kalshi_market_data.sh"
+
+# Extract Forecast Info
+if latest_status_json:
+    status_data = load_json(latest_status_json)
+    forecast_info = status_data.get("forecast", {})
+    if forecast_info:
+        forecast_val = str(forecast_info.get("best_single_number", "Unknown"))
+        top_bin = forecast_info.get("top_probability_bin", "Unknown")
+
+# Display Summary Cards
+col1, col2, col3 = st.columns(3)
+with col1:
+    if system_status == "GREEN":
+        st.success(f"### SYSTEM STATUS: {system_status}")
+    elif system_status == "YELLOW":
+        st.warning(f"### SYSTEM STATUS: {system_status}")
+    else:
+        st.error(f"### SYSTEM STATUS: {system_status}")
+
+with col2:
+    st.metric("TODAY'S FORECAST", f"{forecast_val}°F")
+    st.write(f"**Top Bin:** {top_bin}")
+
+with col3:
+    st.metric("KALSHI MARKET", kalshi_status)
+    last_upd = "N/A"
+    if latest_kalshi_json.exists():
+        last_upd = datetime.fromtimestamp(latest_kalshi_json.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+    st.write(f"**Last Updated:** {last_upd}")
+
+st.info(f"👉 **ACTION NEEDED:** {action_needed}")
+
+# Answers to the 4 Questions
+with st.expander("❓ Quick System FAQ", expanded=True):
+    q1_icon = "✅" if system_status != "RED" else "❌"
+    st.write(f"**1. Is the system working?** {q1_icon} {system_status}")
+    st.write(f"**2. What is today's forecast?** {forecast_val}°F (Bin: {top_bin})")
+    has_warns = "Yes" if "WARNING" in log_content or system_status == "YELLOW" else "No"
+    st.write(f"**3. Are there any warnings?** {has_warns}")
+    st.write(f"**4. What should I do?** {action_needed}")
+
+st.divider()
+
 # Main Tabs
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-    "Status", "Forecast", "Model Comparison", "Calibration", "Kalshi Market Data", "Logs", "Files", "Operator Notes"
+    "Status", "Forecast", "Kalshi Market Data", "Model Comparison", "Calibration", "Logs", "Files", "Operator Notes"
 ])
 
 with tab1:

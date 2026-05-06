@@ -25,3 +25,16 @@ Thumbs.db
 .env.local
 .env.deploy
 deploy_secrets.json
+
+# KMIA Generated Data
+backend/data/processed/status/*.json
+backend/data/processed/status/*.md
+backend/data/processed/logs/*.log
+backend/data/processed/reports/*.md
+backend/data/processed/reports/*.html
+backend/data/processed/aggregate_calibration/*.json
+backend/data/processed/aggregate_calibration/*.md
+backend/data/processed/kalshi_market_snapshots/*.json
+backend/tests/test_reports/
+backend/tests/test_history.jsonl
+backend/venv/
