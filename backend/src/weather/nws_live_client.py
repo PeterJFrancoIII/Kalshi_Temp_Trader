@@ -16,11 +16,6 @@ def c_to_f(c: Optional[float]) -> Optional[float]:
         return None
     return round((c * 9/5) + 32, 1)
 
-def ms_to_mph(ms: Optional[float]) -> Optional[float]:
-    if ms is None:
-        return None
-    return round(ms * 2.23694, 1)
-
 def pa_to_mb(pa: Optional[float]) -> Optional[float]:
     if pa is None:
         return None
@@ -40,6 +35,57 @@ def to_et(ts_str: str) -> datetime:
         ts_str = ts_str.replace("Z", "+00:00")
     dt = datetime.fromisoformat(ts_str)
     return dt.astimezone(tz.gettz('America/New_York'))
+
+def degrees_to_compass(degrees: Optional[float]) -> str:
+    if degrees is None:
+        return ""
+    # 16-point compass
+    points = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+    idx = int((degrees + 11.25) / 22.5) % 16
+    return points[idx]
+
+def convert_nws_wind_to_mph(value_obj: Dict[str, Any]) -> Optional[float]:
+    val = value_obj.get("value")
+    if val is None:
+        return None
+    unit = value_obj.get("unitCode", "")
+    
+    if "m_s-1" in unit:
+        return round(val * 2.23694, 1)
+    elif "km_h-1" in unit:
+        return round(val * 0.621371, 1)
+    elif "mi_h-1" in unit:
+        return round(val, 1)
+    
+    # Default to mph if unknown but likely mi/h, or just return as is
+    return round(val, 1)
+
+def parse_nws_cloud_layers(layers: Optional[List[Dict[str, Any]]]) -> str:
+    if not layers:
+        return ""
+    
+    parts = []
+    for layer in layers:
+        amount = layer.get("amount", "")
+        base_obj = layer.get("base", {})
+        val = base_obj.get("value")
+        unit = base_obj.get("unitCode", "")
+        
+        if val is None:
+            if amount:
+                parts.append(amount)
+            continue
+            
+        # Convert to feet
+        feet = val
+        if "wmoUnit:m" in unit:
+            feet = val * 3.28084
+            
+        x100ft = int(round(feet / 100))
+        # Format: FEW025 (amount + 3-digit x100ft)
+        parts.append(f"{amount}{x100ft:03d}")
+        
+    return " ".join(parts)
 
 def fetch_kmia_point_metadata() -> Dict[str, Any]:
     url = "https://api.weather.gov/points/25.7959,-80.2870"
@@ -101,7 +147,10 @@ def build_live_nws_snapshot() -> Dict[str, Any]:
         "current_temp_f": None,
         "dewpoint_f": None,
         "wind_speed_mph": None,
+        "wind_gust_mph": None,
         "wind_direction_degrees": None,
+        "wind_direction_compass": None,
+        "clouds_x100ft": None,
         "observed_max_so_far_f": None,
         "forecast_high_f": None,
         "hourly_forecast_summary": None,
@@ -141,20 +190,25 @@ def build_live_nws_snapshot() -> Dict[str, Any]:
         
         try:
             dt_et = to_et(ts_utc)
-            ts_et_str = dt_et.strftime("%Y-%m-%d %H:%M")
+            date_et_str = dt_et.strftime("%Y-%m-%d")
+            # 7:53 PM ET format
+            time_et_str = dt_et.strftime("%I:%M %p ET").lstrip("0")
             
             row = {
                 "timestamp_utc": ts_utc,
-                "timestamp_et": ts_et_str,
+                "date_et": date_et_str,
+                "time_et": time_et_str,
                 "temperature_f": c_to_f(p.get("temperature", {}).get("value")),
                 "dewpoint_f": c_to_f(p.get("dewpoint", {}).get("value")),
                 "relative_humidity_pct": round(p.get("relativeHumidity", {}).get("value"), 1) if p.get("relativeHumidity", {}).get("value") is not None else None,
                 "wind_direction_degrees": p.get("windDirection", {}).get("value"),
-                "wind_speed_mph": ms_to_mph(p.get("windSpeed", {}).get("value")),
-                "wind_gust_mph": ms_to_mph(p.get("windGust", {}).get("value")),
+                "wind_direction_compass": degrees_to_compass(p.get("windDirection", {}).get("value")),
+                "wind_speed_mph": convert_nws_wind_to_mph(p.get("windSpeed", {})),
+                "wind_gust_mph": convert_nws_wind_to_mph(p.get("windGust", {})),
                 "sea_level_pressure_mb": pa_to_mb(p.get("seaLevelPressure", {}).get("value")),
                 "barometric_pressure_mb": pa_to_mb(p.get("barometricPressure", {}).get("value")),
                 "precipitation_last_hour_in": m_to_in(p.get("precipitationLastHour", {}).get("value")),
+                "clouds_x100ft": parse_nws_cloud_layers(p.get("cloudLayers")),
                 "text_description": p.get("textDescription"),
                 "raw_message": p.get("rawMessage")
             }
@@ -179,7 +233,10 @@ def build_live_nws_snapshot() -> Dict[str, Any]:
         snapshot["current_temp_f"] = latest["temperature_f"]
         snapshot["dewpoint_f"] = latest["dewpoint_f"]
         snapshot["wind_speed_mph"] = latest["wind_speed_mph"]
+        snapshot["wind_gust_mph"] = latest["wind_gust_mph"]
         snapshot["wind_direction_degrees"] = latest["wind_direction_degrees"]
+        snapshot["wind_direction_compass"] = latest["wind_direction_compass"]
+        snapshot["clouds_x100ft"] = latest["clouds_x100ft"]
 
         # Staleness Check
         try:

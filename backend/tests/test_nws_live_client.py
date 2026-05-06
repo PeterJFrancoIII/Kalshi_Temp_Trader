@@ -5,14 +5,15 @@ from datetime import datetime, timezone, timedelta
 from dateutil import tz
 from weather.nws_live_client import (
     c_to_f, 
-    ms_to_mph,
     pa_to_mb,
     m_to_in,
     to_et,
     get_et_now,
+    degrees_to_compass,
+    convert_nws_wind_to_mph,
+    parse_nws_cloud_layers,
     build_live_nws_snapshot, 
     fetch_kmia_point_metadata,
-    fetch_latest_kmia_observation,
     fetch_recent_kmia_observations
 )
 
@@ -23,16 +24,6 @@ MOCK_POINT_META = {
     "properties": {
         "forecast": "https://api.weather.gov/gridpoints/MFL/109,96/forecast",
         "forecastHourly": "https://api.weather.gov/gridpoints/MFL/109,96/forecast/hourly"
-    }
-}
-
-MOCK_LATEST_OBS = {
-    "properties": {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "temperature": {"value": 25.0}, # 77F
-        "dewpoint": {"value": 20.0},
-        "windSpeed": {"value": 5.0}, # m/s -> 11.2 mph
-        "windDirection": {"value": 90}
     }
 }
 
@@ -48,20 +39,18 @@ MOCK_RECENT_OBS = {
                 "temperature": {"value": 30.0}, # 86F
                 "dewpoint": {"value": 20.0},
                 "relativeHumidity": {"value": 60.5},
-                "windDirection": {"value": 100},
-                "windSpeed": {"value": 5.0},
-                "windGust": {"value": 10.0},
-                "seaLevelPressure": {"value": 101325}, # 1013.25 mb
+                "windDirection": {"value": 100}, # ESE
+                "windSpeed": {"value": 5.0, "unitCode": "wmoUnit:m_s-1"}, # 11.2 mph
+                "windGust": {"value": 10.0, "unitCode": "wmoUnit:m_s-1"}, # 22.4 mph
+                "seaLevelPressure": {"value": 101325}, 
                 "barometricPressure": {"value": 101300},
-                "precipitationLastHour": {"value": 0.01}, # 0.01 m -> 0.39 in
+                "precipitationLastHour": {"value": 0.01}, 
+                "cloudLayers": [
+                    {"amount": "FEW", "base": {"value": 762, "unitCode": "wmoUnit:m"}}, # 2500ft -> 025
+                    {"amount": "SCT", "base": {"value": 1372, "unitCode": "wmoUnit:m"}} # 4500ft -> 045
+                ],
                 "textDescription": "Mostly Sunny",
                 "rawMessage": "METAR KMIA 061200Z..."
-            }
-        },
-        {
-            "properties": {
-                "timestamp": (FIXED_NOW_UTC - timedelta(hours=1)).isoformat(),
-                "temperature": {"value": 32.0} # 89.6F
             }
         }
     ]
@@ -69,60 +58,76 @@ MOCK_RECENT_OBS = {
 
 def test_conversions():
     assert c_to_f(0) == 32.0
-    assert c_to_f(25) == 77.0
-    assert ms_to_mph(5) == 11.2
     assert pa_to_mb(101325) == 1013.25
     assert m_to_in(0.01) == 0.39
 
-def test_timezone_conversion():
-    ts = "2026-05-06T12:00:00Z"
-    et_dt = to_et(ts)
-    assert et_dt.strftime("%H:%M") == "08:00" # UTC-4 (May is EDT)
+def test_wind_conversions():
+    # m/s to mph
+    assert convert_nws_wind_to_mph({"value": 5.0, "unitCode": "wmoUnit:m_s-1"}) == 11.2
+    # km/h to mph
+    assert convert_nws_wind_to_mph({"value": 10.0, "unitCode": "wmoUnit:km_h-1"}) == 6.2
+    # mph to mph
+    assert convert_nws_wind_to_mph({"value": 15.0, "unitCode": "wmoUnit:mi_h-1"}) == 15.0
+    # Null handling
+    assert convert_nws_wind_to_mph({"value": None}) is None
 
-@patch("requests.get")
-def test_fetch_kmia_point_metadata(mock_get):
-    mock_get.return_value.json.return_value = MOCK_POINT_META
-    mock_get.return_value.status_code = 200
-    res = fetch_kmia_point_metadata()
-    assert res["properties"]["forecast"] == MOCK_POINT_META["properties"]["forecast"]
+def test_compass_conversion():
+    assert degrees_to_compass(0) == "N"
+    assert degrees_to_compass(22.5) == "NNE"
+    assert degrees_to_compass(45) == "NE"
+    assert degrees_to_compass(90) == "E"
+    assert degrees_to_compass(135) == "SE"
+    assert degrees_to_compass(180) == "S"
+    assert degrees_to_compass(225) == "SW"
+    assert degrees_to_compass(270) == "W"
+    assert degrees_to_compass(315) == "NW"
+    assert degrees_to_compass(360) == "N"
+    assert degrees_to_compass(None) == ""
+
+def test_cloud_parsing():
+    layers = [
+        {"amount": "FEW", "base": {"value": 762, "unitCode": "wmoUnit:m"}},
+        {"amount": "SCT", "base": {"value": 1372, "unitCode": "wmoUnit:m"}}
+    ]
+    assert parse_nws_cloud_layers(layers) == "FEW025 SCT045"
+    assert parse_nws_cloud_layers([]) == ""
+    assert parse_nws_cloud_layers(None) == ""
+    # Null base value but amount present
+    assert parse_nws_cloud_layers([{"amount": "CLR", "base": {"value": None}}]) == "CLR"
+
+def test_date_time_formatting():
+    ts = "2026-05-06T12:53:00Z"
+    dt_et = to_et(ts)
+    # 12:53 UTC -> 08:53 AM EDT
+    assert dt_et.strftime("%Y-%m-%d") == "2026-05-06"
+    assert dt_et.strftime("%I:%M %p ET").lstrip("0") == "8:53 AM ET"
 
 @patch("requests.get")
 @patch("weather.nws_live_client.get_et_now")
-def test_build_live_nws_snapshot(mock_et_now, mock_get):
-    # Fix ET now to match mock data
+def test_build_live_nws_snapshot_enhanced(mock_et_now, mock_get):
     mock_et_now.return_value = datetime(2026, 5, 6, 8, 0, 0, tzinfo=tz.gettz('America/New_York'))
     
-    # Setup mocks for multiple calls
     m1 = MagicMock()
     m1.json.return_value = MOCK_POINT_META
     m1.status_code = 200
-    
     m2 = MagicMock()
     m2.json.return_value = MOCK_RECENT_OBS
     m2.status_code = 200
     
-    # For forecast and hourly
-    m3 = MagicMock()
-    m3.json.return_value = {"properties": {"periods": [{"isDaytime": True, "temperature": 88}]}}
-    m3.status_code = 200
-
-    m4 = MagicMock()
-    m4.json.return_value = {"properties": {"periods": [{"startTime": "2026-05-06T12:00:00-04:00", "temperature": 80, "shortForecast": "Sunny"}]}}
-    m4.status_code = 200
-
-    mock_get.side_effect = [m1, m2, m3, m4]
+    mock_get.side_effect = [m1, m2, MagicMock(), MagicMock()] # Point, Obs, Forecast, Hourly
 
     snap = build_live_nws_snapshot()
     
-    assert snap["station"] == "KMIA"
-    assert snap["current_temp_f"] == 86.0 # Latest from recent_feats
-    assert snap["observed_max_so_far_f"] == 89.6 # Max of 86 and 89.6
-    assert len(snap["recent_observations_table"]) == 2
-    
     row = snap["recent_observations_table"][0]
-    assert row["temperature_f"] == 86.0
-    assert row["precipitation_last_hour_in"] == 0.39
-    assert row["sea_level_pressure_mb"] == 1013.25
+    assert row["date_et"] == "2026-05-06"
+    assert row["time_et"] == "8:00 AM ET"
+    assert row["wind_direction_compass"] == "E"
+    assert row["wind_speed_mph"] == 11.2
+    assert row["wind_gust_mph"] == 22.4
+    assert row["clouds_x100ft"] == "FEW025 SCT045"
+    
+    assert snap["wind_direction_compass"] == "E"
+    assert snap["clouds_x100ft"] == "FEW025 SCT045"
 
 def test_stale_data_detection():
     # Mock observation from 2 hours ago

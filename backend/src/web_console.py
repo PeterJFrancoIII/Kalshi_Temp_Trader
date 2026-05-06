@@ -396,10 +396,14 @@ if __name__ == "__main__":
             nc1, nc2, nc3, nc4 = st.columns(4)
             nc1.metric("Current Temp", f"{n_data.get('current_temp_f', 'N/A')}°F")
             nc2.metric("Observed Max Today", f"{n_data.get('observed_max_so_far_f', 'N/A')}°F")
-            nc3.metric("Forecast High", f"{n_data.get('forecast_high_f', 'N/A')}°F")
+            nc3.metric("Wind", f"{n_data.get('wind_direction_compass', 'N/A')} {n_data.get('wind_speed_mph', 'N/A')} mph")
             nc4.metric("Stale Data", "Yes" if n_data.get("stale_data") else "No")
             
             st.write(f"**Latest Observation Time:** {n_data.get('latest_observation_time', 'N/A')} (UTC)")
+            if n_data.get("wind_gust_mph"):
+                st.write(f"**Recent Gust:** {n_data.get('wind_gust_mph')} mph")
+            if n_data.get("clouds_x100ft"):
+                st.write(f"**Clouds:** {n_data.get('clouds_x100ft')}")
             
             # Observations Table
             st.subheader("Recent Observations (KMIA)")
@@ -409,16 +413,19 @@ if __name__ == "__main__":
                 
                 # Human-friendly column mapping
                 col_map = {
-                    "timestamp_et": "Time ET",
+                    "date_et": "Date",
+                    "time_et": "Time ET",
                     "temperature_f": "Temp °F",
                     "dewpoint_f": "Dew Point °F",
                     "relative_humidity_pct": "Humidity %",
-                    "wind_direction_degrees": "Wind Dir",
+                    "wind_direction_compass": "Wind Dir",
+                    "wind_direction_degrees": "Wind Deg",
                     "wind_speed_mph": "Wind mph",
                     "wind_gust_mph": "Gust mph",
                     "sea_level_pressure_mb": "Sea Level mb",
                     "barometric_pressure_mb": "Pressure mb",
                     "precipitation_last_hour_in": "Precip 1h in",
+                    "clouds_x100ft": "Clouds x100ft",
                     "text_description": "Description",
                     "raw_message": "Raw METAR"
                 }
@@ -427,7 +434,7 @@ if __name__ == "__main__":
                 existing_cols = [c for c in col_map.keys() if c in df_obs.columns]
                 df_display = df_obs[existing_cols].rename(columns=col_map)
                 
-                st.dataframe(df_display, use_container_width=True)
+                st.dataframe(df_display, use_container_width=True, hide_index=True)
             else:
                 st.warning("No recent observations found in snapshot.")
             
