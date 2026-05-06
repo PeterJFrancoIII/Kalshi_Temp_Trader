@@ -21,6 +21,11 @@ HISTORY_FILE = DATA / "history" / "kmia_daily_history.jsonl"
 PAPER_DIR = DATA / "paper_trading"
 LEARNING_DIR = DATA / "learning"
 
+try:
+    from shared.manual_corrections import load_manual_corrections
+except ImportError:
+    def load_manual_corrections(): return {}
+
 def get_latest_file(directory, pattern):
     if not directory.exists():
         return None
@@ -307,6 +312,21 @@ if __name__ == "__main__":
         st.metric("Next Action", "Monitor" if l_data else "Generate")
         st.success(l_data.get('next_action', "Run generate_learning_summary.sh"))
 
+    # --- MANUAL DATA CORRECTIONS ---
+    corrections = load_manual_corrections()
+    if corrections:
+        st.divider()
+        st.subheader("🛠️ Manual Data Corrections")
+        for date, details in corrections.items():
+            status_text = details.get("settlement_status", "Active")
+            excluded = " (Excluded from Learning)" if details.get("exclude_from_learning") else ""
+            open_time = f" | Market Open: {details['market_open_time_et']} ET" if details.get("market_open_time_et") else ""
+            st.write(f"**{date}:** {status_text}{excluded}{open_time}")
+            if details.get("notes"):
+                for note in details["notes"]:
+                    st.write(f"- {note}")
+        st.info("🚨 **NO REAL TRADING EXECUTION**")
+
     st.divider()
 
 
@@ -413,7 +433,7 @@ if __name__ == "__main__":
         if latest_log:
             st.code(load_text(latest_log)[-5000:], language="text")
 
-    with tabs[6]:
+    with tabs[7]:
         st.header("Discovered Files")
         file_info = []
         for d in [STATUS_DIR, REPORTS_DIR, LOGS_DIR, CAL_DIR, KALSHI_DIR, PAPER_DIR]:
@@ -424,7 +444,7 @@ if __name__ == "__main__":
         if file_info:
             st.table(pd.DataFrame(file_info))
 
-    with tabs[7]:
+    with tabs[8]:
         st.header("Operator Notes")
         st.write("""
         ### Daily Workflow

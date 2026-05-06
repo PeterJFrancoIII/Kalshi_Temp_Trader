@@ -11,6 +11,11 @@ DATA_DIR = os.path.join(PROJECT_ROOT, "data/processed")
 PAPER_DIR = os.path.join(DATA_DIR, "paper_trading")
 LEARNING_DIR = os.path.join(DATA_DIR, "learning")
 
+try:
+    from shared.manual_corrections import is_excluded_from_learning
+except ImportError:
+    def is_excluded_from_learning(date_str): return False
+
 def load_json(path):
     if os.path.exists(path):
         try:
@@ -61,6 +66,11 @@ def generate_summary():
     if settled_trades >= 3 and win_rate < 0.5:
         next_action = "Analyze losing trades for common patterns."
     
+    trade_date = signal.get('generated_at_utc', datetime.now(timezone.utc).isoformat())[:10]
+    warnings = []
+    if is_excluded_from_learning(trade_date):
+        warnings.append("Date excluded from learning due to manual correction.")
+    
     best_sig = signal.get('best_signal', {})
     
     summary = {
@@ -75,6 +85,7 @@ def generate_summary():
         "best_signal": best_sig,
         "model_lesson": model_lesson,
         "next_action": next_action,
+        "warnings": warnings,
         "safety": {
             "no_real_trading": True
         }

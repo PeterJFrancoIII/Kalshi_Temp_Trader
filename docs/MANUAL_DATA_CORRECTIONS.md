@@ -1,57 +1,62 @@
 # Manual Data Corrections
 
-Use this when NWS, KMIA, Kalshi, or settlement data is wrong.
+This document explains how to manually correct NWS/Kalshi data and record market timing overrides for the KMIA Kalshi bot.
 
-Manual corrections help prevent bad data from hurting the bot's learning summaries, calibration, and paper-trading results.
+## Safety First
 
-This does not place real trades.
+**DRY-RUN / PAPER EVALUATION ONLY.**
+**NO REAL TRADING EXECUTION.**
 
-## Current corrections
+This system is for research and paper-trading evaluation only. It must not be used to place real Kalshi orders.
 
-### May 5, 2026
+## Configuration File
 
-Operator reported:
+Corrections are stored in:
+`backend/config/manual_data_corrections.json`
 
-- Kalshi data is incorrect.
-- NWS/KMIA max temperature is incorrect.
+## Common Use Cases
 
-Action:
+### 1. Correcting Bad Official Data
+If the official NWS Max Temp is reported incorrectly in the automated history, you can override it:
 
-- Exclude May 5 from learning until corrected.
-- Mark settlement as needing manual review.
+```json
+"2026-05-05": {
+  "station": "KMIA",
+  "corrected_official_max_temp_f": 88,
+  "notes": ["Manual override of incorrect NWS data."]
+}
+```
 
-### May 7, 2026
+### 2. Excluding Dates from Learning
+If a day's data is so corrupt that it should not be used to train/calibrate models or calculate win rates:
 
-Operator reported:
+```json
+"2026-05-05": {
+  "exclude_from_learning": true,
+  "settlement_status": "needs_manual_review"
+}
+```
 
-- The market/trade opened at 11:00 AM ET.
+### 3. Recording Market Open-Time Overrides
+If a Kalshi market opens at an unusual time (e.g., due to holiday or technical issues), you can record it for auditability:
 
-Action:
+```json
+"2026-05-07": {
+  "market_open_time_et": "11:00",
+  "notes": ["Market opened late at 11:00 AM ET."]
+}
+```
 
-- Record 11:00 AM ET as the market open time.
+## How it Impacts the System
 
-## Config file
+- **Settlement**: If `corrected_official_max_temp_f` is present, it is used instead of the value in `kmia_daily_history.jsonl`.
+- **Learning**: Dates with `exclude_from_learning: true` are filtered out of win rate and PnL calculations in the performance summary and learning generator.
+- **Web Console**: Corrections are displayed on the Operator Home for transparency.
+- **Auditability**: All corrections include mandatory notes and are versioned.
 
-Manual corrections live here:
+## Verification
 
-backend/config/manual_data_corrections.json
-
-## Check corrections
-
-Run:
-
+Run the validation script to check your configuration:
 ```bash
 bash scripts/check_manual_corrections.sh
 ```
-
-## Safety
-
-**DRY-RUN / PAPER EVALUATION ONLY.**
-
-**NO REAL TRADING EXECUTION.**
-
-The bot must not place real Kalshi orders.
-
-## Simple rule
-
-If data is wrong, do not let the bot learn from it until it is reviewed.

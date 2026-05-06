@@ -21,6 +21,13 @@ except ImportError:
         if 85 <= temp <= 86: return "85-86"
         return ">=87"
 
+try:
+    from shared.manual_corrections import get_correction_for_date, is_excluded_from_learning
+except ImportError:
+    # Fallback if PYTHONPATH is not set correctly during tests
+    def get_correction_for_date(date_str): return {}
+    def is_excluded_from_learning(date_str): return False
+
 logger = logging.getLogger(__name__)
 
 # Paths
@@ -117,7 +124,10 @@ def settle_paper_trades():
                 if f"{trade_date}_{ticker}" in settled_tickers:
                     continue
                     
-                actual_max = history.get(trade_date)
+                correction = get_correction_for_date(trade_date)
+                actual_max = correction.get("corrected_official_max_temp_f")
+                if actual_max is None:
+                    actual_max = history.get(trade_date)
                 
                 if actual_max is not None:
                     actual_bin = temp_to_bin(actual_max)
@@ -130,6 +140,10 @@ def settle_paper_trades():
                     entry_price = trade.get("simulated_entry_price", 0)
                     pnl = 1.00 - entry_price if is_won else -entry_price
                     
+                    result_str = "WON" if is_won else "LOST"
+                    if correction.get("settlement_status") == "needs_manual_review":
+                        result_str = "NEEDS_MANUAL_REVIEW"
+
                     settlement = {
                         "settled_at_utc": datetime.now(timezone.utc).isoformat(),
                         "trade_date": trade_date,
@@ -137,12 +151,14 @@ def settle_paper_trades():
                         "forecast_bin": forecast_bin,
                         "actual_max_temp_f": actual_max,
                         "actual_bin": actual_bin,
-                        "result": "WON" if is_won else "LOST",
+                        "result": result_str,
                         "simulated_entry_price": entry_price,
                         "simulated_pnl": round(pnl, 4),
                         "model_probability": trade.get("model_probability"),
                         "market_probability": trade.get("market_probability"),
                         "edge": trade.get("edge"),
+                        "correction_source": "manual_operator_override" if correction.get("corrected_official_max_temp_f") is not None else None,
+                        "exclude_from_learning": correction.get("exclude_from_learning", False),
                         "safety": "NO REAL TRADING EXECUTION"
                     }
                     new_settlements.append(settlement)
@@ -175,17 +191,21 @@ def generate_performance_summary(pending_count: int = 0):
                 except:
                     continue
 
+    # Filter out excluded trades and those needing manual review for performance metrics
+    valid_settlements = [s for s in settlements if not s.get("exclude_from_learning", False) and s["result"] != "NEEDS_MANUAL_REVIEW"]
+    
     summary = {
-        "total_settled_trades": len(settlements),
-        "wins": sum(1 for s in settlements if s["result"] == "WON"),
-        "losses": sum(1 for s in settlements if s["result"] == "LOST"),
+        "total_settled_trades": len(valid_settlements),
+        "wins": sum(1 for s in valid_settlements if s["result"] == "WON"),
+        "losses": sum(1 for s in valid_settlements if s["result"] == "LOST"),
         "win_rate": 0,
-        "total_simulated_pnl": round(sum(s["simulated_pnl"] for s in settlements), 4),
+        "total_simulated_pnl": round(sum(s["simulated_pnl"] for s in valid_settlements), 4),
         "average_edge": 0,
         "average_entry_price": 0,
         "best_trade": None,
         "worst_trade": None,
         "pending_trades": pending_count,
+        "excluded_trades": len(settlements) - len(valid_settlements),
         "warnings": [],
         "safety": {"no_real_trading": True}
     }
@@ -196,7 +216,7 @@ def generate_performance_summary(pending_count: int = 0):
         summary["average_entry_price"] = round(sum(s["simulated_entry_price"] for s in settlements) / summary["total_settled_trades"], 4)
         
         # Best/Worst by PnL
-        sorted_by_pnl = sorted(settlements, key=lambda x: x["simulated_pnl"], reverse=True)
+        sorted_by_pnl = sorted(valid_settlements, key=lambda x: x["simulated_pnl"], reverse=True)
         summary["best_trade"] = sorted_by_pnl[0]
         summary["worst_trade"] = sorted_by_pnl[-1]
 

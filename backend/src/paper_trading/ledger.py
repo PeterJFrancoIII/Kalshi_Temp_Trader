@@ -68,6 +68,7 @@ def record_paper_trade():
         "edge": best_signal.get("edge"),
         "simulated_entry_price": best_signal.get("yes_ask") or best_signal.get("market_implied_probability"),
         "paper_action": action,
+        "market_open_time_et": best_signal.get("market_open_time_et"),
         "status": "OPEN",
         "safety": "NO REAL TRADING EXECUTION"
     }

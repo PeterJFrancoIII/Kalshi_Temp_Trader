@@ -11,6 +11,11 @@ from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
+try:
+    from shared.manual_corrections import get_market_open_time_et
+except ImportError:
+    def get_market_open_time_et(date_str): return None
+
 # Resolve ROOT
 ROOT = Path(__file__).resolve().parents[3]
 REPORTS_DIR = ROOT / "backend" / "data" / "processed" / "reports"
@@ -22,6 +27,17 @@ def get_latest_file(directory: Path, pattern: str) -> Optional[Path]:
     if not files:
         return None
     return max(files, key=os.path.getmtime)
+
+def parse_ticker_date(ticker: str) -> Optional[str]:
+    """Parses date from ticker like KXHIGHMIA-26MAY06-B84.5"""
+    match = re.search(r"([0-9]{2})([A-Z]{3})([0-9]{2})", ticker)
+    if not match: return None
+    year_short, mon_str, day_str = match.groups()
+    months = {"JAN":"01","FEB":"02","MAR":"03","APR":"04","MAY":"05","JUN":"06",
+              "JUL":"07","AUG":"08","SEP":"09","OCT":"10","NOV":"11","DEC":"12"}
+    month = months.get(mon_str.upper())
+    if not month: return None
+    return f"20{year_short}-{month}-{day_str}"
 
 def parse_forecast_bins_from_md(md_path: Path) -> Dict[str, float]:
     """Parses probability bins from a forecast markdown report."""
@@ -219,7 +235,8 @@ def generate_paper_signal():
             "confidence": confidence,
             "yes_ask": ask,
             "yes_bid": bid,
-            "last_price": last
+            "last_price": last,
+            "market_open_time_et": get_market_open_time_et(parse_ticker_date(ticker)) if ticker else None
         })
 
     # Sort signals by edge descending

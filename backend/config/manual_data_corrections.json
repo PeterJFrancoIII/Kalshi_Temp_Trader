@@ -1,0 +1,29 @@
+{
+  "corrections_version": 1,
+  "timezone": "America/New_York",
+  "dates": {
+    "2026-05-05": {
+      "station": "KMIA",
+      "corrected_official_max_temp_f": null,
+      "corrected_kalshi_market_data": null,
+      "settlement_status": "needs_manual_review",
+      "exclude_from_learning": true,
+      "notes": [
+        "Operator reported May 5 Kalshi data is incorrect.",
+        "Operator reported May 5 NWS/KMIA max temperature is incorrect.",
+        "Do not use May 5 for learning/calibration until corrected."
+      ]
+    },
+    "2026-05-07": {
+      "station": "KMIA",
+      "market_open_time_et": "11:00",
+      "notes": [
+        "Operator reported May 7 market/trade opened at 11:00 AM ET."
+      ]
+    }
+  },
+  "safety": {
+    "no_real_trading": true,
+    "no_order_execution": true
+  }
+}

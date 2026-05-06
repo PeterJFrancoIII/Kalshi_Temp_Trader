@@ -228,6 +228,15 @@ from test_health_summary import (
 from test_paper_settlement import TestPaperSettlement
 from test_paper_learning import TestPaperLearning
 
+from test_manual_corrections import (
+    test_load_manual_corrections,
+    test_is_excluded_from_learning,
+    test_get_market_open_time_et,
+    test_missing_file_fails_safely,
+    test_invalid_json_fails_safely,
+    test_get_correction_for_date as test_get_correction
+)
+
 
 # Helper to run unittest classes in this runner
 def run_unittest_class(cls):
@@ -359,7 +368,13 @@ tests = [
     lambda: run_unittest_class(TestDailyStatus),
     lambda: run_unittest_class(TestDeploymentAssets),
     lambda: run_unittest_class(TestPaperSettlement),
-    lambda: run_unittest_class(TestPaperLearning)
+    lambda: run_unittest_class(TestPaperLearning),
+    test_load_manual_corrections,
+    test_is_excluded_from_learning,
+    test_get_market_open_time_et,
+    test_missing_file_fails_safely,
+    test_invalid_json_fails_safely,
+    test_get_correction
 ]
 
 
