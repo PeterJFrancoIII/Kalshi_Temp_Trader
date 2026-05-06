@@ -19,3 +19,15 @@ def test_start_entire_system_safety():
     assert "git push" not in content, "UNSAFE: Contains git push"
     assert "git reset" not in content, "UNSAFE: Contains git reset"
     assert "git clean" not in content, "UNSAFE: Contains git clean"
+
+def test_systemd_startup_service_safety():
+    """Verify safety constraints in kmia-full-system-startup.service."""
+    root = Path(__file__).resolve().parents[2]
+    service_path = root / "deploy" / "systemd" / "kmia-full-system-startup.service"
+
+    assert service_path.exists(), "kmia-full-system-startup.service missing"
+
+    content = service_path.read_text()
+    
+    # Must contain
+    assert "NO REAL TRADING EXECUTION" in content, "Safety disclaimer missing in systemd service"

@@ -1,0 +1,14 @@
+[Unit]
+Description=KMIA Full Paper Trading System Startup - NO REAL TRADING EXECUTION
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/kmia-kalshi
+ExecStart=/opt/kmia-kalshi/scripts/start_entire_system.sh
+User=peterjfrancoiii
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

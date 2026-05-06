@@ -41,9 +41,7 @@ echo "[6/10] Settling Paper Trades..."
 bash scripts/settle_paper_trades.sh
 
 echo "[7/10] Generating Daily Status..."
-bash scripts/run_kmia_daily_workflow.sh > /dev/null 2>&1 || true # Optional step if the script exists
-# Just generate status directly if run_kmia_daily_workflow fails or is missing
-python -c "from daily_status import build_daily_status; build_daily_status()" 2>/dev/null || true
+bash scripts/generate_daily_status.sh || true
 
 echo "[8/10] Restarting Web Console..."
 if systemctl is-active --quiet kmia-web-console.service; then
@@ -78,7 +76,7 @@ if ls $PAPER_DIR/paper_signal_*.json 1> /dev/null 2>&1; then
 fi
 
 # Explicitly do NOT remove the core ledger/performance files
-# Never commit, never push, never reset, never clean.
+# Never commit, never push, never reset, never clean, never place trades.
 echo "Git hygiene complete. Remember: Never commit runtime files."
 
 echo "===================================================="
