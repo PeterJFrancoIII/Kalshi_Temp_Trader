@@ -33,6 +33,7 @@ critical_files:
   paper_trading: docs/PAPER_TRADING_FEEDBACK.md
   automated_paper_loop: docs/AUTOMATED_PAPER_LOOP.md
   learning_summary: docs/LEARNING_SUMMARY.md
+  manual_corrections: docs/MANUAL_DATA_CORRECTIONS.md
   deploy_guide: docs/DEPLOY_SIMPLE.md
   governance: CODE_GOVERNANCE.md
 
