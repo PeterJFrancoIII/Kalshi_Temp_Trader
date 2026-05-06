@@ -22,8 +22,8 @@ GIT_CLEAN=$(git status --porcelain 2>/dev/null)
 if [[ -z "$GIT_CLEAN" ]]; then
     GIT_TREE="Clean"
 else
-    # Check if dirty ONLY because of backend/data/processed
-    NON_RUNTIME_DIRTY=$(echo "$GIT_CLEAN" | grep -v "backend/data/processed/" || true)
+    # Check if dirty ONLY because of runtime outputs
+    NON_RUNTIME_DIRTY=$(echo "$GIT_CLEAN" | grep -v "backend/data/processed/" | grep -v "backend/tests/temp/" || true)
     if [[ -z "$NON_RUNTIME_DIRTY" ]]; then
         GIT_TREE="Runtime outputs changed"
     else

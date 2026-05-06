@@ -35,17 +35,9 @@ backend/data/processed/reports/*.html
 backend/data/processed/aggregate_calibration/*.json
 backend/data/processed/aggregate_calibration/*.md
 backend/data/processed/kalshi_market_snapshots/*.json
+backend/data/processed/paper_trading/*.json
+backend/data/processed/paper_trading/*.jsonl
+backend/tests/temp/
 backend/tests/test_reports/
 backend/tests/test_history.jsonl
 backend/venv/
-
-# Paper Trading Data
-backend/data/processed/paper_trading/*.json
-backend/data/processed/paper_trading/*.jsonl
-backend/data/processed/kalshi_market_snapshots/*.json
-backend/data/processed/status/*.json
-backend/data/processed/status/*.md
-backend/data/processed/logs/*.log
-backend/data/processed/reports/*.md
-backend/data/processed/reports/*.html
-backend/tests/temp/
