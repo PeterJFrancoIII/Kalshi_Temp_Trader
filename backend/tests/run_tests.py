@@ -225,6 +225,8 @@ from test_health_summary import (
     test_health_summary_read_only
 )
 
+from test_paper_settlement import TestPaperSettlement
+
 
 # Helper to run unittest classes in this runner
 def run_unittest_class(cls):
@@ -354,7 +356,8 @@ tests = [
     lambda: run_unittest_class(TestOperationalScripts),
     lambda: run_unittest_class(TestDailyStatusCLI),
     lambda: run_unittest_class(TestDailyStatus),
-    lambda: run_unittest_class(TestDeploymentAssets)
+    lambda: run_unittest_class(TestDeploymentAssets),
+    lambda: run_unittest_class(TestPaperSettlement)
 ]
 
 

@@ -285,6 +285,35 @@ if __name__ == "__main__":
             st.json(load_json(latest_kalshi_json))
 
     with tabs[4]:
+        st.header("Paper Trading Performance")
+        st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
+        PERF_FILE = PAPER_DIR / "latest_paper_trading_performance.json"
+        if PERF_FILE.exists():
+            perf = load_json(PERF_FILE)
+            p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+            p_col1.metric("Settled Trades", perf.get("total_settled_trades", 0))
+            p_col2.metric("Win Rate", f"{perf.get('win_rate', 0):.1%}")
+            p_col3.metric("Simulated PnL", f"${perf.get('total_simulated_pnl', 0):.2f}")
+            p_col4.metric("Pending Trades", perf.get("pending_trades", 0))
+            
+            SETTLE_FILE = PAPER_DIR / "paper_trade_settlements.jsonl"
+            if SETTLE_FILE.exists():
+                st.subheader("Latest Settlement Results")
+                settlements = []
+                with open(SETTLE_FILE, "r") as f:
+                    for line in f:
+                        try:
+                            settlements.append(json.loads(line))
+                        except:
+                            continue
+                if settlements:
+                    df_settle = pd.DataFrame(settlements)
+                    # Reorder for display
+                    s_cols = ["trade_date", "market_ticker", "actual_max_temp_f", "actual_bin", "result", "simulated_pnl"]
+                    st.dataframe(df_settle[s_cols].iloc[::-1])
+        else:
+            st.info("No performance data available. Run `bash scripts/settle_paper_trades.sh`.")
+
         st.header("Paper Trading Ledger")
         st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
         LEDGER_FILE = PAPER_DIR / "paper_trade_ledger.jsonl"
