@@ -16,7 +16,7 @@ For monitoring simulated performance, see [Paper Trading Feedback](PAPER_TRADING
 For background loop status, see [Automated Paper Trading Loop](AUTOMATED_PAPER_LOOP.md).
 For strategy lessons, see [Learning Summary](LEARNING_SUMMARY.md).
 For data fixes, see [Manual Data Corrections](MANUAL_DATA_CORRECTIONS.md).
-For live weather monitoring, see [Live NWS / KMIA Data](NWS_LIVE_DATA.md).
+For live weather monitoring and observation tables, see [Live NWS / KMIA Data](NWS_LIVE_DATA.md).
 For setup quality and risks, see [Prediction Quality Report](PREDICTION_QUALITY_REPORT.md).
 
 ## 3. Safe commands

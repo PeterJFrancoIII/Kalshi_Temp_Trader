@@ -70,7 +70,7 @@ If it still says Unknown, check the Forecast tab and Logs tab.
 See the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
 
 For fixing incorrect data, see [Manual Data Corrections](MANUAL_DATA_CORRECTIONS.md).
-For live weather data issues, see [Live NWS / KMIA Data](NWS_LIVE_DATA.md).
+For live weather data issues or missing observation tables, see [Live NWS / KMIA Data](NWS_LIVE_DATA.md).
 For setup quality and risk issues, see [Prediction Quality Report](PREDICTION_QUALITY_REPORT.md).
 
 ## Safety

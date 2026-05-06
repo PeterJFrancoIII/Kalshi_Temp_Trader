@@ -14,16 +14,16 @@ This system provides live weather observation and forecast data for KMIA (Miami 
 
 ### Components
 
-1.  **NWS Client**: `backend/src/weather/nws_live_client.py`
+1. **NWS Client**: `backend/src/weather/nws_live_client.py`
     - Fetches point metadata for KMIA (25.7959,-80.2870).
     - Retrieves latest and recent observations.
     - Retrieves daily and hourly forecasts.
     - Compiles data into a standardized snapshot.
-2.  **Update Script**: `scripts/update_nws_live_data.sh`
+2. **Update Script**: `scripts/update_nws_live_data.sh`
     - Runs the client and saves results.
     - Path: `backend/data/processed/weather_nws/latest_nws_kmia_snapshot.json`
     - Archives: `backend/data/processed/weather_nws/nws_kmia_snapshot_YYYY-MM-DD_HHMMSS.json`
-3.  **Web Console**:
+3. **Web Console**:
     - New tab: **Live NWS / KMIA Data**
     - Displays current temp, observed max, forecast high, and staleness status.
 
@@ -47,3 +47,69 @@ bash scripts/update_nws_live_data.sh
 - **MISSING**: The snapshot file does not exist. Run the update script.
 - **STALE**: NWS has not updated the observation in over 90 minutes. Check [api.weather.gov](https://api.weather.gov) status.
 - **ERROR**: API endpoint failed. Check internet connectivity and NWS API availability.
+
+## KMIA Observation Time-Series Table
+
+The console has a Live NWS / KMIA Data tab.
+
+It is meant to resemble the useful data table from:
+
+<https://www.weather.gov/wrh/timeseries?site=kmia>
+
+The bot reads the public API directly:
+
+<https://api.weather.gov/stations/KMIA/observations>
+
+The table should show:
+
+- Time ET
+- Temp °F
+- Dew Point °F
+- Humidity %
+- Wind direction
+- Wind speed
+- Wind gust
+- Pressure
+- Precipitation
+- Description
+- Raw METAR if available
+
+## What to check
+
+Look at:
+
+- Current Temp
+- Observed Max So Far
+- Latest Observation Time
+- Stale Data
+- Recent Observations Table
+
+## What good looks like
+
+- NWS Live Data: CONNECTED
+- Recent observations are visible
+- Latest observation is not stale
+- Observed Max So Far updates during the day
+
+## If the table is empty
+
+Run:
+
+```bash
+bash scripts/update_nws_live_data.sh
+bash scripts/health_summary.sh
+```
+
+Then refresh the console.
+
+If it is still empty, NWS may be delayed or unavailable.
+
+Stale or delayed NWS data is usually YELLOW, not RED.
+
+## Safety
+
+**DRY-RUN / PAPER EVALUATION ONLY.**
+
+**NO REAL TRADING EXECUTION.**
+
+This data is for forecasting, monitoring, and paper evaluation only.
