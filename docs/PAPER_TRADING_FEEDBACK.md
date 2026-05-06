@@ -43,7 +43,9 @@ The bot must not place real Kalshi orders.
 
 ## Automated Loop Installation
 
-To install the automated paper trading loop:
+For details on the automated loop, see [Automated Paper Trading Loop](AUTOMATED_PAPER_LOOP.md).
+
+For active Kalshi contract forecast behavior, see [Active Kalshi Contract Forecasts](ACTIVE_KALSHI_CONTRACT_FORECASTS.md).
 
 ```bash
 sudo cp deploy/systemd/kmia-paper-trading-loop.service /etc/systemd/system/

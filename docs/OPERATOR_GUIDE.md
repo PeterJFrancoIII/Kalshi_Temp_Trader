@@ -24,11 +24,13 @@ To understand runtime output files and Git status, see [Git Hygiene](GIT_HYGIENE
 To correct incorrect market or weather data, see [Manual Data Corrections](MANUAL_DATA_CORRECTIONS.md).
 To monitor live weather feeds and recent observations, see [Live NWS / KMIA Data](NWS_LIVE_DATA.md).
 To review setup quality and risks, see [Prediction Quality Report](PREDICTION_QUALITY_REPORT.md).
+To see how forecasts map to active Kalshi contracts, see [Active Kalshi Contract Forecasts](ACTIVE_KALSHI_CONTRACT_FORECASTS.md).
 
 ## Paper Trading
 
 For details on simulated trades and performance tracking, see the [Paper Trading Feedback](PAPER_TRADING_FEEDBACK.md) guide.
 To monitor the background loop, see [Automated Paper Trading Loop](AUTOMATED_PAPER_LOOP.md).
+For active Kalshi contract forecast behavior, see [Active Kalshi Contract Forecasts](ACTIVE_KALSHI_CONTRACT_FORECASTS.md).
 For strategy lessons, see [Learning Summary](LEARNING_SUMMARY.md).
 
 ## Safety

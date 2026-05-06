@@ -36,6 +36,7 @@ critical_files:
   manual_corrections: docs/MANUAL_DATA_CORRECTIONS.md
   nws_live_data: docs/NWS_LIVE_DATA.md
   prediction_quality: docs/PREDICTION_QUALITY_REPORT.md
+  active_kalshi_contracts: docs/ACTIVE_KALSHI_CONTRACT_FORECASTS.md
   deploy_guide: docs/DEPLOY_SIMPLE.md
   governance: CODE_GOVERNANCE.md
 

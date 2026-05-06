@@ -19,6 +19,8 @@ For data fixes, see [Manual Data Corrections](MANUAL_DATA_CORRECTIONS.md).
 For live weather monitoring and observation tables, see [Live NWS / KMIA Data](NWS_LIVE_DATA.md).
 For setup quality and risks, see [Prediction Quality Report](PREDICTION_QUALITY_REPORT.md).
 
+For active Kalshi contract mapping, see [Active Kalshi Contract Forecasts](ACTIVE_KALSHI_CONTRACT_FORECASTS.md).
+
 ## 3. Safe commands
 
 Run these from the server:
