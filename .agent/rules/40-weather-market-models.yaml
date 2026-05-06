@@ -1,0 +1,17 @@
+# 40-weather-market-models.yaml - Models & Bins
+rule_id: 40-weather-market-models
+title: Weather Market Models & Bins
+description: |
+  Details on the forecasting models and market structure.
+current_bins: ["<=78", "79-80", "81-82", "83-84", "85-86", ">=87"]
+migration_plan:
+  target_bins: ["<=79", "80-81", "82-83", "84-85", "86-87", ">=88"]
+  status: DOCUMENTED_ONLY
+models:
+  v1: rules_model.py (Base rules and climatology)
+  v2: rules_model_v2.py (Enhanced rules with live sensor weights)
+constraints:
+  - Observed max temperature so far must zero out lower bins.
+  - Probability sum must be ~1.0.
+status: active
+priority: 2

@@ -1,0 +1,14 @@
+# 20-descriptor-maintenance.yaml - Maintenance
+rule_id: 20-descriptor-maintenance
+title: Descriptor and Rule Maintenance
+description: |
+  The .agent/ folder is the source of truth for AI agents interacting with this repo.
+  Any architectural changes, new models, or new workflows must be reflected in:
+  - MASTER_DESCRIPTOR.md
+  - MACHINE_INDEX.yaml
+  - Relevant rules in .agent/rules/
+maintenance_cycle:
+  - Update on every new feature addition.
+  - Review on every model version change.
+status: active
+priority: 2

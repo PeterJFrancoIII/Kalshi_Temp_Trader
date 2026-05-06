@@ -1,0 +1,15 @@
+# 50-agent-index.yaml - Agent Roles
+rule_id: 50-agent-index
+title: Agent Index & Coordination
+description: |
+  Rules for coordinating multiple AI agents.
+roles:
+  project_admin: Responsible for .agent/ maintenance and safety.
+  forecasting_agent: Focuses on models in backend/src/forecasting/.
+  infrastructure_agent: Focuses on scripts/ and deploy/.
+  ui_agent: Focuses on the web console.
+coordination:
+  - shared_types.py can only be modified by the project admin or architect.
+  - All agents must verify safety rules before pushing changes.
+status: active
+priority: 2

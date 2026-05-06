@@ -1,0 +1,9 @@
+# 00-project.yaml - Project Overview
+rule_id: 00-project
+title: Project Overview
+description: |
+  This project is a KMIA temperature forecasting system for Kalshi-style markets.
+  It is strictly for research and paper-trading evaluation.
+  The system uses Python for all core logic and shell scripts for orchestration.
+status: active
+priority: 1

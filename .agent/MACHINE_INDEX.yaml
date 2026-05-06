@@ -1,0 +1,47 @@
+project:
+  name: Kalshi_Temp_Trader
+  station: KMIA
+  status: RESEARCH_MVP
+  version: 0.1.0
+
+capabilities:
+  language: python
+  frameworks:
+    - streamlit
+    - pydantic
+    - pytest
+
+entry_points:
+  daily_workflow: scripts/run_kmia_daily_workflow.sh
+  status_generator: scripts/generate_daily_status.sh
+  test_runner: scripts/run_tests.sh
+  web_console: scripts/run_web_console.sh
+
+critical_files:
+  shared_types: backend/src/shared/types.py
+  v1_model: backend/src/forecasting/rules_model.py
+  v2_model: backend/src/forecasting/rules_model_v2.py
+  data_processed: backend/data/processed/
+  governance: CODE_GOVERNANCE.md
+
+deployment:
+  target: LINUX_SERVER
+  user: peterjfrancoiii
+  ip: 100.109.192.54
+  method: SSH
+  credentials_file: .env.deploy
+
+constraints:
+  real_money_trading: false
+  market_access: read-only
+  allowed_station: KMIA
+  prohibited_terms:
+    - create_order
+    - submit_order
+    - cancel_order
+    - place_order
+    - market_order
+
+temperature_bins:
+  active: ["<=78", "79-80", "81-82", "83-84", "85-86", ">=87"]
+  planned_migration: ["<=79", "80-81", "82-83", "84-85", "86-87", ">=88"]

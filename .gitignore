@@ -23,3 +23,5 @@ Thumbs.db
 # Env
 .env
 .env.local
+.env.deploy
+deploy_secrets.json

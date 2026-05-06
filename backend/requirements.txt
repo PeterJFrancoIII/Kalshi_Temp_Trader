@@ -5,7 +5,8 @@ beautifulsoup4>=4.12.0
 python-dateutil>=2.8.2
 sqlalchemy>=2.0.0
 
-# Future optional dependencies (Do not install until needed for Streamlit dashboard/ML)
-# streamlit
-# pandas
+# Future optional dependencies
+streamlit
+pandas
+PyYAML
 # scikit-learn

@@ -1,0 +1,20 @@
+# NO REAL TRADING EXECUTION
+# DRY-RUN / PAPER EVALUATION ONLY
+[Unit]
+Description=KMIA Kalshi Paper Evaluation Web Console - NO REAL TRADING EXECUTION
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/kmia-kalshi
+ExecStart=/opt/kmia-kalshi/scripts/run_web_console.sh
+Restart=always
+RestartSec=10
+User=peterjfrancoiii
+Environment=PYTHONUNBUFFERED=1
+Environment=STREAMLIT_ADDRESS=127.0.0.1
+Environment=STREAMLIT_PORT=8501
+
+[Install]
+WantedBy=multi-user.target

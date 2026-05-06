@@ -1,0 +1,12 @@
+# 30-code-governance.yaml - Governance
+rule_id: 30-code-governance
+title: Code Governance
+description: |
+  Follow the rules defined in CODE_GOVERNANCE.md.
+  - Python-first architecture (3.11+).
+  - Streamlit for dashboarding.
+  - No React or complex frontend frameworks in MVP.
+  - Typed functions and Pydantic models required for new modules.
+  - Pytest required for all new logic.
+status: active
+priority: 1

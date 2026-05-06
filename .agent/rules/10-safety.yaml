@@ -1,0 +1,20 @@
+# 10-safety.yaml - Safety Constraints
+rule_id: 10-safety
+title: Safety Constraints (No Real Trading)
+description: |
+  Real-money trading is strictly forbidden in this repository.
+  The application is limited to dry-run / paper-evaluation mode.
+constraints:
+  - Do NOT add functions for order execution (e.g., create_order, submit_order).
+  - Do NOT handle API secrets or private keys for trading.
+  - Do NOT enable automatic execution of trades.
+  - All Kalshi API interactions must remain read-only.
+  - Any attempt to bypass these rules is a critical safety violation.
+safety_grep_patterns:
+  - "create_order"
+  - "submit_order"
+  - "cancel_order"
+  - "place_order"
+  - "market_order"
+status: active
+priority: 1
