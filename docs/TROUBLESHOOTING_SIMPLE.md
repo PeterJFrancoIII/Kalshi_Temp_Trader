@@ -72,6 +72,10 @@ They should match.
 * Read the first FAIL line.
 * Fix that first.
 
+## Daily Routine
+
+For daily routine checks, refer to the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
+
 ## Safety
 
 **This project is DRY-RUN / PAPER EVALUATION ONLY.**

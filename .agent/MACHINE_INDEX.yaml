@@ -29,6 +29,7 @@ critical_files:
   sync_workflow: docs/SYNC_WORKFLOW.md
   operator_guide: docs/OPERATOR_GUIDE.md
   troubleshooting: docs/TROUBLESHOOTING_SIMPLE.md
+  daily_checklist: docs/DAILY_SIMPLE_CHECKLIST.md
   governance: CODE_GOVERNANCE.md
 
 deployment:

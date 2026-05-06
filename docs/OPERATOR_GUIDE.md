@@ -2,6 +2,8 @@
 
 ## What to check
 
+For daily routines, see the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
+
 1. Open the console.
 2. Look at SYSTEM STATUS.
 3. If GREEN, do nothing.
@@ -18,6 +20,10 @@
 ## Troubleshooting
 
 For quick fixes, see the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).
+
+## Daily Routine
+
+For daily routine checks, refer to the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
 
 ## Safety
 
