@@ -23,6 +23,7 @@ Specifically, check there if Today's Forecast says **Unknown**.
 To understand runtime output files and Git status, see [Git Hygiene](GIT_HYGIENE.md).
 To correct incorrect market or weather data, see [Manual Data Corrections](MANUAL_DATA_CORRECTIONS.md).
 To monitor live weather feeds, see [Live NWS / KMIA Data](NWS_LIVE_DATA.md).
+To review setup quality and risks, see [Prediction Quality Report](PREDICTION_QUALITY_REPORT.md).
 
 ## Paper Trading
 

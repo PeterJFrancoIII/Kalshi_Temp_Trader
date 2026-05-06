@@ -35,6 +35,7 @@ critical_files:
   learning_summary: docs/LEARNING_SUMMARY.md
   manual_corrections: docs/MANUAL_DATA_CORRECTIONS.md
   nws_live_data: docs/NWS_LIVE_DATA.md
+  prediction_quality: docs/PREDICTION_QUALITY_REPORT.md
   deploy_guide: docs/DEPLOY_SIMPLE.md
   governance: CODE_GOVERNANCE.md
 
