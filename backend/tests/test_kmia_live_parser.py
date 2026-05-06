@@ -125,12 +125,30 @@ def test_parse_obhistory_year_rollover():
 
 def test_compute_live_features_max_so_far():
     tz = gettz('US/Eastern')
-    now = datetime.now(tz)
+    # Use a fixed mid-day time to ensure test stability regardless of when it's run
+    ref_now = datetime(2026, 5, 6, 12, 0, 0, tzinfo=tz)
     
     # 2 hours ago
-    t1 = now - timedelta(hours=2)
+    t1 = ref_now - timedelta(hours=2)
     # 1 hour ago
-    t2 = now - timedelta(hours=1)
+    t2 = ref_now - timedelta(hours=1)
+    
+    obs = [
+        ParsedObservation(timestamp=t1, temperature_f=85.0),
+        ParsedObservation(timestamp=t2, temperature_f=82.0),
+    ]
+    
+    # We must ensure compute_live_features uses our reference 'now' if we want it to be deterministic,
+    # but the current implementation uses datetime.now(timezone.utc).
+    # For this test to pass with the current implementation, we just need to ensure
+    # that the observations are from 'today' in ET.
+    # Since the system clock is likely close to 'now', using a fixed recent date is better.
+    
+    # Update: compute_live_features uses datetime.now(timezone.utc) internally for stale checks.
+    # To be fully safe, we should use observations very close to the actual 'now'.
+    actual_now = datetime.now(timezone.utc)
+    t1 = actual_now - timedelta(minutes=60)
+    t2 = actual_now - timedelta(minutes=30)
     
     obs = [
         ParsedObservation(timestamp=t1, temperature_f=85.0),
@@ -144,11 +162,10 @@ def test_compute_live_features_max_so_far():
     assert metrics.stale_data_flag is False
 
 def test_stale_data_flag():
-    tz = gettz('US/Eastern')
-    now = datetime.now(tz)
+    actual_now = datetime.now(timezone.utc)
     
     # 3 hours ago -> stale
-    t1 = now - timedelta(hours=3)
+    t1 = actual_now - timedelta(hours=3)
     
     obs = [
         ParsedObservation(timestamp=t1, temperature_f=85.0),
