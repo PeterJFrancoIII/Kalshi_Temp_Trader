@@ -18,6 +18,7 @@ For daily tasks, see the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
 ## Troubleshooting
 
 See the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).
+Specifically, check there if Today's Forecast says **Unknown**.
 
 ## Safety
 

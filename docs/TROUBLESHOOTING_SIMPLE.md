@@ -44,6 +44,23 @@ Server: `git rev-parse HEAD`
 * Read the first FAIL line.
 * Fix it.
 
+## If Today's Forecast says Unknown
+
+This means the console could not read the latest forecast summary.
+
+Run on the server:
+
+```bash
+cd /opt/kmia-kalshi
+bash scripts/run_kmia_daily_workflow.sh
+bash scripts/generate_daily_status.sh
+sudo systemctl restart kmia-web-console.service
+```
+
+Then refresh the browser.
+
+If it still says Unknown, check the Forecast tab and Logs tab.
+
 ## Daily Routine
 
 See the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
