@@ -208,22 +208,22 @@ def generate_paper_signal():
                     confidence = "high"
             elif edge > 0:
                 action = "WATCH"
-                confidence = "low"
         else:
             warnings.append(f"{ticker}: No price data available.")
         
         signals.append({
-            "ticker": ticker,
-            "bin": mapping["bin_label"],
-            "title": m.get("title"),
-            "subtitle": m.get("subtitle"),
-            "model_prob": round(model_prob, 4),
-            "market_prob": round(market_prob, 4) if market_prob is not None else None,
+            "market_ticker": ticker,
+            "market_title": m.get("title"),
+            "forecast_bin": mapping["bin_label"],
+            "model_probability": round(model_prob, 4),
+            "market_implied_probability": round(market_prob, 4) if market_prob is not None else None,
             "edge": round(edge, 4) if edge is not None else None,
             "expected_value": round(ev, 4) if ev is not None else None,
-            "action": action,
+            "paper_action": action,
             "confidence": confidence,
-            "warnings": mapping["warnings"]
+            "yes_ask": ask,
+            "yes_bid": bid,
+            "last_price": last
         })
 
     # Sort signals by edge descending

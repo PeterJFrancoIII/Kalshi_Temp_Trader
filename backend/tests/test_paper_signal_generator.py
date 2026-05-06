@@ -93,13 +93,13 @@ def test_generate_signal_logic():
             
         assert len(report["signals"]) > 0, f"No signals generated. Report: {report}"
         sig = report["signals"][0]
-        assert sig["ticker"] == "TEST-T90"
+        assert sig["market_ticker"] == "TEST-T90"
         # 90-91 is part of >=87 bin (prob 0.4)
-        assert sig["model_prob"] == 0.4
+        assert sig["model_probability"] == 0.4
         # (0.1 + 0.08) / 2 = 0.09 market prob
-        assert abs(sig["market_prob"] - 0.09) < 1e-6
+        assert abs(sig["market_implied_probability"] - 0.09) < 1e-6
         assert sig["edge"] > 0.3
-        assert sig["action"] == "PAPER BUY CANDIDATE"
+        assert sig["paper_action"] == "PAPER BUY CANDIDATE"
     finally:
         sg.REPORTS_DIR = original_reports
         sg.SNAPSHOT_FILE = original_snapshot

@@ -287,14 +287,14 @@ if p_data:
     if best:
         pcol1, pcol2, pcol3, pcol4 = st.columns(4)
         with pcol1:
-            st.write(f"**Action:** `{best.get('action')}`")
-            st.write(f"**Confidence:** {best.get('confidence').upper()}")
+            st.write(f"**Action:** `{best.get('paper_action')}`")
+            st.write(f"**Confidence:** {best.get('confidence', 'Unknown').upper()}")
         with pcol2:
-            st.write(f"**Ticker:** `{best.get('ticker')}`")
-            st.write(f"**Bin:** {best.get('bin')}")
+            st.write(f"**Ticker:** `{best.get('market_ticker')}`")
+            st.write(f"**Bin:** {best.get('forecast_bin')}")
         with pcol3:
-            st.write(f"**Model Prob:** {best.get('model_prob', 0):.1%}")
-            st.write(f"**Market Prob:** {best.get('market_prob', 0):.1%}" if best.get('market_prob') else "**Market Prob:** N/A")
+            st.write(f"**Model Prob:** {best.get('model_probability', 0):.1%}")
+            st.write(f"**Market Prob:** {best.get('market_implied_probability', 0):.1%}" if best.get('market_implied_probability') else "**Market Prob:** N/A")
         with pcol4:
             st.write(f"**Edge:** {best.get('edge', 0):+.1%}" if best.get('edge') is not None else "**Edge:** N/A")
             st.write(f"**EV ($1):** {best.get('expected_value', 0):+.2f}" if best.get('expected_value') is not None else "**EV:** N/A")
