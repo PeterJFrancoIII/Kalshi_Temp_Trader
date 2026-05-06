@@ -20,6 +20,10 @@ For daily tasks, see the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
 See the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).
 Specifically, check there if Today's Forecast says **Unknown**.
 
+## Paper Trading
+
+For details on simulated trades and performance tracking, see the [Paper Trading Feedback](PAPER_TRADING_FEEDBACK.md) guide.
+
 ## Safety
 
 **DRY-RUN / PAPER EVALUATION ONLY.**

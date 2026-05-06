@@ -19,5 +19,18 @@ class TestOperatorDocs(unittest.TestCase):
         self.assertIn("health_summary.sh", content)
         self.assertIn("check_sync_status.sh", content)
 
+    def test_paper_trading_doc_exists(self):
+        """Verify that docs/PAPER_TRADING_FEEDBACK.md exists."""
+        self.assertTrue(os.path.exists(os.path.join(os.getcwd(), "docs", "PAPER_TRADING_FEEDBACK.md")))
+
+    def test_paper_trading_doc_content(self):
+        """Verify the content of docs/PAPER_TRADING_FEEDBACK.md."""
+        with open(os.path.join(os.getcwd(), "docs", "PAPER_TRADING_FEEDBACK.md"), "r") as f:
+            content = f.read()
+        self.assertIn("NO REAL TRADING EXECUTION", content)
+        self.assertIn("PAPER SIGNAL", content)
+        self.assertIn("SETTLED TRADE", content)
+        self.assertIn("simulated", content)
+
 if __name__ == "__main__":
     unittest.main()

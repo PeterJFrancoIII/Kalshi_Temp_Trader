@@ -12,6 +12,8 @@ See [What The Colors Mean](WHAT_THE_COLORS_MEAN.md).
 * **YELLOW**: Bot is working, but needs attention. Read the message.
 * **RED**: Something is broken. Run `bash scripts/health_summary.sh`.
 
+For monitoring simulated performance, see [Paper Trading Feedback](PAPER_TRADING_FEEDBACK.md).
+
 ## 3. Safe commands
 
 Run these from the server:
