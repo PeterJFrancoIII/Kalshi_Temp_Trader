@@ -1,0 +1,26 @@
+{
+  "mode": "read_only_public_market_data",
+  "station": "KMIA",
+  "city": "Miami",
+  "state": "FL",
+  "search_terms": [
+    "Miami",
+    "KMIA",
+    "temperature",
+    "high temperature",
+    "daily high",
+    "weather",
+    "climate",
+    "Florida",
+    "FL"
+  ],
+  "preferred_terms": [
+    "Miami",
+    "temperature",
+    "high"
+  ],
+  "safety": {
+    "no_real_trading": true,
+    "no_order_execution": true
+  }
+}

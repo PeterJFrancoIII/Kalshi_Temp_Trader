@@ -36,6 +36,7 @@ class KalshiPublicClient:
     def discover_temperature_markets(self, query_terms: List[str]) -> List[Dict[str, Any]]:
         """
         Broadly discover markets matching query terms (e.g., ['miami', 'temperature']).
+        Returns any market that matches ANY of the query terms.
         """
         # Fetch all open markets and filter locally for robust discovery
         response = self._get("/markets", params={"status": "open"})
@@ -48,7 +49,8 @@ class KalshiPublicClient:
                 f"{market.get('ticker', '')}"
             ).lower()
             
-            if all(term.lower() in search_text for term in query_terms):
+            # Match ANY term for broad discovery
+            if any(term.lower() in search_text for term in query_terms):
                 discovered.append(market)
                 
         return discovered

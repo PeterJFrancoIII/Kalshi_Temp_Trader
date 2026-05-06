@@ -116,11 +116,18 @@ if system_status != "RED":
 
     if latest_kalshi_json.exists():
         mkts = load_json(latest_kalshi_json)
-        if mkts.get("markets_found", 0) == 0:
+        if mkts.get("selected_temperature_markets"):
+            kalshi_status = "CONNECTED"
+        elif mkts.get("total_markets_returned", 0) > 0:
             system_status = "YELLOW"
             status_color = "warning"
-            kalshi_status = "NO MARKET FOUND"
-            action_needed = "Kalshi updater ran, but no matching market was found. Review market discovery terms."
+            kalshi_status = "CONNECTED (No Miami Markets)"
+            action_needed = "Kalshi discovery found general markets, but no matching Miami temperature market. Review ticker/series manually."
+        else:
+            system_status = "YELLOW"
+            status_color = "warning"
+            kalshi_status = "CONNECTED (0 Markets)"
+            action_needed = "Kalshi discovery returned 0 results. Review search terms in config."
     else:
         system_status = "YELLOW"
         status_color = "warning"
@@ -297,7 +304,9 @@ with tab8:
     ```
 
     ---
-    **Security Notice**: This console is read-only. No trading actions can be performed from this interface.
+    **Operator Notice**: If market discovery finds 0 matching markets, the system status will show as **YELLOW**. This is an advisory state, not a system failure.
+    
+    **Security Notice**: This console is read-only. No trading actions can be performed from this interface. **NO REAL TRADING EXECUTION.**
     """)
 
 st.divider()
