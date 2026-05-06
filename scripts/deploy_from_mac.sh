@@ -21,13 +21,16 @@ if [ "$(hostname)" = "hal" ]; then
 fi
 
 echo "Current Git Status:"
+git restore --staged backend/data/processed backend/tests/temp 2>/dev/null || true
 git status --short
 
 if [ -n "$(git status --short)" ]; then
     read -p "Commit all current changes? [y/N] " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        git add .
+        echo "Generated files are not committed."
+        git add .agent backend/src backend/tests docs scripts deploy backend/config backend/requirements.txt README.md .gitignore 2>/dev/null || true
+        git restore --staged backend/data/processed backend/tests/temp 2>/dev/null || true
         git commit -m "Update KMIA bot"
     else
         echo "Exiting safely without committing or pushing."

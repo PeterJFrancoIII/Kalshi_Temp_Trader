@@ -22,7 +22,7 @@ bash scripts/deploy_from_mac.sh
 ## What the Script Does
 
 1. **Environment Validation:** Verifies you are running from the Mac repository root (and refuses to run if the hostname is `hal`).
-2. **Local Commits:** Checks for uncommitted changes and optionally commits them with a generic message.
+2. **Local Commits:** Checks for uncommitted changes and optionally commits them with a generic message. **Generated runtime files and test temporary directories are explicitly excluded.**
 3. **Pushes to GitHub:** Pushes local changes to the `main` branch.
 4. **SSH into Server:** Connects securely to the `kmia` SSH host.
 5. **Pulls Updates:** Runs `git pull --ff-only` on the server to retrieve the exact code you just pushed.
