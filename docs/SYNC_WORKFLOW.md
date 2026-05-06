@@ -83,3 +83,7 @@ The hashes must match exactly.
 - **No Rsync:** Do not use `rsync` for normal workflows; it is reserved for emergency recovery only.
 - **Git Hygiene:** Generated data files and local `.env` files should generally not be committed.
 - **Secrets:** Keep all secrets out of Git; use `.env` files that are ignored.
+
+## Troubleshooting
+
+If synchronization fails, refer to the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).

@@ -28,6 +28,7 @@ critical_files:
   data_processed: backend/data/processed/
   sync_workflow: docs/SYNC_WORKFLOW.md
   operator_guide: docs/OPERATOR_GUIDE.md
+  troubleshooting: docs/TROUBLESHOOTING_SIMPLE.md
   governance: CODE_GOVERNANCE.md
 
 deployment:

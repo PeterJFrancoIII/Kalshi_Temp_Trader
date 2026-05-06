@@ -15,6 +15,10 @@
 - `bash scripts/run_kmia_daily_workflow.sh`: Run the full daily prediction workflow.
 - `bash scripts/update_kalshi_market_data.sh`: Update Kalshi market price data.
 
+## Troubleshooting
+
+For quick fixes, see the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).
+
 ## Safety
 
 This system is DRY-RUN / PAPER EVALUATION ONLY.

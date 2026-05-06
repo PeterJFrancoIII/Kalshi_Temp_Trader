@@ -27,3 +27,7 @@ The script outputs a color-coded status at the end:
 ### Read-Only Nature
 
 The health check script is strictly **read-only**. It does not modify any files, restart services, or execute any trading orders.
+
+## Troubleshooting
+
+For common issues, see the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).
