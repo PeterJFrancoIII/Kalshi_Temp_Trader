@@ -238,7 +238,8 @@ from test_manual_corrections import (
 )
 
 from test_nws_live_client import (
-    test_c_to_f,
+    test_conversions,
+    test_timezone_conversion,
     test_fetch_kmia_point_metadata,
     test_build_live_nws_snapshot,
     test_stale_data_detection,
@@ -383,7 +384,8 @@ tests = [
     test_missing_file_fails_safely,
     test_invalid_json_fails_safely,
     test_get_correction,
-    test_c_to_f,
+    test_conversions,
+    test_timezone_conversion,
     test_fetch_kmia_point_metadata,
     test_build_live_nws_snapshot,
     test_stale_data_detection,
