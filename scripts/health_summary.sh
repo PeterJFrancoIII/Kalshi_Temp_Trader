@@ -22,7 +22,13 @@ GIT_CLEAN=$(git status --porcelain 2>/dev/null)
 if [[ -z "$GIT_CLEAN" ]]; then
     GIT_TREE="Clean"
 else
-    GIT_TREE="Dirty"
+    # Check if dirty ONLY because of backend/data/processed
+    NON_RUNTIME_DIRTY=$(echo "$GIT_CLEAN" | grep -v "backend/data/processed/" || true)
+    if [[ -z "$NON_RUNTIME_DIRTY" ]]; then
+        GIT_TREE="Runtime outputs changed"
+    else
+        GIT_TREE="Dirty source changes"
+    fi
 fi
 
 echo "Git Commit:   $GIT_COMMIT"
@@ -89,6 +95,7 @@ echo "Memory Usage:    $MEM_USAGE"
 if [[ -z "$LATEST_STATUS" ]]; then echo -e "${YELLOW}WARN: Missing status file.${NC}"; fi
 if [[ -z "$LATEST_FORECAST" ]]; then echo -e "${YELLOW}WARN: Missing forecast file.${NC}"; fi
 if [[ "$MARKETS_FOUND" -eq 0 ]]; then echo -e "${YELLOW}WARN: Zero markets found in latest snapshot.${NC}"; fi
+if [[ "$GIT_TREE" == "Dirty source changes" ]]; then echo -e "${YELLOW}WARN: Uncommitted source code changes exist.${NC}"; fi
 
 # Final Status Logic
 # GREEN = console active, HTTP 200, status exists, forecast exists
@@ -115,7 +122,7 @@ fi
 
 if [[ "$CONSOLE_OK" == true && "$HTTP_OK" == true && "$FILES_OK" == true ]]; then
     # Could be GREEN or YELLOW
-    if [[ "$MARKETS_FOUND" -gt 0 && -f "$CALIBRATION_FILE" && -n "$LATEST_SNAPSHOT" ]]; then
+    if [[ "$MARKETS_FOUND" -gt 0 && -f "$CALIBRATION_FILE" && -n "$LATEST_SNAPSHOT" && "$GIT_TREE" != "Dirty source changes" ]]; then
         STATUS_COLOR=$GREEN
         STATUS_TEXT="GREEN"
     else

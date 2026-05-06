@@ -42,4 +42,10 @@ backend/venv/
 # Paper Trading Data
 backend/data/processed/paper_trading/*.json
 backend/data/processed/paper_trading/*.jsonl
+backend/data/processed/kalshi_market_snapshots/*.json
+backend/data/processed/status/*.json
+backend/data/processed/status/*.md
+backend/data/processed/logs/*.log
+backend/data/processed/reports/*.md
+backend/data/processed/reports/*.html
 backend/tests/temp/
