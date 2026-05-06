@@ -199,6 +199,13 @@ from test_web_console_logic import (
     test_load_latest_forecast_summary_missing
 )
 
+from test_weather_ingestion import (
+    test_weather_status_serialization,
+    test_stale_data_flag,
+    test_observed_max_so_far,
+    test_history_record_count
+)
+
 from test_health_summary import (
     test_health_summary_script_exists,
     test_health_summary_is_executable,
@@ -315,6 +322,10 @@ tests = [
     test_kalshi_manual_series_lookup,
     test_load_latest_forecast_summary_parsing,
     test_load_latest_forecast_summary_missing,
+    test_weather_status_serialization,
+    test_stale_data_flag,
+    test_observed_max_so_far,
+    test_history_record_count,
     test_scripts_contain_safety_disclaimer,
     test_check_sync_status_runs,
     test_health_summary_script_exists,

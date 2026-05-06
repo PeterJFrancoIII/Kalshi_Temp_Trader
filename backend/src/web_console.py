@@ -103,6 +103,10 @@ latest_log = get_latest_file(LOGS_DIR, "kmia_daily_workflow_*.log")
 agg_cal_json = CAL_DIR / "aggregate_calibration.json"
 agg_cal_md = CAL_DIR / "aggregate_calibration.md"
 
+# Weather Data Ingestion Status
+WEATHER_INGESTION_DIR = DATA / "weather_ingestion"
+latest_weather_json = WEATHER_INGESTION_DIR / "latest_weather_ingestion_status.json"
+
 # Sidebar Metrics
 st.sidebar.header("System Overview")
 st.sidebar.metric("Station", "KMIA")
@@ -133,6 +137,15 @@ forecast_val = "Unknown"
 top_bin = "Unknown"
 kalshi_status = "CONNECTED"
 kalshi_msg = "Market data is up to date."
+weather_live = "YES"
+
+# Load Weather Status
+w_data = load_json(latest_weather_json) if latest_weather_json.exists() else {}
+if w_data:
+    if w_data.get("stale_data", False):
+        weather_live = "STALE"
+    if not w_data.get("current_temp_f"):
+        weather_live = "MISSING"
 
 # Check for Red Flags
 if not latest_status_json or not latest_forecast_md or not DATA.exists():
@@ -154,6 +167,11 @@ if system_status != "RED":
         status_color = "warning"
         action_needed = "Calibration data missing. Run the daily workflow."
     
+    if weather_live != "YES":
+        system_status = "YELLOW"
+        status_color = "warning"
+        action_needed = "Weather ingestion is stale or missing. Check scripts/check_weather_ingestion.sh"
+
     if "WARNING" in log_content:
         system_status = "YELLOW"
         status_color = "warning"
@@ -204,7 +222,7 @@ if forecast_val == "Unknown" or top_bin == "Unknown":
         top_bin = t_bin
 
 # Display Summary Cards
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 with col1:
     if system_status == "GREEN":
         st.success(f"### SYSTEM STATUS: {system_status}")
@@ -220,6 +238,12 @@ with col2:
         st.caption(f"Source: {latest_forecast_md.name}")
 
 with col3:
+    st.metric("WEATHER INGESTION", weather_live)
+    if w_data:
+        st.write(f"**Temp:** {w_data.get('current_temp_f', 'N/A')}°F")
+        st.write(f"**Max Today:** {w_data.get('observed_max_so_far_f', 'N/A')}°F")
+
+with col4:
     st.metric("KALSHI MARKET", kalshi_status)
     last_upd = "N/A"
     if latest_kalshi_json.exists():
@@ -240,8 +264,8 @@ with st.expander("❓ Quick System FAQ", expanded=True):
 st.divider()
 
 # Main Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-    "Status", "Forecast", "Kalshi Market Data", "Model Comparison", "Calibration", "Logs", "Files", "Operator Notes"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    "Status", "Forecast", "Weather", "Kalshi Market Data", "Model Comparison", "Calibration", "Logs", "Files", "Operator Notes"
 ])
 
 with tab1:
@@ -264,7 +288,32 @@ with tab2:
         st.warning("No forecast reports found. Run `bash scripts/run_kmia_daily_workflow.sh` to generate one.")
 
 with tab3:
-    st.header("Kalshi Market Data")
+    st.header("Weather Ingestion Status (KMIA)")
+    st.info("ℹ️ **READ-ONLY NWS INGESTION — NO REAL TRADING EXECUTION**")
+    
+    if latest_weather_json.exists():
+        w_data = load_json(latest_weather_json)
+        col_w1, col_w2 = st.columns(2)
+        with col_w1:
+            st.metric("Live KMIA Data", weather_live)
+            st.write(f"**Current Temp:** {w_data.get('current_temp_f', 'N/A')}°F")
+            st.write(f"**Observed Max Today:** {w_data.get('observed_max_so_far_f', 'N/A')}°F")
+            st.write(f"**Forecast High:** {w_data.get('forecast_high_f', 'N/A')}°F")
+        with col_w2:
+            st.write(f"**Latest Observation Time:** {w_data.get('latest_observation_time', 'N/A')}")
+            st.write(f"**Historical Records:** {w_data.get('history_record_count', 0)}")
+            st.write(f"**Climatology Active:** {'YES' if w_data.get('climatology_active') else 'NO'}")
+            st.write(f"**Data Stale:** {'YES' if w_data.get('stale_data') else 'NO'}")
+        
+        if w_data.get("warnings"):
+            st.warning("⚠️ **Ingestion Warnings:**")
+            for warn in w_data["warnings"]:
+                st.write(f"- {warn}")
+    else:
+        st.warning("No weather ingestion status found.")
+        st.info("Run: `bash scripts/check_weather_ingestion.sh` to update.")
+
+with tab4:
     st.warning("ℹ️ **READ-ONLY PUBLIC MARKET DATA — NO REAL TRADING EXECUTION**")
     
     if latest_kalshi_json.exists():

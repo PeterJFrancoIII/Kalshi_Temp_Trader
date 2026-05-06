@@ -1,0 +1,18 @@
+{
+  "fetched_at_utc": "2026-05-06T06:33:35.849692+00:00",
+  "station": "KMIA",
+  "source": "NWS/public",
+  "current_temp_f": null,
+  "observed_max_so_far_f": null,
+  "forecast_high_f": null,
+  "latest_observation_time": null,
+  "stale_data": true,
+  "history_record_count": 27879,
+  "climatology_active": true,
+  "warnings": [
+    "No observations found via JSON or HTML."
+  ],
+  "safety": {
+    "no_real_trading": true
+  }
+}
