@@ -10,6 +10,6 @@ roles:
   ui_agent: Focuses on the web console.
 coordination:
   - shared_types.py can only be modified by the project admin or architect.
-  - All agents must verify safety rules before pushing changes.
+  - All agents must verify safety rules and sync status (scripts/check_sync_status.sh) before pushing changes.
 status: active
 priority: 2

@@ -184,6 +184,11 @@ from test_kalshi_public_market_data import (
     test_kalshi_updater_logic
 )
 
+from test_sync_tooling import (
+    test_scripts_contain_safety_disclaimer,
+    test_check_sync_status_runs
+)
+
 
 # Helper to run unittest classes in this runner
 def run_unittest_class(cls):
@@ -285,6 +290,8 @@ tests = [
     test_kalshi_client_no_auth_references,
     test_kalshi_client_mocked_discovery,
     test_kalshi_updater_logic,
+    test_scripts_contain_safety_disclaimer,
+    test_check_sync_status_runs,
     lambda: run_unittest_class(TestRulesModelV2),
     lambda: run_unittest_class(TestGenerateAggregateReport),
     lambda: run_unittest_class(TestOperationalScripts),

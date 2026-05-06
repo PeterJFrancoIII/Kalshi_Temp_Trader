@@ -3,20 +3,25 @@
 This document outlines the synchronization process for the Kalshi Temp Trader project.
 
 ## Important Disclaimer
+
 **NO REAL TRADING EXECUTION**
 This project is currently in RESEARCH_MVP status. Real-money trading is strictly forbidden.
 
 ## Source of Truth
+
 The **GitHub `main` branch** is the absolute source of truth for all code and configuration.
 
 ## Environment Paths
+
 - **Mac Development:** `/Users/computer/Desktop/App Development/Kalshi`
 - **Server Deployment:** `/opt/kmia-kalshi`
 
 ## Normal Workflow
 
 ### 1. Mac: Before Editing
+
 Always sync your local Mac environment with GitHub before making changes.
+
 ```bash
 cd "/Users/computer/Desktop/App Development/Kalshi"
 git fetch origin
@@ -25,7 +30,9 @@ git pull --ff-only origin main
 ```
 
 ### 2. Mac: After Editing
+
 Push changes to GitHub once they are verified.
+
 ```bash
 git status
 git diff --stat
@@ -35,7 +42,9 @@ git push origin main
 ```
 
 ### 3. Server: Update
+
 Deploy the latest changes from GitHub to the production server.
+
 ```bash
 ssh peterjfrancoiii@192.168.0.126
 cd /opt/kmia-kalshi
@@ -50,14 +59,17 @@ curl -I http://127.0.0.1:8501
 ```
 
 ## Verify Sync
+
 To ensure all environments are aligned, verify the commit hashes match.
 
 **Mac:**
+
 ```bash
 git rev-parse HEAD
 ```
 
 **Server:**
+
 ```bash
 git rev-parse HEAD
 ```
@@ -65,6 +77,7 @@ git rev-parse HEAD
 The hashes must match exactly.
 
 ## Warnings & Constraints
+
 - **Do Not Force Push:** Never use `git push --force`.
 - **Clean State Required:** Do not pull updates if you have uncommitted local changes.
 - **No Rsync:** Do not use `rsync` for normal workflows; it is reserved for emergency recovery only.
