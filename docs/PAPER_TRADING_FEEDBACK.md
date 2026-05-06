@@ -12,6 +12,7 @@ It creates simulated paper signals, records simulated paper trades, and settles 
 - **WIN**: The simulated trade matched the actual temperature bin.
 - **LOSS**: The simulated trade did not match the actual temperature bin.
 - **PnL**: Simulated profit or loss only.
+- **PERFORMANCE SUMMARY**: JSON file at `backend/data/processed/paper_trading/latest_paper_trading_performance.json`.
 
 ## What to check
 

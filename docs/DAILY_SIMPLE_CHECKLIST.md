@@ -26,6 +26,9 @@ bash scripts/health_summary.sh
 bash scripts/run_tests.sh
 bash scripts/generate_daily_status.sh
 bash scripts/update_kalshi_market_data.sh
+bash scripts/generate_paper_signal.sh
+bash scripts/record_paper_trade.sh
+bash scripts/settle_paper_trades.sh
 ```
 
 ## 4. Git sync check

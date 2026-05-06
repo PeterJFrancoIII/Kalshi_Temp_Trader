@@ -1,9 +1,38 @@
 {
-  "generated_at_utc": "2026-05-06T06:41:30.192767+00:00",
-  "forecast_source": "kmia_forecast_2026-05-04_rules_v2_climatology_161356.md",
+  "generated_at_utc": "2026-05-06T07:10:43.787702+00:00",
+  "forecast_source": "kmia_forecast_mock_rules_v2_climatology.md",
   "market_snapshot_source": "latest_kalshi_market_snapshot.json",
-  "signals": [],
-  "best_signal": null,
+  "signals": [
+    {
+      "market_ticker": "TEST-T90",
+      "market_title": "Will it be hot?",
+      "forecast_bin": ">=87",
+      "model_probability": 0.4,
+      "market_implied_probability": 0.09,
+      "edge": 0.31,
+      "expected_value": 0.3,
+      "paper_action": "PAPER BUY CANDIDATE",
+      "confidence": "high",
+      "yes_ask": 0.1,
+      "yes_bid": 0.08,
+      "last_price": null
+    }
+  ],
+  "best_signal": {
+    "market_ticker": "TEST-T90",
+    "market_title": "Will it be hot?",
+    "forecast_bin": ">=87",
+    "model_probability": 0.4,
+    "market_implied_probability": 0.09,
+    "edge": 0.31,
+    "expected_value": 0.3,
+    "paper_action": "PAPER BUY CANDIDATE",
+    "confidence": "high",
+    "yes_ask": 0.1,
+    "yes_bid": 0.08,
+    "last_price": null
+  },
+  "warnings": [],
   "safety": {
     "no_real_trading": true,
     "disclaimer": "NO REAL TRADING EXECUTION - PAPER ONLY"
