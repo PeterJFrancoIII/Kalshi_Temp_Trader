@@ -26,9 +26,9 @@ See [What The Colors Mean](WHAT_THE_COLORS_MEAN.md) for more details.
 
 ### Git Tree Status
 
-* **Clean**: No changes.
-* **Runtime outputs changed**: Normal operation. Generated data files have been created or modified. Does not affect health color.
-* **Dirty source changes**: Uncommitted edits exist to source files. Sets status to YELLOW to flag for review.
+* **Clean**: no changes
+* **Runtime outputs changed**: normal generated files changed
+* **Dirty source changes**: code/docs/config changed and needs review
 
 See [What The Colors Mean](WHAT_THE_COLORS_MEAN.md) for more details.
 

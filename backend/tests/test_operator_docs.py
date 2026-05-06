@@ -18,6 +18,24 @@ class TestOperatorDocs(unittest.TestCase):
         self.assertIn("kmia-web-console.service", content)
         self.assertIn("health_summary.sh", content)
         self.assertIn("check_sync_status.sh", content)
+        self.assertTrue("Runtime outputs changed" in content or "Git Hygiene" in content)
+
+    def test_git_hygiene_doc_content(self):
+        """Verify the content of docs/GIT_HYGIENE.md."""
+        path = os.path.join(os.getcwd(), "docs", "GIT_HYGIENE.md")
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                content = f.read()
+            self.assertIn("NO REAL TRADING EXECUTION", content)
+            self.assertIn("Runtime Output Files", content)
+
+    def test_health_checks_doc_content(self):
+        """Verify the content of docs/HEALTH_CHECKS.md."""
+        path = os.path.join(os.getcwd(), "docs", "HEALTH_CHECKS.md")
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                content = f.read()
+            self.assertIn("Runtime outputs changed", content)
 
     def test_paper_trading_doc_exists(self):
         """Verify that docs/PAPER_TRADING_FEEDBACK.md exists."""

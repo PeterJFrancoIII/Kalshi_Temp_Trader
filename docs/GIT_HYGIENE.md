@@ -36,7 +36,7 @@ Generated runtime and test outputs are **NOT** committed. These include:
 
 ## Runtime Output Files
 
-The bot creates reports, logs, market snapshots, paper signals, and paper ledgers while it runs.
+The bot creates reports, logs, market snapshots, paper signals, paper ledgers, and status files while it runs.
 
 These files are generated automatically.
 
@@ -45,11 +45,13 @@ They are not source code.
 They should not be committed to Git unless intentionally needed.
 
 If health says:
+
 Git Tree: Runtime outputs changed
 
 That is normal.
 
 If health says:
+
 Git Tree: Dirty source changes
 
 That needs attention.
