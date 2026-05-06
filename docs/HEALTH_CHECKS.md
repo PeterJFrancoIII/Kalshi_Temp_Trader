@@ -1,33 +1,33 @@
 # Health Checks
 
-This document describes how to monitor the health of the KMIA Kalshi bot.
+This guide explains how to check the bot's health.
 
-## NO REAL TRADING EXECUTION
+## Safety
 
-This project is for **DRY-RUN / PAPER EVALUATION ONLY**. No real trading execution is performed.
+**DRY-RUN / PAPER EVALUATION ONLY.**
+
+**NO REAL TRADING EXECUTION.**
 
 ## Health Summary Script
 
-The health summary script provides a quick overview of the system status.
-
-### How to Run
+Run this script to see if the system is OK:
 
 ```bash
 bash scripts/health_summary.sh
 ```
 
-### Status Indicators
+## What the results mean
 
-The script outputs a color-coded status at the end:
+* **GREEN**: Working perfectly.
+* **YELLOW**: Bot is working, but some non-critical data is missing.
+* **RED**: Critical failure. Console might be down.
 
-- **GREEN**: Everything is running correctly. The web console is active, HTTP 200 is returned, and all required data files (status, forecast, snapshots) exist and are populated.
-- **YELLOW**: The system is partially functional. The web console is active, but some non-critical data might be missing (e.g., zero markets found in the latest snapshot, or missing calibration files).
-- **RED**: Critical failure. The web console is inactive, HTTP checks failed, or essential files like the daily status or forecast report are missing.
+See [What The Colors Mean](WHAT_THE_COLORS_MEAN.md) for more details.
 
-### Read-Only Nature
+## Read-Only
 
-The health check script is strictly **read-only**. It does not modify any files, restart services, or execute any trading orders.
+This script only reads data. It does not change anything or place orders.
 
 ## Troubleshooting
 
-For common issues, see the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).
+See the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).

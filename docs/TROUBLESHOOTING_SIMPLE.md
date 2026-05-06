@@ -2,7 +2,7 @@
 
 ## If the console does not open
 
-Run:
+Run these:
 
 ```bash
 sudo systemctl status kmia-web-console.service --no-pager
@@ -10,76 +10,48 @@ curl -I http://127.0.0.1:8501
 sudo systemctl restart kmia-web-console.service
 ```
 
-## If the dashboard is YELLOW
+## If the dashboard is YELLOW or RED
 
-**Meaning:**
-The bot is mostly working, but something needs attention.
-Most common reason:
-Kalshi market discovery found 0 markets.
+Check the meaning here: [What The Colors Mean](WHAT_THE_COLORS_MEAN.md).
 
-Run:
+Run these:
 
 ```bash
 bash scripts/health_summary.sh
 bash scripts/update_kalshi_market_data.sh
-```
-
-## If the dashboard is RED
-
-**Meaning:**
-Something important is broken.
-
-Run:
-
-```bash
 bash scripts/run_tests.sh
-bash scripts/generate_daily_status.sh
-bash scripts/health_summary.sh
 ```
 
 ## If Git sync is broken
 
-Run:
-
-```bash
-bash scripts/check_sync_status.sh
-```
+Run: `bash scripts/check_sync_status.sh`
 
 **Warning:**
 
 * Do not force push.
-* Do not use rsync unless emergency recovery.
+* Do not use rsync.
 
-## If the server and Mac do not match
+## If Mac and server do not match
 
-On Mac:
+Both should show the same code hash.
 
-```bash
-git rev-parse HEAD
-```
-
-On server:
-
-```bash
-git rev-parse HEAD
-```
-
-They should match.
+Mac: `git rev-parse HEAD`
+Server: `git rev-parse HEAD`
 
 ## If tests fail
 
-* Do not deploy new changes.
+* Do not deploy.
 * Read the first FAIL line.
-* Fix that first.
+* Fix it.
 
 ## Daily Routine
 
-For daily routine checks, refer to the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
+See the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
 
 ## Safety
 
-**This project is DRY-RUN / PAPER EVALUATION ONLY.**
+**DRY-RUN / PAPER EVALUATION ONLY.**
 
 **NO REAL TRADING EXECUTION.**
 
-The bot must not place real Kalshi orders.
+The bot must not place real orders.
