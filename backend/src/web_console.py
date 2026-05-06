@@ -201,33 +201,34 @@ with tab2:
         st.warning("No forecast reports found. Run `bash scripts/run_kmia_daily_workflow.sh` to generate one.")
 
 with tab3:
-    st.header("Latest Model Comparison")
-    content = load_text(latest_comparison_md)
-    if content:
-        st.markdown(content)
-    else:
-        st.info("No comparison reports available yet.")
-
-with tab4:
-    st.header("Aggregate Calibration")
-    if agg_cal_json.exists():
-        cal_data = load_json(agg_cal_json)
-        st.json(cal_data)
-    elif agg_cal_md.exists():
-        content = load_text(agg_cal_md)
-        st.markdown(content)
-    else:
-        st.info("Aggregate calibration data not found.")
-
-with tab5:
     st.header("Kalshi Market Data")
     st.warning("ℹ️ **READ-ONLY PUBLIC MARKET DATA — NO REAL TRADING EXECUTION**")
     
     if latest_kalshi_json.exists():
         market_data = load_json(latest_kalshi_json)
         st.write(f"**Latest Snapshot:** {market_data.get('fetched_at_utc', 'N/A')}")
-        st.write(f"**Markets Found:** {market_data.get('markets_found', 0)}")
         
+        found_count = market_data.get("markets_found", 0)
+        if found_count == 0:
+            st.warning("⚠️ **YELLOW: No Miami/KMIA Kalshi temperature market selected yet.**")
+            st.info("To fix this, add a known Kalshi market ticker or series ticker to `backend/config/kalshi_market_discovery.json`.")
+            st.markdown("[View Setup Guide](file:///Users/computer/Desktop/App%20Development/Kalshi/docs/KALSHI_MANUAL_TICKER_SETUP.md)")
+        else:
+            st.success(f"✅ {found_count} markets selected.")
+
+        # Manual Tracking Info
+        with st.expander("Tracking Metadata", expanded=False):
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.write("**Known Tickers Used:**", market_data.get("known_market_tickers_used", []))
+                st.write("**Known Series Used:**", market_data.get("known_series_tickers_used", []))
+            with col_b:
+                st.write("**Missing Tickers:**", market_data.get("missing_known_tickers", []))
+                st.write("**Missing Series:**", market_data.get("missing_known_series", []))
+            
+            st.write("**Manual Matches:**", len(market_data.get("manual_matches", [])))
+            st.write("**Next Action:**", market_data.get("next_action", "N/A"))
+
         markets = market_data.get("markets", [])
         if markets:
             display_data = []
@@ -242,11 +243,30 @@ with tab5:
                 })
             st.dataframe(pd.DataFrame(display_data))
         else:
-            st.info("No temperature markets found in the latest snapshot.")
+            st.info("No temperature markets currently tracked.")
     else:
         st.warning("No Kalshi market snapshots found.")
         st.info("Run the following command to update market data:")
         st.code("bash scripts/update_kalshi_market_data.sh")
+
+with tab4:
+    st.header("Latest Model Comparison")
+    content = load_text(latest_comparison_md)
+    if content:
+        st.markdown(content)
+    else:
+        st.info("No comparison reports available yet.")
+
+with tab5:
+    st.header("Aggregate Calibration")
+    if agg_cal_json.exists():
+        cal_data = load_json(agg_cal_json)
+        st.json(cal_data)
+    elif agg_cal_md.exists():
+        content = load_text(agg_cal_md)
+        st.markdown(content)
+    else:
+        st.info("Aggregate calibration data not found.")
 
 with tab6:
     st.header("Latest Workflow Logs")

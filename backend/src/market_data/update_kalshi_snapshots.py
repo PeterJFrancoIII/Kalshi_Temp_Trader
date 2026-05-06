@@ -38,67 +38,102 @@ def main():
     print(f"Discovering markets using terms: {search_terms}...")
     
     try:
-        # Discovery Result
+        # 1. Manual Market Ticker Lookup
+        manual_matches = []
+        missing_known_tickers = []
+        if known_markets:
+            print(f"Checking {len(known_markets)} known market tickers...")
+            for ticker in known_markets:
+                try:
+                    m_resp = client.get_market(ticker)
+                    m = m_resp.get("market")
+                    if m:
+                        manual_matches.append(m)
+                        print(f"  Found known market: {ticker}")
+                    else:
+                        missing_known_tickers.append(ticker)
+                except Exception as e:
+                    print(f"  Warning: Could not fetch known market {ticker}: {e}")
+                    missing_known_tickers.append(ticker)
+
+        # 2. Manual Series Lookup
+        missing_known_series = []
+        if known_series:
+            print(f"Checking {len(known_series)} known series tickers...")
+            for series in known_series:
+                try:
+                    s_resp = client.get_markets_for_series(series)
+                    s_markets = s_resp.get("markets", [])
+                    if s_markets:
+                        manual_matches.extend(s_markets)
+                        print(f"  Found {len(s_markets)} markets for series: {series}")
+                    else:
+                        missing_known_series.append(series)
+                except Exception as e:
+                    print(f"  Warning: Could not fetch series {series}: {e}")
+                    missing_known_series.append(series)
+
+        # 3. Auto-Discovery Fallback
         discovery_result = client.discover_temperature_markets(search_terms)
         candidates = discovery_result.get("candidate_markets", [])
         attempts = discovery_result.get("endpoint_attempts", [])
         raw_count = discovery_result.get("total_raw_markets_seen", 0)
         
-        print(f"Discovery complete. Raw markets seen: {raw_count}")
-        for att in attempts:
-            print(f"  Endpoint: {att.get('endpoint')} -> Status: {att.get('status')} ({att.get('count', 0)} items)")
-            if att.get("error"):
-                print(f"    Error: {att.get('error')}")
-
-        # Selection Logic
-        selected = []
+        print(f"Auto-discovery complete. Raw markets seen: {raw_count}")
+        
+        # 4. Refined Auto-Selection
+        auto_selected = []
         for m in candidates:
-            ticker = m.get("ticker", "").upper()
-            series = m.get("series_ticker", "").upper()
+            m_ticker = m.get("ticker", "").upper()
+            m_series = m.get("series_ticker", "").upper()
             title = m.get("title", "")
             subtitle = m.get("subtitle", "")
-            text = (f"{title} {subtitle} {ticker} {series}").lower()
+            text = (f"{title} {subtitle} {m_ticker} {m_series}").lower()
             
-            # 1. Check known tickers first
-            if ticker in [t.upper() for t in known_markets] or series in [s.upper() for s in known_series]:
-                selected.append(m)
-                continue
-                
-            # 2. Score based on preferred terms
+            # Score based on preferred terms
             if all(pt.lower() in text for pt in preferred_terms):
-                selected.append(m)
+                auto_selected.append(m)
         
-        print(f"Candidate markets (matched any term): {len(candidates)}")
-        print(f"Selected Miami/KMIA temperature markets: {len(selected)}")
+        # Combine (deduplicate by ticker)
+        all_selected_map = {m.get("ticker"): m for m in auto_selected}
+        for m in manual_matches:
+            all_selected_map[m.get("ticker")] = m
+            
+        final_selected = list(all_selected_map.values())
         
-        if not selected and candidates:
-            print("\nPROVING NO MATCHES: Reviewing candidates that matched broad terms but failed selection:")
-            for m in candidates[:10]: # Show top 10
-                print(f"  - Ticker: {m.get('ticker')} | Title: {m.get('title')} | Sub: {m.get('subtitle')}")
-            if len(candidates) > 10:
-                print(f"  ... and {len(candidates)-10} more.")
-
+        print(f"Candidate markets: {len(candidates)}")
+        print(f"Selected markets: {len(final_selected)} ({len(auto_selected)} auto, {len(manual_matches)} manual)")
+        
         next_action = "None. System is healthy."
         warnings = []
-        if not selected:
+        if not final_selected:
             warnings.append("No matching Miami/KMIA temperature market found.")
-            next_action = "Review Kalshi market naming manually or add a known series/ticker to backend/config/kalshi_market_discovery.json."
+            next_action = "Auto-discovery found no Miami/KMIA temperature market. Add a known ticker or series to backend/config/kalshi_market_discovery.json."
+        
+        if missing_known_tickers:
+            warnings.append(f"Missing known market tickers: {missing_known_tickers}")
+        if missing_known_series:
+            warnings.append(f"Missing known series tickers: {missing_known_series}")
+            
+        if final_selected and (known_markets or known_series):
+            next_action = "Known ticker tracking is active."
 
         snapshot = {
             "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
             "mode": "read_only_public_market_data",
             "base_url": client.base_url,
             "search_terms_used": search_terms,
+            "known_market_tickers_used": known_markets,
+            "known_series_tickers_used": known_series,
+            "manual_matches": manual_matches,
+            "missing_known_tickers": missing_known_tickers,
+            "missing_known_series": missing_known_series,
             "endpoint_attempts": attempts,
             "total_raw_markets_seen": raw_count,
             "candidate_markets_count": len(candidates),
-            "candidate_markets_summary": [
-                {"ticker": m.get("ticker"), "title": m.get("title"), "subtitle": m.get("subtitle")}
-                for m in candidates
-            ],
-            "selected_temperature_markets": selected,
-            "markets_found": len(selected), # Compatibility
-            "markets": selected,           # Compatibility
+            "selected_temperature_markets": final_selected,
+            "markets_found": len(final_selected),
+            "markets": final_selected,
             "warnings": warnings,
             "next_action": next_action,
             "safety": {

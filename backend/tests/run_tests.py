@@ -184,7 +184,9 @@ from test_kalshi_public_market_data import (
     test_kalshi_updater_logic,
     test_kalshi_config_exists,
     test_kalshi_client_broad_discovery,
-    test_kalshi_snapshot_safety_fields
+    test_kalshi_snapshot_safety_fields,
+    test_kalshi_manual_ticker_lookup,
+    test_kalshi_manual_series_lookup
 )
 
 from test_sync_tooling import (
@@ -304,6 +306,8 @@ tests = [
     test_kalshi_config_exists,
     test_kalshi_client_broad_discovery,
     test_kalshi_snapshot_safety_fields,
+    test_kalshi_manual_ticker_lookup,
+    test_kalshi_manual_series_lookup,
     test_scripts_contain_safety_disclaimer,
     test_check_sync_status_runs,
     test_health_summary_script_exists,

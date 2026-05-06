@@ -25,6 +25,10 @@ class KalshiPublicClient:
         response.raise_for_status()
         return response.json()
 
+    def get_market(self, market_ticker: str) -> Dict[str, Any]:
+        """Fetch details for a specific market ticker."""
+        return self._get(f"/markets/{market_ticker}")
+
     def get_markets_for_series(self, series_ticker: str, status: str = "open") -> Dict[str, Any]:
         """Fetch markets for a specific series (e.g., KXKX)."""
         return self._get("/markets", params={"series_ticker": series_ticker, "status": status})

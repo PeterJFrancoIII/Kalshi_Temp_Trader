@@ -135,6 +135,33 @@ def test_kalshi_snapshot_safety_fields():
     # This is more of a placeholder to ensure we are thinking about these fields
     assert snapshot["safety"]["no_authentication"] is True
 
+def test_kalshi_manual_ticker_lookup():
+    """Verify that a known ticker can be fetched directly."""
+    mock_market_resp = MagicMock()
+    mock_market_resp.json.return_value = {
+        "market": {"ticker": "KNOWN-TICKER", "title": "Manual Market"}
+    }
+    
+    with patch("requests.get", return_value=mock_market_resp):
+        client = KalshiPublicClient()
+        result = client.get_market("KNOWN-TICKER")
+    
+    assert result["market"]["ticker"] == "KNOWN-TICKER"
+
+def test_kalshi_manual_series_lookup():
+    """Verify that a known series can be fetched directly."""
+    mock_series_resp = MagicMock()
+    mock_series_resp.json.return_value = {
+        "markets": [{"ticker": "SERIES-M1", "title": "Series Market"}]
+    }
+    
+    with patch("requests.get", return_value=mock_series_resp):
+        client = KalshiPublicClient()
+        result = client.get_markets_for_series("KXKX")
+    
+    assert len(result["markets"]) == 1
+    assert result["markets"][0]["ticker"] == "SERIES-M1"
+
 def test_kalshi_updater_logic():
     """
     Verify that the updater correctly references the market data module.
