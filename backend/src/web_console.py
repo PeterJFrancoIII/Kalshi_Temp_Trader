@@ -235,32 +235,58 @@ if __name__ == "__main__":
             last_upd = datetime.fromtimestamp(latest_kalshi_json.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
         st.write(f"**Last Updated:** {last_upd}")
 
-    # Paper Signal Summary
+    # Paper Loop Data
     latest_paper_json = PAPER_DIR / "latest_paper_signal.json"
     p_data = load_json(latest_paper_json) if latest_paper_json.exists() else {}
+    
+    LEDGER_FILE = PAPER_DIR / "paper_trade_ledger.jsonl"
+    open_paper_trades = 0
+    if LEDGER_FILE.exists():
+        with open(LEDGER_FILE, "r") as f:
+            open_paper_trades = sum(1 for line in f if line.strip())
 
-    if p_data:
-        st.divider()
-        st.subheader("🎯 Latest Paper Signal")
-        best = p_data.get("best_signal")
-        if isinstance(best, dict):
-            pcol1, pcol2, pcol3, pcol4 = st.columns(4)
-            with pcol1:
-                st.write(f"**Action:** `{best.get('paper_action', 'Unknown')}`")
-                st.write(f"**Confidence:** {str(best.get('confidence', 'Unknown')).upper()}")
-            with pcol2:
-                st.write(f"**Ticker:** `{best.get('market_ticker', 'Unknown')}`")
-                st.write(f"**Bin:** {best.get('forecast_bin', 'Unknown')}")
-            with pcol3:
-                st.write(f"**Model Prob:** {best.get('model_probability', 0):.1%}")
-                st.write(f"**Market Prob:** {best.get('market_implied_probability', 0):.1%}" if best.get('market_implied_probability') is not None else "**Market Prob:** N/A")
-            with pcol4:
-                st.write(f"**Edge:** {best.get('edge', 0):+.1%}" if best.get('edge') is not None else "**Edge:** N/A")
-                st.write(f"**EV ($1):** {best.get('expected_value', 0):+.2f}" if best.get('expected_value') is not None else "**EV:** N/A")
-        elif best:
-            st.warning(f"Best signal data is malformed: {best}")
+    PERF_FILE = PAPER_DIR / "latest_paper_trading_performance.json"
+    perf = load_json(PERF_FILE) if PERF_FILE.exists() else {}
+    pending_settlements = perf.get("pending_trades", 0)
+    settled_trades = perf.get("total_settled_trades", 0)
+    sim_pnl = perf.get("total_simulated_pnl", 0)
+
+    paper_loop_status = "Active" if p_data else "Missing Data"
+    
+    best_sig = p_data.get("best_signal")
+    if isinstance(best_sig, dict):
+        latest_signal_action = best_sig.get("paper_action", "Unknown")
+    else:
+        latest_signal_action = "Unknown"
+
+    if system_status != "GREEN":
+        next_action = "Check logs"
+    elif pending_settlements > 0:
+        next_action = "Wait for official KMIA settlement"
+    elif open_paper_trades == 0:
+        next_action = "Wait for next signal"
+    else:
+        next_action = "Wait for official KMIA settlement"
 
     st.divider()
+    st.subheader("🔄 Paper Loop Status")
+    
+    pl_col1, pl_col2, pl_col3, pl_col4 = st.columns(4)
+    with pl_col1:
+        st.metric("Paper Loop", paper_loop_status)
+        st.write(f"**Latest Signal:** `{latest_signal_action}`")
+    with pl_col2:
+        st.metric("Open Paper Trades", open_paper_trades)
+        st.write(f"**Pending Settlements:** {pending_settlements}")
+    with pl_col3:
+        st.metric("Settled Trades", settled_trades)
+        st.write(f"**Simulated PnL:** ${sim_pnl:.2f}")
+    with pl_col4:
+        st.metric("Next Action", "Pending" if pending_settlements > 0 else "Ready")
+        st.info(next_action)
+
+    st.divider()
+
 
     # Main Tabs
     tabs = st.tabs(["Status", "Forecast", "Weather", "Kalshi Market Data", "Paper Trading", "Logs", "Files", "Operator Notes"])
