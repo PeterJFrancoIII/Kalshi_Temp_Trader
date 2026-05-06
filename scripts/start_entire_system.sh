@@ -31,19 +31,22 @@ bash scripts/run_tests.sh
 echo "[3/10] Updating Kalshi Market Data..."
 bash scripts/update_kalshi_market_data.sh
 
-echo "[4/10] Generating Paper Signal..."
+echo "[4/11] Generating Paper Signal..."
 bash scripts/generate_paper_signal.sh
 
-echo "[5/10] Recording Paper Trade..."
+echo "[5/11] Recording Paper Trade..."
 bash scripts/record_paper_trade.sh
 
-echo "[6/10] Settling Paper Trades..."
+echo "[6/11] Settling Paper Trades..."
 bash scripts/settle_paper_trades.sh
 
-echo "[7/10] Generating Daily Status..."
+echo "[7/11] Generating Learning Summary..."
+bash scripts/generate_learning_summary.sh
+
+echo "[8/11] Generating Daily Status..."
 bash scripts/generate_daily_status.sh || true
 
-echo "[8/10] Restarting Web Console..."
+echo "[9/11] Restarting Web Console..."
 if systemctl is-active --quiet kmia-web-console.service; then
     sudo systemctl restart kmia-web-console.service
     echo "kmia-web-console.service restarted."
@@ -51,7 +54,7 @@ else
     echo "kmia-web-console.service not active or installed. Skipping restart."
 fi
 
-echo "[9/10] Enabling Timers..."
+echo "[10/11] Enabling Timers..."
 if [ -f "deploy/systemd/kmia-kalshi-market-data.timer" ]; then
     sudo systemctl enable --now kmia-kalshi-market-data.timer 2>/dev/null || echo "Needs sudo to enable kmia-kalshi-market-data.timer"
 fi

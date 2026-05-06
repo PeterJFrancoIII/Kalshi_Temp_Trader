@@ -19,6 +19,7 @@ CAL_DIR = DATA / "aggregate_calibration"
 KALSHI_DIR = DATA / "kalshi_market_snapshots"
 HISTORY_FILE = DATA / "history" / "kmia_daily_history.jsonl"
 PAPER_DIR = DATA / "paper_trading"
+LEARNING_DIR = DATA / "learning"
 
 def get_latest_file(directory, pattern):
     if not directory.exists():
@@ -285,11 +286,32 @@ if __name__ == "__main__":
         st.metric("Next Action", "Pending" if pending_settlements > 0 else "Ready")
         st.info(next_action)
 
+    # --- LEARNING SUMMARY ---
+    latest_learning_json = LEARNING_DIR / "latest_learning_summary.json"
+    l_data = load_json(latest_learning_json) if latest_learning_json.exists() else {}
+    
+    st.divider()
+    st.subheader("🎓 Learning Summary")
+    
+    l_col1, l_col2, l_col3, l_col4 = st.columns(4)
+    with l_col1:
+        st.metric("Learning Status", "Active" if l_data else "No Data")
+        st.write(f"**Trade Date:** {l_data.get('trade_date', 'N/A')}")
+    with l_col2:
+        st.metric("Win Rate", f"{l_data.get('win_rate', 0):.1%}")
+        st.write(f"**Settled Trades:** {l_data.get('settled_trades', 0)}")
+    with l_col3:
+        st.metric("Simulated PnL", f"${l_data.get('simulated_pnl', 0.0):.2f}")
+        st.write(f"**Model Lesson:** {l_data.get('model_lesson', 'Collecting more data...')}")
+    with l_col4:
+        st.metric("Next Action", "Monitor" if l_data else "Generate")
+        st.success(l_data.get('next_action', "Run generate_learning_summary.sh"))
+
     st.divider()
 
 
     # Main Tabs
-    tabs = st.tabs(["Status", "Forecast", "Weather", "Kalshi Market Data", "Paper Trading", "Logs", "Files", "Operator Notes"])
+    tabs = st.tabs(["Status", "Forecast", "Weather", "Kalshi Market Data", "Paper Trading", "Learning", "Logs", "Files", "Operator Notes"])
     
     with tabs[0]:
         st.header("Latest System Status")
@@ -375,6 +397,18 @@ if __name__ == "__main__":
                 }))
 
     with tabs[5]:
+        st.header("🎓 Paper Trading Learning Summary")
+        st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
+        if latest_learning_json.exists():
+            st.json(l_data)
+            st.write("### Model Lesson")
+            st.info(l_data.get("model_lesson", "No lesson yet."))
+            st.write("### Best Signal Evaluated")
+            st.json(l_data.get("best_signal", {}))
+        else:
+            st.info("No learning summary found. Run `bash scripts/generate_learning_summary.sh`.")
+
+    with tabs[6]:
         st.header("Latest Workflow Logs")
         if latest_log:
             st.code(load_text(latest_log)[-5000:], language="text")
