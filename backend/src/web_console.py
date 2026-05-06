@@ -252,6 +252,24 @@ if __name__ == "__main__":
             last_upd = datetime.fromtimestamp(latest_kalshi_json.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
         st.write(f"**Last Updated:** {last_upd}")
 
+    # --- PREDICTION QUALITY SUMMARY ---
+    pq_json = LEARNING_DIR / "latest_prediction_quality_report.json"
+    pq_data = load_json(pq_json) if pq_json.exists() else {}
+    
+    if pq_data:
+        st.divider()
+        st.subheader("🎯 Prediction Quality: " + pq_data.get("prediction_quality", "Unknown"))
+        pq_col1, pq_col2, pq_col3 = st.columns(3)
+        with pq_col1:
+            st.write(f"**Main Risk:** {pq_data.get('main_risk', 'None')}")
+        with pq_col2:
+            st.write(f"**Next Action:** {pq_data.get('next_action', 'N/A')}")
+        with pq_col3:
+            st.write(f"**Best Paper Signal:** `{pq_data.get('best_paper_signal', 'None')}`")
+        
+        if pq_data.get("data_quality_warnings"):
+            st.warning(" | ".join(pq_data["data_quality_warnings"]))
+
     # Paper Loop Data
     latest_paper_json = PAPER_DIR / "latest_paper_signal.json"
     p_data = load_json(latest_paper_json) if latest_paper_json.exists() else {}
@@ -342,7 +360,7 @@ if __name__ == "__main__":
 
 
     # Main Tabs
-    tabs = st.tabs(["Status", "Forecast", "Weather", "Live NWS / KMIA Data", "Kalshi Market Data", "Paper Trading", "Learning", "Logs", "Files", "Operator Notes"])
+    tabs = st.tabs(["Status", "Forecast", "Weather", "Live NWS / KMIA Data", "Kalshi Market Data", "Paper Trading", "Learning", "Prediction Quality", "Logs", "Files", "Operator Notes"])
     
     with tabs[0]:
         st.header("Latest System Status")
@@ -387,7 +405,7 @@ if __name__ == "__main__":
         if latest_kalshi_json.exists():
             st.json(load_json(latest_kalshi_json))
 
-    with tabs[4]:
+    with tabs[5]:
         st.header("Paper Trading Performance")
         st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
         PERF_FILE = PAPER_DIR / "latest_paper_trading_performance.json"
@@ -448,7 +466,7 @@ if __name__ == "__main__":
                     "expected_value": "{:+.2f}"
                 }))
 
-    with tabs[5]:
+    with tabs[6]:
         st.header("🎓 Paper Trading Learning Summary")
         st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
         if latest_learning_json.exists():
@@ -460,12 +478,30 @@ if __name__ == "__main__":
         else:
             st.info("No learning summary found. Run `bash scripts/generate_learning_summary.sh`.")
 
-    with tabs[6]:
+    with tabs[7]:
+        st.header("🎯 Prediction Quality Report")
+        st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
+        
+        pq_json = LEARNING_DIR / "latest_prediction_quality_report.json"
+        if pq_json.exists():
+            pq_data = load_json(pq_json)
+            st.json(pq_data)
+            
+            trade_date = pq_data.get("trade_date")
+            if trade_date:
+                md_path = LEARNING_DIR / f"prediction_quality_report_{trade_date}.md"
+                if md_path.exists():
+                    st.divider()
+                    st.markdown(load_text(md_path))
+        else:
+            st.info("No prediction quality report found. Run `bash scripts/generate_prediction_quality_report.sh`.")
+
+    with tabs[8]:
         st.header("Latest Workflow Logs")
         if latest_log:
             st.code(load_text(latest_log)[-5000:], language="text")
 
-    with tabs[7]:
+    with tabs[9]:
         st.header("Discovered Files")
         file_info = []
         for d in [STATUS_DIR, REPORTS_DIR, LOGS_DIR, CAL_DIR, KALSHI_DIR, PAPER_DIR]:
@@ -476,7 +512,7 @@ if __name__ == "__main__":
         if file_info:
             st.table(pd.DataFrame(file_info))
 
-    with tabs[8]:
+    with tabs[10]:
         st.header("Operator Notes")
         st.write("""
         ### Daily Workflow
