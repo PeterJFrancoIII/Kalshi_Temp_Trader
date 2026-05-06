@@ -209,7 +209,6 @@ from test_weather_ingestion import (
 
 from test_paper_signal_generator import (
     test_parse_forecast_bins,
-    test_map_market_to_bin,
     test_generate_signal_logic
 )
 
@@ -247,6 +246,9 @@ from test_nws_live_client import (
     test_stale_data_detection,
     test_missing_fields_no_crash
 )
+
+from test_kalshi_contract_mapper import TestKalshiContractMapper
+from test_paper_signal_enhanced import TestPaperSignalEnhanced
 
 
 # Helper to run unittest classes in this runner
@@ -362,7 +364,6 @@ tests = [
     test_observed_max_so_far,
     test_history_record_count,
     test_parse_forecast_bins,
-    test_map_market_to_bin,
     test_generate_signal_logic,
     test_record_paper_trade_logic,
     test_scripts_contain_safety_disclaimer,
@@ -393,7 +394,9 @@ tests = [
     test_date_time_formatting,
     test_build_live_nws_snapshot_enhanced,
     test_stale_data_detection,
-    test_missing_fields_no_crash
+    test_missing_fields_no_crash,
+    lambda: run_unittest_class(TestKalshiContractMapper),
+    lambda: run_unittest_class(TestPaperSignalEnhanced)
 ]
 
 

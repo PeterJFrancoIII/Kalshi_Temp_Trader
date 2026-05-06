@@ -479,7 +479,51 @@ if __name__ == "__main__":
                     df_settle = pd.DataFrame(settlements)
                     # Reorder for display
                     s_cols = ["trade_date", "market_ticker", "actual_max_temp_f", "actual_bin", "result", "simulated_pnl"]
-                    st.dataframe(df_settle[s_cols].iloc[::-1])
+                    existing_s_cols = [c for c in s_cols if c in df_settle.columns]
+                    st.dataframe(df_settle[existing_s_cols].iloc[::-1], use_container_width=True, hide_index=True)
+
+            st.divider()
+            st.subheader("Active Kalshi Contract Forecasts")
+            st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
+            
+            PAPER_DIR = DATA / "paper_trading"
+            latest_signal_json = PAPER_DIR / "latest_paper_signal.json"
+            
+            if latest_signal_json.exists():
+                s_data = load_json(latest_signal_json)
+                signals = s_data.get("signals", [])
+                if signals:
+                    df_sig = pd.DataFrame(signals)
+                    # Map columns
+                    col_map_sig = {
+                        "market_ticker": "Ticker",
+                        "market_title": "Contract",
+                        "status": "Status",
+                        "threshold_f": "Threshold",
+                        "condition_type": "Condition",
+                        "model_probability": "Model %",
+                        "market_probability": "Market %",
+                        "edge": "Edge",
+                        "time_to_close_minutes": "Time to Close",
+                        "speed_to_roi_score": "Speed-to-ROI",
+                        "paper_action": "Paper Action"
+                    }
+                    
+                    # Format for display
+                    df_display_sig = df_sig.copy()
+                    df_display_sig["model_probability"] = df_display_sig["model_probability"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
+                    df_display_sig["market_probability"] = df_display_sig["market_probability"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
+                    df_display_sig["edge"] = df_display_sig["edge"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
+                    
+                    # Ensure all columns exist
+                    existing_cols_sig = [c for c in col_map_sig.keys() if c in df_display_sig.columns]
+                    df_display_final = df_display_sig[existing_cols_sig].rename(columns=col_map_sig)
+                    
+                    st.dataframe(df_display_final, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No active contract mappings found in the latest signal report.")
+            else:
+                st.warning("No paper signal file found. Run `bash scripts/generate_paper_signal.sh`.")
         else:
             st.info("No performance data available. Run `bash scripts/settle_paper_trades.sh`.")
 

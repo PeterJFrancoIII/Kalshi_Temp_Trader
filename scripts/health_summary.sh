@@ -18,12 +18,20 @@ echo "===================================================="
 # 1. Git Info
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "N/A")
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "N/A")
-GIT_CLEAN=$(git status --porcelain 2>/dev/null)
-if [[ -z "$GIT_CLEAN" ]]; then
+GIT_STATUS_FULL=$(git status --porcelain 2>/dev/null)
+if [[ -z "$GIT_STATUS_FULL" ]]; then
     GIT_TREE="Clean"
 else
-    # Check if dirty ONLY because of runtime outputs
-    NON_RUNTIME_DIRTY=$(echo "$GIT_CLEAN" | grep -v "backend/data/processed/" | grep -v "backend/tests/temp/" || true)
+    # Check if dirty ONLY because of runtime outputs (even if ignored, they might show up if tracked)
+    # We grep -v for everything we listed in .gitignore as generated
+    NON_RUNTIME_DIRTY=$(echo "$GIT_STATUS_FULL" | \
+        grep -v "backend/data/processed/" | \
+        grep -v "backend/tests/temp/" | \
+        grep -v "backend/tests/test_reports/" | \
+        grep -v "backend/tests/test_history.jsonl" | \
+        grep -v "backend/logs/" | \
+        grep -v "backend/src/web_console.log" || true)
+        
     if [[ -z "$NON_RUNTIME_DIRTY" ]]; then
         GIT_TREE="Runtime outputs changed"
     else

@@ -16,11 +16,23 @@ try:
 except ImportError:
     def get_market_open_time_et(date_str): return None
 
+from market_data.kalshi_contract_mapper import parse_kalshi_markets
+
 # Resolve ROOT
 ROOT = Path(__file__).resolve().parents[3]
 REPORTS_DIR = ROOT / "backend" / "data" / "processed" / "reports"
 SNAPSHOT_FILE = ROOT / "backend" / "data" / "processed" / "kalshi_market_snapshots" / "latest_kalshi_market_snapshot.json"
 OUTPUT_DIR = ROOT / "backend" / "data" / "processed" / "paper_trading"
+
+# Model Bins Definition
+BIN_RANGES = {
+    "<=78": (None, 78),
+    "79-80": (79, 80),
+    "81-82": (81, 82),
+    "83-84": (83, 84),
+    "85-86": (85, 86),
+    ">=87": (87, None)
+}
 
 def get_latest_file(directory: Path, pattern: str) -> Optional[Path]:
     files = list(directory.glob(pattern))
@@ -48,7 +60,6 @@ def parse_forecast_bins_from_md(md_path: Path) -> Dict[str, float]:
         content = f.read()
     
     bins = {}
-    # Pattern to match table rows like | 81-82 | 8.5% | or | >=87 | 33.9% |
     pattern = r"\|\s*([<>=]*\d+[-\d]*)\s*\|\s*(\d+\.?\d*)%\s*\|"
     matches = re.findall(pattern, content)
     for bin_label, prob_str in matches:
@@ -56,181 +67,172 @@ def parse_forecast_bins_from_md(md_path: Path) -> Dict[str, float]:
     
     return bins
 
-def map_market_to_bin(m: Dict[str, Any], model_bins: Dict[str, float]) -> Dict[str, Any]:
+def estimate_contract_probability(mapping: Dict[str, Any], model_bins: Dict[str, float]) -> tuple:
     """
-    Maps a Kalshi market to model bins and calculates the total model probability.
-    Returns { "bin_label": "...", "model_prob": 0.0, "warnings": [] }
+    Estimates the probability of a contract condition based on model bins.
+    Returns (probability, warnings)
     """
-    title = m.get("title", "").lower()
-    subtitle = m.get("subtitle", "").lower()
-    text = (title + " " + subtitle).replace("\u00b0", "deg") # Handle degree symbol
+    cond = mapping.get("condition_type")
+    t = mapping.get("threshold_f")
+    h = mapping.get("range_high_f")
     
-    res = { "bin_label": "Unknown", "model_prob": 0.0, "warnings": [] }
+    if cond == "unknown" or t is None:
+        return None, ["Unknown contract condition or missing threshold."]
     
-    # 1. Extract Range from Kalshi
-    k_low = -float('inf')
-    k_high = float('inf')
-    
-    # Patterns for Ranges
-    range_match = re.search(r"(\d+)(?:\s*deg|\s*degrees)?\s*(?:to|-|and)\s*(\d+)", text)
-    if range_match:
-        k_low = int(range_match.group(1))
-        k_high = int(range_match.group(2))
-    
-    # Patterns for Upper Thresholds
-    above_match = re.search(r"(\d+)\s*(?:deg|degrees)?\s*or\s*above", text)
-    if not range_match and above_match:
-        k_low = int(above_match.group(1))
-    elif not range_match:
-        above_match = re.search(r"(?:above\s+|>\s*)(\d+)", text)
-        if above_match:
-            k_low = int(above_match.group(1)) + 1
-            if ">=" in text: k_low -= 1
-
-    # Patterns for Lower Thresholds
-    below_match = re.search(r"(\d+)\s*(?:deg|degrees)?\s*or\s*below", text)
-    if not range_match and below_match:
-        k_high = int(below_match.group(1))
-    elif not range_match:
-        below_match = re.search(r"(?:below\s+|<\s*)(\d+)", text)
-        if below_match:
-            k_high = int(below_match.group(1)) - 1
-            if "<=" in text: k_high += 1
-    
-    if k_low == -float('inf') and k_high == float('inf'):
-        res["warnings"].append(f"Could not parse range from: {subtitle}")
-        return res
-
-    # 2. Map to Model Bins
-    # Model bins are: <=78, 79-80, 81-82, 83-84, 85-86, >=87
-    matched_bins = []
     total_prob = 0.0
+    matched_any = False
+    uncertain = False
     
-    for b_label, b_prob in model_bins.items():
-        # Parse model bin range
-        m_low = -float('inf')
-        m_high = float('inf')
+    for bin_label, (b_low, b_high) in BIN_RANGES.items():
+        prob = model_bins.get(bin_label, 0.0)
         
-        if "-" in b_label:
-            m_low, m_high = map(int, b_label.split("-"))
-        elif "<=" in b_label:
-            m_high = int(b_label.replace("<=", ""))
-        elif ">=" in b_label:
-            m_low = int(b_label.replace(">=", ""))
-            
-        # Check overlap: max(start) <= min(end)
-        overlap_start = max(k_low, m_low)
-        overlap_end = min(k_high, m_high)
+        # Above T
+        if cond == "above":
+            # If bin is strictly above T
+            if b_low is not None and b_low > t:
+                total_prob += prob
+                matched_any = True
+            elif b_high is not None and b_high <= t:
+                # Bin is strictly below T, ignore
+                pass
+            else:
+                # T falls inside the bin
+                uncertain = True
+                
+        # Below T
+        elif cond == "below":
+            if b_high is not None and b_high < t:
+                total_prob += prob
+                matched_any = True
+            elif b_low is not None and b_low >= t:
+                pass
+            else:
+                uncertain = True
+                
+        # Between T and H
+        elif cond == "between":
+            if b_low is not None and b_high is not None and b_low >= t and b_high <= h:
+                total_prob += prob
+                matched_any = True
+            elif (b_high is not None and b_high < t) or (b_low is not None and b_low > h):
+                pass
+            else:
+                uncertain = True
+                
+    if uncertain:
+        # For KMIA, if T is an integer like 86, and bin is 85-86, then "above 86" means >= 87.
+        # Let's try a small refinement for integer boundaries.
+        if cond == "above" and t.is_integer():
+             # Re-check above T as >= T+1
+             pass # Already handled by b_low > t if b_low is T+1
+        return None, [f"Contract boundary {t} cuts through model bins. Exact mapping uncertain."]
+
+    if not matched_any and total_prob == 0:
+        # Check if condition is beyond range
+        if cond == "above" and t >= 87:
+             return 0.0, ["Threshold above model's max bin boundary (87). Probability likely > 0 but unquantifiable."]
+        if cond == "below" and t <= 78:
+             return 0.0, ["Threshold below model's min bin boundary (78). Probability likely > 0 but unquantifiable."]
+             
+    return total_prob, []
+
+def calculate_speed_to_roi(ev: float, close_time_iso: Optional[str]) -> tuple:
+    """Calculates ROI speed score. (Expected Value / Time to Close)"""
+    if not close_time_iso:
+        return 0.0, None
         
-        if overlap_start <= overlap_end:
-            matched_bins.append(b_label)
-            total_prob += b_prob
-            
-    if matched_bins:
-        res["bin_label"] = "/".join(matched_bins) if len(matched_bins) > 1 else matched_bins[0]
-        res["model_prob"] = total_prob
-    else:
-        res["warnings"].append(f"No model bin overlap for Kalshi range {k_low}-{k_high}")
+    try:
+        close_dt = datetime.fromisoformat(close_time_iso.replace("Z", "+00:00"))
+        now_dt = datetime.now(timezone.utc)
+        diff = close_dt - now_dt
+        minutes = max(diff.total_seconds() / 60.0, 1.0) # Min 1 min
         
-    return res
+        # Simple score: ROI % per hour or similar. 
+        # Here: EV per 100 minutes.
+        score = (ev / minutes) * 1000.0 if ev > 0 else 0.0
+        return round(score, 2), round(minutes, 1)
+    except:
+        return 0.0, None
 
 def generate_paper_signal():
-    """Generates a quantitative edge report comparing model vs market."""
+    """Generates a quantitative edge report comparing model vs market using active contracts."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     # 1. Load Latest Forecast
     latest_forecast = get_latest_file(REPORTS_DIR, "kmia_forecast_*rules_v2_climatology*.md")
     model_bins = parse_forecast_bins_from_md(latest_forecast) if latest_forecast else {}
     
-    # 2. Load Latest Kalshi Snapshot
-    market_data = {}
-    if SNAPSHOT_FILE.exists():
-        try:
-            with open(SNAPSHOT_FILE, "r") as f:
-                market_data = json.load(f)
-        except Exception as e:
-            logger.error(f"Failed to load market snapshot: {e}")
-    
-    markets = market_data.get("selected_temperature_markets", [])
-    if not markets:
-        markets = market_data.get("markets", []) # Fallback to generic list
+    # 2. Load and Map Active Markets
+    markets = parse_kalshi_markets(SNAPSHOT_FILE)
     
     signals = []
-    warnings = []
+    global_warnings = []
     
     if not model_bins:
-        warnings.append("No forecast bins available. Ensure daily workflow ran.")
+        global_warnings.append("No forecast bins available. Ensure daily workflow ran.")
     if not markets:
-        warnings.append("No Kalshi markets available in snapshot.")
+        global_warnings.append("No active KMIA Kalshi markets available in snapshot.")
 
     for m in markets:
         ticker = m.get("ticker")
-        mapping = map_market_to_bin(m, model_bins)
+        mapping = m.get("contract_mapping", {})
         
-        if mapping["bin_label"] == "Unknown":
-            if mapping["warnings"]:
-                warnings.extend([f"{ticker}: {w}" for w in mapping["warnings"]])
+        prob, map_warnings = estimate_contract_probability(mapping, model_bins)
+        
+        if prob is None:
+            if map_warnings:
+                global_warnings.extend([f"{ticker}: {w}" for w in map_warnings])
             continue
             
-        model_prob = mapping["model_prob"]
-        
-        # Extract Market Price (0.0 - 1.0)
-        # Check for both cents (yes_ask) and dollars (yes_ask_dollars)
+        # Extract Market Price
         ask = m.get("yes_ask_dollars")
         bid = m.get("yes_bid_dollars")
         last = m.get("last_price_dollars")
         
-        # Fallback to cents if dollars missing
-        if ask is None and m.get("yes_ask") is not None:
-            ask = m.get("yes_ask") / 100.0
-        else:
-            ask = float(ask) if ask is not None else None
+        # Fallback to cents
+        if ask is None and m.get("yes_ask") is not None: ask = m.get("yes_ask") / 100.0
+        else: ask = float(ask) if ask is not None else None
             
-        if bid is None and m.get("yes_bid") is not None:
-            bid = m.get("yes_bid") / 100.0
-        else:
-            bid = float(bid) if bid is not None else None
+        if bid is None and m.get("yes_bid") is not None: bid = m.get("yes_bid") / 100.0
+        else: bid = float(bid) if bid is not None else None
 
-        if last is None and m.get("last_price") is not None:
-            last = m.get("last_price") / 100.0
-        else:
-            last = float(last) if last is not None else None
+        if last is None and m.get("last_price") is not None: last = m.get("last_price") / 100.0
+        else: last = float(last) if last is not None else None
 
-        # Determine Implied Prob
-        market_prob = None
-        if ask is not None:
-            market_prob = ask
-        elif last is not None:
-            market_prob = last
+        market_prob = ask if ask is not None else last
         
-        if market_prob is None:
-            warnings.append(f"{ticker}: No usable price data (yes_ask or last_price). Skipping.")
+        if market_prob is None or market_prob == 0:
+            global_warnings.append(f"{ticker}: No usable price data. Skipping.")
             continue
             
-        edge = model_prob - market_prob
-        # Expected Value for a $1 payoff
+        edge = prob - market_prob
         cost = ask if ask is not None else market_prob
-        ev = (model_prob * 1.0) - cost
+        ev = (prob * 1.0) - cost
+        
+        speed_score, mins_to_close = calculate_speed_to_roi(ev, m.get("close_time"))
         
         # Action logic
         action = "NO EDGE"
         confidence = "low"
-        if edge > 0.05: # > 5% edge
+        if edge > 0.05:
             action = "PAPER BUY CANDIDATE"
             confidence = "medium"
-            if edge > 0.15: # > 15% edge
-                confidence = "high"
+            if edge > 0.15: confidence = "high"
         elif edge > 0:
             action = "WATCH"
         
         signals.append({
             "market_ticker": ticker,
             "market_title": m.get("title"),
-            "forecast_bin": mapping["bin_label"],
-            "model_probability": round(model_prob, 4),
-            "market_implied_probability": round(market_prob, 4),
+            "status": m.get("status"),
+            "condition_type": mapping.get("condition_type"),
+            "threshold_f": mapping.get("threshold_f"),
+            "model_probability": round(prob, 4),
+            "market_probability": round(market_prob, 4),
             "edge": round(edge, 4),
             "expected_value": round(ev, 4),
+            "speed_to_roi_score": speed_score,
+            "time_to_close_minutes": mins_to_close,
             "paper_action": action,
             "confidence": confidence,
             "yes_ask": ask,
@@ -239,9 +241,7 @@ def generate_paper_signal():
             "market_open_time_et": get_market_open_time_et(parse_ticker_date(ticker)) if ticker else None
         })
 
-    # Sort signals by edge descending
-    signals.sort(key=lambda x: x["edge"] if x["edge"] is not None else -1.0, reverse=True)
-    
+    signals.sort(key=lambda x: x["edge"], reverse=True)
     best_signal = signals[0] if signals else None
     
     report = {
@@ -250,14 +250,13 @@ def generate_paper_signal():
         "market_snapshot_source": str(SNAPSHOT_FILE.name),
         "signals": signals,
         "best_signal": best_signal,
-        "warnings": list(set(warnings)),
+        "warnings": list(set(global_warnings)),
         "safety": {
             "no_real_trading": True,
             "disclaimer": "NO REAL TRADING EXECUTION - PAPER ONLY"
         }
     }
     
-    # Save reports
     ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     latest_path = OUTPUT_DIR / "latest_paper_signal.json"
     ts_path = OUTPUT_DIR / f"paper_signal_{ts}.json"

@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from paper_trading.signal_generator import generate_paper_signal, parse_forecast_bins_from_md, map_market_to_bin
+from paper_trading.signal_generator import generate_paper_signal, parse_forecast_bins_from_md
 
 # NO REAL TRADING EXECUTION
 
@@ -25,28 +25,6 @@ def test_parse_forecast_bins():
         if temp_md.exists():
             temp_md.unlink()
 
-def test_map_market_to_bin():
-    """Verify market title/subtitle mapping to model bins."""
-    model_bins = {">=87": 0.4, "85-86": 0.3}
-    
-    # 1. '90 to 91'
-    m1 = {"title": "Will it be 90-91?", "subtitle": "90\u00b0 to 91\u00b0"}
-    res1 = map_market_to_bin(m1, model_bins)
-    assert res1["bin_label"] == ">=87"
-    assert res1["model_prob"] == 0.4
-    
-    # 2. '86 to 87' (overlaps two bins)
-    m2 = {"title": "Will it be 86-87?", "subtitle": "86\u00b0 to 87\u00b0"}
-    res2 = map_market_to_bin(m2, model_bins)
-    assert "85-86" in res2["bin_label"]
-    assert ">=87" in res2["bin_label"]
-    assert res2["model_prob"] == 0.7 # 0.3 + 0.4
-    
-    # 3. Unknown
-    m3 = {"title": "Unknown", "subtitle": "50\u00b0 or below"}
-    res3 = map_market_to_bin(m3, model_bins)
-    assert res3["bin_label"] == "Unknown"
-
 def test_generate_signal_logic():
     """Verify that signals are generated when forecast and markets align."""
     temp_dir = Path(__file__).resolve().parent / "temp"
@@ -63,23 +41,25 @@ def test_generate_signal_logic():
     md_path.write_text(md_content)
     
     # 2. Create Mock Snapshot
-    # Use actual Kalshi-like structure from 53KB snapshot
     snapshot_path = temp_dir / "latest_kalshi_market_snapshot.json"
     snapshot_data = {
         "selected_temperature_markets": [
             {
-                "ticker": "TEST-T90",
+                "ticker": "KXHIGHMIA-26MAY07-B86.5",
                 "title": "Will it be hot?",
-                "subtitle": "90\u00b0 to 91\u00b0",
+                "subtitle": "86.5 degrees or above",
                 "yes_ask_dollars": "0.1000",
-                "yes_bid_dollars": "0.0800"
+                "yes_bid_dollars": "0.0800",
+                "status": "open",
+                "close_time": "2026-05-07T00:00:00Z",
+                "strike_type": "greater",
+                "floor_strike": 86.5
             }
         ]
     }
     with open(snapshot_path, "w") as f:
         json.dump(snapshot_data, f)
         
-    # Patch paths in generator (manual patch for test context)
     import paper_trading.signal_generator as sg
     original_reports = sg.REPORTS_DIR
     original_snapshot = sg.SNAPSHOT_FILE
@@ -93,16 +73,16 @@ def test_generate_signal_logic():
             
         assert len(report["signals"]) > 0, f"No signals generated. Report: {report}"
         sig = report["signals"][0]
-        assert sig["market_ticker"] == "TEST-T90"
-        # 90-91 is part of >=87 bin (prob 0.4)
-        assert sig["model_probability"] == 0.4
-        # Now uses yes_ask directly = 0.10
-        assert abs(sig["market_implied_probability"] - 0.10) < 1e-6
+        assert sig["market_ticker"] == "KXHIGHMIA-26MAY07-B86.5"
+        # 86.5+ matches >=87 bin exactly
+        assert abs(sig["model_probability"] - 0.4) < 1e-6
+        assert abs(sig["market_probability"] - 0.10) < 1e-6
         assert sig["edge"] >= 0.3
         assert sig["paper_action"] == "PAPER BUY CANDIDATE"
     finally:
         sg.REPORTS_DIR = original_reports
         sg.SNAPSHOT_FILE = original_snapshot
+
 def test_generate_signal_safety_and_skipping():
     """Verify safety field and price-based skipping."""
     temp_dir = Path(__file__).resolve().parent / "temp"
@@ -110,24 +90,30 @@ def test_generate_signal_safety_and_skipping():
     
     # 1. Create Mock Forecast
     md_path = temp_dir / "kmia_forecast_mock_rules_v2_climatology.md"
-    md_path.write_text("## Probability Bins\n| 85-86 | 50.0% |")
+    md_path.write_text("## Probability Bins\n| 85-86 | 50.0% |\n| >=87 | 10.0% |")
     
-    # 2. Create Mock Snapshot with one good market and one with no price
+    # 2. Create Mock Snapshot
     snapshot_path = temp_dir / "latest_kalshi_market_snapshot.json"
     snapshot_data = {
         "selected_temperature_markets": [
             {
-                "ticker": "GOOD-TICKER",
-                "title": "Good",
-                "subtitle": "85\u00b0 to 86\u00b0",
-                "yes_ask_dollars": "0.10"
+                "ticker": "KXHIGHMIA-26MAY07-B86.5",
+                "title": "Above 86.5",
+                "subtitle": "86.5 or above",
+                "yes_ask_dollars": "0.10",
+                "status": "open",
+                "strike_type": "greater",
+                "floor_strike": 86.5
             },
             {
-                "ticker": "BAD-TICKER",
+                "ticker": "KXHIGHMIA-26MAY07-B85.5",
                 "title": "Bad",
-                "subtitle": "85\u00b0 to 86\u00b0",
+                "subtitle": "85.5 or above",
                 "yes_ask": None,
-                "last_price": None
+                "last_price": None,
+                "status": "open",
+                "strike_type": "greater",
+                "floor_strike": 85.5
             }
         ]
     }
@@ -146,8 +132,10 @@ def test_generate_signal_safety_and_skipping():
             report = json.load(f)
             
         assert len(report["signals"]) == 1
-        assert report["signals"][0]["market_ticker"] == "GOOD-TICKER"
-        assert any("BAD-TICKER" in w for w in report["warnings"])
+        assert report["signals"][0]["market_ticker"] == "KXHIGHMIA-26MAY07-GOOD"
+        # 86.5+ matches >=87 (0.10)
+        assert abs(report["signals"][0]["model_probability"] - 0.10) < 1e-6
+        assert any("KXHIGHMIA-26MAY07-BAD" in w for w in report["warnings"])
         assert report["safety"]["no_real_trading"] is True
         assert "NO REAL TRADING" in report["safety"]["disclaimer"]
     finally:
