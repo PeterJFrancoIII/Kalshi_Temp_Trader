@@ -40,7 +40,6 @@ backend/tests/test_history.jsonl
 backend/venv/
 
 # Paper Trading Data
-backend/data/processed/paper_trading/paper_signal_*.json
-backend/data/processed/paper_trading/latest_paper_signal.json
-backend/data/processed/paper_trading/latest_paper_trading_performance.json
-backend/data/processed/paper_trading/paper_trade_ledger.jsonl
+backend/data/processed/paper_trading/*.json
+backend/data/processed/paper_trading/*.jsonl
+backend/tests/temp/

@@ -53,6 +53,7 @@ ssh kmia << 'EOF'
     cd /opt/kmia-kalshi
     echo "Pulling latest changes..."
     git fetch origin
+    git restore backend/tests/temp/ 2>/dev/null || true
     git pull --ff-only origin main
     
     SERVER_COMMIT=$(git rev-parse HEAD)

@@ -24,4 +24,6 @@ def test_deploy_from_mac_safety():
     # Must specifically mention excluded paths
     assert "backend/data/processed" in content, "Missing exclusion for processed data"
     assert "backend/tests/temp" in content, "Missing exclusion for test temp data"
+    assert "git restore backend/tests/temp/" in content, "Missing git restore for temp data before pull"
+
 
