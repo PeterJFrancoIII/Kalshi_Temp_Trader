@@ -250,6 +250,32 @@ with col4:
         last_upd = datetime.fromtimestamp(latest_kalshi_json.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
     st.write(f"**Last Updated:** {last_upd}")
 
+# Paper Signal Summary
+PAPER_DIR = DATA / "paper_trading"
+latest_paper_json = PAPER_DIR / "latest_paper_signal.json"
+p_data = load_json(latest_paper_json) if latest_paper_json and latest_paper_json.exists() else {}
+
+if p_data:
+    st.divider()
+    st.subheader("🎯 Latest Paper Signal")
+    best = p_data.get("best_signal")
+    if best:
+        pcol1, pcol2, pcol3, pcol4 = st.columns(4)
+        with pcol1:
+            st.write(f"**Action:** `{best.get('action')}`")
+            st.write(f"**Confidence:** {best.get('confidence').upper()}")
+        with pcol2:
+            st.write(f"**Ticker:** `{best.get('ticker')}`")
+            st.write(f"**Bin:** {best.get('bin')}")
+        with pcol3:
+            st.write(f"**Model Prob:** {best.get('model_prob', 0):.1%}")
+            st.write(f"**Market Prob:** {best.get('market_prob', 0):.1%}" if best.get('market_prob') else "**Market Prob:** N/A")
+        with pcol4:
+            st.write(f"**Edge:** {best.get('edge', 0):+.1%}" if best.get('edge') is not None else "**Edge:** N/A")
+            st.write(f"**EV ($1):** {best.get('expected_value', 0):+.2f}" if best.get('expected_value') is not None else "**EV:** N/A")
+    else:
+        st.info("No paper signals generated for current markets.")
+
 st.info(f"👉 **ACTION NEEDED:** {action_needed}")
 
 # Answers to the 4 Questions
@@ -264,8 +290,8 @@ with st.expander("❓ Quick System FAQ", expanded=True):
 st.divider()
 
 # Main Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
-    "Status", "Forecast", "Weather", "Kalshi Market Data", "Model Comparison", "Calibration", "Logs", "Files", "Operator Notes"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
+    "Status", "Forecast", "Weather", "Kalshi Market Data", "Paper Trading", "Model Comparison", "Calibration", "Logs", "Files", "Operator Notes"
 ])
 
 with tab1:
@@ -361,7 +387,33 @@ with tab4:
         st.info("Run the following command to update market data:")
         st.code("bash scripts/update_kalshi_market_data.sh")
 
-with tab4:
+with tab5:
+    st.header("Paper Trading Analysis")
+    st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
+    
+    if p_data:
+        st.write(f"**Generated At:** {p_data.get('generated_at_utc')}")
+        st.write(f"**Forecast Source:** `{p_data.get('forecast_source')}`")
+        
+        signals = p_data.get("signals", [])
+        if signals:
+            st.subheader("All Quantitative Signals")
+            df_signals = pd.DataFrame(signals)
+            # Reorder for display
+            cols = ["ticker", "bin", "model_prob", "market_prob", "edge", "expected_value", "action", "confidence"]
+            st.dataframe(df_signals[cols].style.format({
+                "model_prob": "{:.1%}",
+                "market_prob": "{:.1%}",
+                "edge": "{:+.1%}",
+                "expected_value": "{:+.2f}"
+            }))
+        else:
+            st.info("No signals found for tracked markets.")
+    else:
+        st.warning("No paper trading signal data found.")
+        st.info("Run: `bash scripts/generate_paper_signal.sh` to generate signals.")
+
+with tab6:
     st.header("Latest Model Comparison")
     content = load_text(latest_comparison_md)
     if content:
@@ -369,7 +421,7 @@ with tab4:
     else:
         st.info("No comparison reports available yet.")
 
-with tab5:
+with tab7:
     st.header("Aggregate Calibration")
     if agg_cal_json.exists():
         cal_data = load_json(agg_cal_json)
@@ -380,7 +432,7 @@ with tab5:
     else:
         st.info("Aggregate calibration data not found.")
 
-with tab6:
+with tab8:
     st.header("Latest Workflow Logs")
     if latest_log:
         st.text(f"File: {latest_log}")
@@ -390,10 +442,10 @@ with tab6:
     else:
         st.info("No workflow logs found.")
 
-with tab7:
+with tab9:
     st.header("Discovered Files")
     file_info = []
-    for d in [STATUS_DIR, REPORTS_DIR, LOGS_DIR, CAL_DIR, KALSHI_DIR]:
+    for d in [STATUS_DIR, REPORTS_DIR, LOGS_DIR, CAL_DIR, KALSHI_DIR, PAPER_DIR]:
         if d.exists():
             for f in d.glob("*"):
                 if f.is_file():
@@ -408,7 +460,7 @@ with tab7:
     else:
         st.info("No files discovered in processed data directories.")
 
-with tab8:
+with tab10:
     st.header("Operator Notes & Commands")
     st.markdown("""
     ### Daily Workflow
@@ -421,6 +473,12 @@ with tab8:
     To update read-only Kalshi market data:
     ```bash
     bash scripts/update_kalshi_market_data.sh
+    ```
+
+    ### Paper Trading
+    To generate paper signals and edge analysis:
+    ```bash
+    bash scripts/generate_paper_signal.sh
     ```
 
     ### Status Generation

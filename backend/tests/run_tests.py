@@ -206,6 +206,12 @@ from test_weather_ingestion import (
     test_history_record_count
 )
 
+from test_paper_signal_generator import (
+    test_parse_forecast_bins,
+    test_map_market_to_bin,
+    test_generate_signal_logic
+)
+
 from test_health_summary import (
     test_health_summary_script_exists,
     test_health_summary_is_executable,
@@ -326,6 +332,9 @@ tests = [
     test_stale_data_flag,
     test_observed_max_so_far,
     test_history_record_count,
+    test_parse_forecast_bins,
+    test_map_market_to_bin,
+    test_generate_signal_logic,
     test_scripts_contain_safety_disclaimer,
     test_check_sync_status_runs,
     test_health_summary_script_exists,
