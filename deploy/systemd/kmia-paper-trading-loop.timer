@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer for KMIA Automated Paper Trading Loop (NO REAL TRADING EXECUTION)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -40,3 +40,15 @@ bash scripts/health_summary.sh
 **NO REAL TRADING EXECUTION.**
 
 The bot must not place real Kalshi orders.
+
+## Automated Loop Installation
+
+To install the automated paper trading loop:
+
+```bash
+sudo cp deploy/systemd/kmia-paper-trading-loop.service /etc/systemd/system/
+sudo cp deploy/systemd/kmia-paper-trading-loop.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now kmia-paper-trading-loop.timer
+systemctl list-timers | grep paper
+```

@@ -1,0 +1,10 @@
+[Unit]
+Description=KMIA Automated Paper Trading Loop (NO REAL TRADING EXECUTION)
+After=network.target
+
+[Service]
+Type=oneshot
+User=peterjfrancoiii
+WorkingDirectory=/opt/kmia-kalshi
+ExecStart=/opt/kmia-kalshi/scripts/run_paper_trading_loop.sh
+Environment="PYTHONPATH=/opt/kmia-kalshi/backend/src"
