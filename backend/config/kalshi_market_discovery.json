@@ -22,8 +22,12 @@
     "temperature",
     "high"
   ],
-  "known_series_tickers": [],
-  "known_market_tickers": [],
+  "known_series_tickers": [
+    "KXHIGHMIA"
+  ],
+  "known_market_tickers": [
+    "KXHIGHMIA-26MAY06"
+  ],
   "safety": {
     "no_real_trading": true,
     "no_order_execution": true,
