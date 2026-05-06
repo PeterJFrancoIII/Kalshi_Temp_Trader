@@ -35,14 +35,14 @@ def record_paper_trade():
         logger.info("No best signal found in report.")
         return
 
-    action = best_signal.get("action")
+    action = best_signal.get("paper_action")
     if action != "PAPER BUY CANDIDATE":
         logger.info(f"Signal action is {action}, not PAPER BUY CANDIDATE. No trade recorded.")
         return
 
-    ticker = best_signal.get("ticker")
+    ticker = best_signal.get("market_ticker")
     if not ticker:
-        logger.warning("Signal missing ticker.")
+        logger.warning("Signal missing market_ticker.")
         return
 
     # Check for duplicates (same ticker on same day)
@@ -62,11 +62,11 @@ def record_paper_trade():
     trade = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "market_ticker": ticker,
-        "forecast_bin": best_signal.get("bin"),
-        "model_probability": best_signal.get("model_prob"),
-        "market_probability": best_signal.get("market_prob"),
+        "forecast_bin": best_signal.get("forecast_bin"),
+        "model_probability": best_signal.get("model_probability"),
+        "market_probability": best_signal.get("market_implied_probability"),
         "edge": best_signal.get("edge"),
-        "simulated_entry_price": best_signal.get("market_prob"), # Simplified: buy at market prob
+        "simulated_entry_price": best_signal.get("yes_ask") or best_signal.get("market_implied_probability"),
         "paper_action": action,
         "status": "OPEN",
         "safety": "NO REAL TRADING EXECUTION"

@@ -4,15 +4,10 @@ import os
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
+import re
 
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
-
-st.set_page_config(
-    page_title="KMIA Weather Console",
-    page_icon="🌦️",
-    layout="wide"
-)
 
 # Resolution of Paths
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +18,7 @@ LOGS_DIR = DATA / "logs"
 CAL_DIR = DATA / "aggregate_calibration"
 KALSHI_DIR = DATA / "kalshi_market_snapshots"
 HISTORY_FILE = DATA / "history" / "kmia_daily_history.jsonl"
+PAPER_DIR = DATA / "paper_trading"
 
 def get_latest_file(directory, pattern):
     if not directory.exists():
@@ -43,8 +39,6 @@ def load_json(path):
         with open(path, 'r') as f:
             return json.load(f)
     return None
-
-import re
 
 def load_latest_forecast_summary(report_path):
     """
@@ -79,7 +73,6 @@ def load_latest_forecast_summary(report_path):
         return res
     
     # Extract Best Single Number
-    # Look for: **Best Single-Number Estimate:** 85°F or **Forecast High:** 85°F
     sn_match = re.search(r"\*\*(?:Best Single-Number Estimate|Forecast High):\*\*\s*([\d.]+)", content)
     if sn_match:
         res["best_single_number"] = sn_match.group(1)
@@ -87,7 +80,6 @@ def load_latest_forecast_summary(report_path):
     # Extract Probability Bins
     bin_section = re.search(r"## Probability Bins(.*?)(?:##|\Z)", content, re.DOTALL)
     if bin_section:
-        # Match table rows: | 85-86 | 37.2% |
         rows = re.findall(r"\|\s*([^|]+?)\s*\|\s*([\d.]+)%\s*\|", bin_section.group(1))
         bins = []
         for b_label, b_prob in rows:
@@ -97,104 +89,82 @@ def load_latest_forecast_summary(report_path):
                 continue
         
         if bins:
-            # Sort by probability descending
             bins.sort(key=lambda x: x[1], reverse=True)
             res["top_probability_bin"] = f"{bins[0][0]} ({bins[0][1]}%)"
             
     return res
 
-# UI Header
-st.title("KMIA Kalshi Weather Console")
-st.error("🚨 **DRY-RUN / PAPER EVALUATION ONLY — NO REAL TRADING EXECUTION**")
+if __name__ == "__main__":
+    st.set_page_config(
+        page_title="KMIA Weather Console",
+        page_icon="🌦️",
+        layout="wide"
+    )
 
-# Discovery
-latest_status_json = get_latest_file(STATUS_DIR, "kmia_daily_status_*.json")
-latest_status_md = get_latest_file(STATUS_DIR, "kmia_daily_status_*.md")
-# Specific discovery for the primary model reports
-latest_forecast_md = get_latest_file(REPORTS_DIR, "kmia_forecast_*rules_v2_climatology*.md")
-if not latest_forecast_md:
-    latest_forecast_md = get_latest_file(REPORTS_DIR, "kmia_forecast_*.md")
+    st.title("KMIA Kalshi Weather Console")
+    st.error("🚨 **DRY-RUN / PAPER EVALUATION ONLY — NO REAL TRADING EXECUTION**")
 
-latest_comparison_md = get_latest_file(REPORTS_DIR, "kmia_comparison_*.md")
-latest_kalshi_json = KALSHI_DIR / "latest_kalshi_market_snapshot.json"
-latest_log = get_latest_file(LOGS_DIR, "kmia_daily_workflow_*.log")
-agg_cal_json = CAL_DIR / "aggregate_calibration.json"
-agg_cal_md = CAL_DIR / "aggregate_calibration.md"
+    # Discovery
+    latest_status_json = get_latest_file(STATUS_DIR, "kmia_daily_status_*.json")
+    latest_status_md = get_latest_file(STATUS_DIR, "kmia_daily_status_*.md")
+    latest_forecast_md = get_latest_file(REPORTS_DIR, "kmia_forecast_*rules_v2_climatology*.md")
+    if not latest_forecast_md:
+        latest_forecast_md = get_latest_file(REPORTS_DIR, "kmia_forecast_*.md")
 
-# Weather Data Ingestion Status
-WEATHER_INGESTION_DIR = DATA / "weather_ingestion"
-latest_weather_json = WEATHER_INGESTION_DIR / "latest_weather_ingestion_status.json"
+    latest_comparison_md = get_latest_file(REPORTS_DIR, "kmia_comparison_*.md")
+    latest_kalshi_json = KALSHI_DIR / "latest_kalshi_market_snapshot.json"
+    latest_log = get_latest_file(LOGS_DIR, "kmia_daily_workflow_*.log")
+    agg_cal_json = CAL_DIR / "aggregate_calibration.json"
+    agg_cal_md = CAL_DIR / "aggregate_calibration.md"
 
-# Sidebar Metrics
-st.sidebar.header("System Overview")
-st.sidebar.metric("Station", "KMIA")
-st.sidebar.metric("Mode", "Paper Evaluation")
+    # Weather Data Ingestion Status
+    WEATHER_INGESTION_DIR = DATA / "weather_ingestion"
+    latest_weather_json = WEATHER_INGESTION_DIR / "latest_weather_ingestion_status.json"
 
-if latest_status_json:
-    st.sidebar.success("✅ Status File Found")
-else:
-    st.sidebar.error("❌ Status File Missing")
+    # Sidebar Metrics
+    st.sidebar.header("System Overview")
+    st.sidebar.metric("Station", "KMIA")
+    st.sidebar.metric("Mode", "Paper Evaluation")
 
-if latest_forecast_md:
-    st.sidebar.success("✅ Forecast File Found")
-else:
-    st.sidebar.error("❌ Forecast File Missing")
+    if latest_status_json:
+        st.sidebar.success("✅ Status File Found")
+    else:
+        st.sidebar.error("❌ Status File Missing")
 
-st.sidebar.divider()
-st.sidebar.info(f"**Project Root:** `{ROOT}`")
-st.sidebar.info(f"**Last Dashboard Refresh:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    if latest_forecast_md:
+        st.sidebar.success("✅ Forecast File Found")
+    else:
+        st.sidebar.error("❌ Forecast File Missing")
 
-# --- OPERATOR HOME SUMMARY ---
-st.header("🏠 Operator Home")
+    st.sidebar.divider()
+    st.sidebar.info(f"**Project Root:** `{ROOT}`")
+    st.sidebar.info(f"**Last Dashboard Refresh:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-# Initialize state
-system_status = "GREEN"
-status_color = "success"
-action_needed = "None. System is working."
-forecast_val = "Unknown"
-top_bin = "Unknown"
-kalshi_status = "CONNECTED"
-kalshi_msg = "Market data is up to date."
-weather_live = "YES"
+    # --- OPERATOR HOME SUMMARY ---
+    st.header("🏠 Operator Home")
 
-# Load Weather Status
-w_data = load_json(latest_weather_json) if latest_weather_json.exists() else {}
-if w_data:
-    if w_data.get("stale_data", False):
-        weather_live = "STALE"
-    if not w_data.get("current_temp_f"):
-        weather_live = "MISSING"
+    # Initialize state
+    forecast_val = "Unknown"
+    top_bin = "Unknown"
+    weather_live = "Unknown"
+    kalshi_status = "Unknown"
+    system_status = "GREEN"
+    status_color = "success"
+    action_needed = "None. System is working."
+    w_data = load_json(latest_weather_json) if latest_weather_json and latest_weather_json.exists() else {}
 
-# Check for Red Flags
-if not latest_status_json or not latest_forecast_md or not DATA.exists():
-    system_status = "RED"
-    status_color = "error"
-    action_needed = "Run: bash scripts/run_kmia_daily_workflow.sh"
+    if w_data:
+        weather_live = "✅ CONNECTED" if not w_data.get("is_stale") else "⚠️ STALE"
+    else:
+        weather_live = "❌ MISSING"
 
-# Check logs for Error
-log_content = load_text(latest_log) or ""
-if "ERROR" in log_content:
-    system_status = "RED"
-    status_color = "error"
-    action_needed = "Check latest workflow log for ERROR details."
-
-# Check for Yellow Flags (if not already Red)
-if system_status != "RED":
-    if not agg_cal_json.exists():
+    # Evaluate System Health
+    if not latest_status_json or not latest_forecast_md or (w_data and w_data.get("is_stale")):
         system_status = "YELLOW"
         status_color = "warning"
-        action_needed = "Calibration data missing. Run the daily workflow."
+        action_needed = "Review missing files or stale weather data."
     
-    if weather_live != "YES":
-        system_status = "YELLOW"
-        status_color = "warning"
-        action_needed = "Weather ingestion is stale or missing. Check scripts/check_weather_ingestion.sh"
-
-    if "WARNING" in log_content:
-        system_status = "YELLOW"
-        status_color = "warning"
-        action_needed = "Review warnings in the Logs tab."
-
+    # Kalshi Status
     if latest_kalshi_json.exists():
         mkts = load_json(latest_kalshi_json)
         if mkts.get("selected_temperature_markets"):
@@ -203,349 +173,172 @@ if system_status != "RED":
             system_status = "YELLOW"
             status_color = "warning"
             kalshi_status = "CONNECTED (No Miami Markets)"
-            action_needed = "Kalshi discovery found general markets, but no matching Miami temperature market. Review ticker/series manually."
+            action_needed = "Kalshi discovery found general markets, but no matching Miami temperature market."
         else:
             system_status = "YELLOW"
             status_color = "warning"
             kalshi_status = "CONNECTED (0 Markets)"
-            action_needed = "Kalshi discovery returned 0 results. Review search terms in config."
+            action_needed = "Kalshi discovery returned 0 results."
     else:
         system_status = "YELLOW"
         status_color = "warning"
         kalshi_status = "MISSING"
         action_needed = "Run: bash scripts/update_kalshi_market_data.sh"
 
-# Extract Forecast Info
-# Try Status JSON first
-if latest_status_json:
-    status_data = load_json(latest_status_json)
-    forecast_info = status_data.get("forecast", {})
-    if not forecast_info:
-        # Fallback to the 'forecasts' dict if 'forecast' is missing
-        f_dict = status_data.get("forecasts", {})
-        if f_dict:
-            # Pick first available or specific model (these are filenames in the JSON)
-            forecast_info = f_dict.get("rules_v2_climatology") or next(iter(f_dict.values()))
-            
-    if forecast_info:
-        if isinstance(forecast_info, str):
-            # It's a filename, parse the report
-            summary = load_latest_forecast_summary(forecast_info)
-            forecast_val = summary.get("best_single_number", "Unknown")
-            top_bin = summary.get("top_probability_bin", "Unknown")
-        elif isinstance(forecast_info, dict):
-            # It's already an object (possibly from an older/different schema)
-            forecast_val = str(forecast_info.get("best_single_number", "Unknown"))
-            top_bin = forecast_info.get("top_probability_bin", "Unknown")
+    # Extract Forecast Info
+    if latest_status_json:
+        status_data = load_json(latest_status_json)
+        forecast_info = status_data.get("forecast", {})
+        if not forecast_info:
+            f_dict = status_data.get("forecasts", {})
+            if f_dict:
+                forecast_info = f_dict.get("rules_v2_climatology") or next(iter(f_dict.values()))
+                
+        if forecast_info:
+            if isinstance(forecast_info, str):
+                summary = load_latest_forecast_summary(forecast_info)
+                forecast_val = summary.get("best_single_number", "Unknown")
+                top_bin = summary.get("top_probability_bin", "Unknown")
+            elif isinstance(forecast_info, dict):
+                forecast_val = str(forecast_info.get("best_single_number", "Unknown"))
+                top_bin = forecast_info.get("top_probability_bin", "Unknown")
 
-# Fallback to Markdown parsing of the latest known forecast if still Unknown
-if forecast_val == "Unknown" or top_bin == "Unknown":
-    summary = load_latest_forecast_summary(latest_forecast_md)
-    if forecast_val == "Unknown":
+    if forecast_val == "Unknown" or top_bin == "Unknown":
+        summary = load_latest_forecast_summary(latest_forecast_md)
         forecast_val = summary.get("best_single_number", "Unknown")
-    if top_bin == "Unknown":
         top_bin = summary.get("top_probability_bin", "Unknown")
 
-# Display Summary Cards
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    if system_status == "GREEN":
-        st.success(f"### SYSTEM STATUS: {system_status}")
-    elif system_status == "YELLOW":
-        st.warning(f"### SYSTEM STATUS: {system_status}")
-    else:
-        st.error(f"### SYSTEM STATUS: {system_status}")
+    # Display Summary Cards
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if system_status == "GREEN":
+            st.success(f"### SYSTEM STATUS: {system_status}")
+        elif system_status == "YELLOW":
+            st.warning(f"### SYSTEM STATUS: {system_status}")
+        else:
+            st.error(f"### SYSTEM STATUS: {system_status}")
 
-with col2:
-    st.metric("TODAY'S FORECAST", f"{forecast_val}°F")
-    st.write(f"**Top Bin:** {top_bin}")
-    if latest_forecast_md:
-        st.caption(f"Source: {latest_forecast_md.name}")
+    with col2:
+        st.metric("TODAY'S FORECAST", f"{forecast_val}°F")
+        st.write(f"**Top Bin:** {top_bin}")
 
-with col3:
-    st.metric("WEATHER INGESTION", weather_live)
-    if w_data:
-        st.write(f"**Temp:** {w_data.get('current_temp_f', 'N/A')}°F")
-        st.write(f"**Max Today:** {w_data.get('observed_max_so_far_f', 'N/A')}°F")
+    with col3:
+        st.metric("WEATHER INGESTION", weather_live)
+        if w_data:
+            st.write(f"**Temp:** {w_data.get('current_temp_f', 'N/A')}°F")
 
-with col4:
-    st.metric("KALSHI MARKET", kalshi_status)
-    last_upd = "N/A"
-    if latest_kalshi_json.exists():
-        last_upd = datetime.fromtimestamp(latest_kalshi_json.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
-    st.write(f"**Last Updated:** {last_upd}")
+    with col4:
+        st.metric("KALSHI MARKET", kalshi_status)
+        last_upd = "N/A"
+        if latest_kalshi_json.exists():
+            last_upd = datetime.fromtimestamp(latest_kalshi_json.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+        st.write(f"**Last Updated:** {last_upd}")
 
-# Paper Signal Summary
-PAPER_DIR = DATA / "paper_trading"
-latest_paper_json = PAPER_DIR / "latest_paper_signal.json"
-p_data = load_json(latest_paper_json) if latest_paper_json and latest_paper_json.exists() else {}
+    # Paper Signal Summary
+    latest_paper_json = PAPER_DIR / "latest_paper_signal.json"
+    p_data = load_json(latest_paper_json) if latest_paper_json.exists() else {}
 
-if p_data:
+    if p_data:
+        st.divider()
+        st.subheader("🎯 Latest Paper Signal")
+        best = p_data.get("best_signal")
+        if best:
+            pcol1, pcol2, pcol3, pcol4 = st.columns(4)
+            with pcol1:
+                st.write(f"**Action:** `{best.get('paper_action')}`")
+                st.write(f"**Confidence:** {best.get('confidence', 'Unknown').upper()}")
+            with pcol2:
+                st.write(f"**Ticker:** `{best.get('market_ticker')}`")
+                st.write(f"**Bin:** {best.get('forecast_bin')}")
+            with pcol3:
+                st.write(f"**Model Prob:** {best.get('model_probability', 0):.1%}")
+                st.write(f"**Market Prob:** {best.get('market_implied_probability', 0):.1%}" if best.get('market_implied_probability') else "**Market Prob:** N/A")
+            with pcol4:
+                st.write(f"**Edge:** {best.get('edge', 0):+.1%}" if best.get('edge') is not None else "**Edge:** N/A")
+                st.write(f"**EV ($1):** {best.get('expected_value', 0):+.2f}" if best.get('expected_value') is not None else "**EV:** N/A")
+
     st.divider()
-    st.subheader("🎯 Latest Paper Signal")
-    best = p_data.get("best_signal")
-    if best:
-        pcol1, pcol2, pcol3, pcol4 = st.columns(4)
-        with pcol1:
-            st.write(f"**Action:** `{best.get('paper_action')}`")
-            st.write(f"**Confidence:** {best.get('confidence', 'Unknown').upper()}")
-        with pcol2:
-            st.write(f"**Ticker:** `{best.get('market_ticker')}`")
-            st.write(f"**Bin:** {best.get('forecast_bin')}")
-        with pcol3:
-            st.write(f"**Model Prob:** {best.get('model_probability', 0):.1%}")
-            st.write(f"**Market Prob:** {best.get('market_implied_probability', 0):.1%}" if best.get('market_implied_probability') else "**Market Prob:** N/A")
-        with pcol4:
-            st.write(f"**Edge:** {best.get('edge', 0):+.1%}" if best.get('edge') is not None else "**Edge:** N/A")
-            st.write(f"**EV ($1):** {best.get('expected_value', 0):+.2f}" if best.get('expected_value') is not None else "**EV:** N/A")
-    else:
-        st.info("No paper signals generated for current markets.")
 
-st.info(f"👉 **ACTION NEEDED:** {action_needed}")
-
-# Answers to the 4 Questions
-with st.expander("❓ Quick System FAQ", expanded=True):
-    q1_icon = "✅" if system_status != "RED" else "❌"
-    st.write(f"**1. Is the system working?** {q1_icon} {system_status}")
-    st.write(f"**2. What is today's forecast?** {forecast_val}°F (Bin: {top_bin})")
-    has_warns = "Yes" if "WARNING" in log_content or system_status == "YELLOW" else "No"
-    st.write(f"**3. Are there any warnings?** {has_warns}")
-    st.write(f"**4. What should I do?** {action_needed}")
-
-st.divider()
-
-# Main Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
-    "Status", "Forecast", "Weather", "Kalshi Market Data", "Paper Trading", "Model Comparison", "Calibration", "Logs", "Files", "Operator Notes"
-])
-
-with tab1:
-    st.header("Latest System Status")
-    if latest_status_json:
-        data = load_json(latest_status_json)
-        st.json(data)
-    elif latest_status_md:
-        content = load_text(latest_status_md)
-        st.markdown(content)
-    else:
-        st.warning("No status reports found. Run `bash scripts/generate_daily_status.sh` to generate one.")
-
-with tab2:
-    st.header("Latest Forecast Report")
-    content = load_text(latest_forecast_md)
-    if content:
-        st.markdown(content)
-    else:
-        st.warning("No forecast reports found. Run `bash scripts/run_kmia_daily_workflow.sh` to generate one.")
-
-with tab3:
-    st.header("Weather Ingestion Status (KMIA)")
-    st.info("ℹ️ **READ-ONLY NWS INGESTION — NO REAL TRADING EXECUTION**")
+    # Main Tabs
+    tabs = st.tabs(["Status", "Forecast", "Weather", "Kalshi Market Data", "Paper Trading", "Logs", "Files", "Operator Notes"])
     
-    if latest_weather_json.exists():
-        w_data = load_json(latest_weather_json)
-        col_w1, col_w2 = st.columns(2)
-        with col_w1:
-            st.metric("Live KMIA Data", weather_live)
-            st.write(f"**Current Temp:** {w_data.get('current_temp_f', 'N/A')}°F")
-            st.write(f"**Observed Max Today:** {w_data.get('observed_max_so_far_f', 'N/A')}°F")
-            st.write(f"**Forecast High:** {w_data.get('forecast_high_f', 'N/A')}°F")
-        with col_w2:
-            st.write(f"**Latest Observation Time:** {w_data.get('latest_observation_time', 'N/A')}")
-            st.write(f"**Historical Records:** {w_data.get('history_record_count', 0)}")
-            st.write(f"**Climatology Active:** {'YES' if w_data.get('climatology_active') else 'NO'}")
-            st.write(f"**Data Stale:** {'YES' if w_data.get('stale_data') else 'NO'}")
-        
-        if w_data.get("warnings"):
-            st.warning("⚠️ **Ingestion Warnings:**")
-            for warn in w_data["warnings"]:
-                st.write(f"- {warn}")
-    else:
-        st.warning("No weather ingestion status found.")
-        st.info("Run: `bash scripts/check_weather_ingestion.sh` to update.")
+    with tabs[0]:
+        st.header("Latest System Status")
+        if latest_status_json:
+            st.json(load_json(latest_status_json))
+        elif latest_status_md:
+            st.markdown(load_text(latest_status_md))
 
-with tab4:
-    st.warning("ℹ️ **READ-ONLY PUBLIC MARKET DATA — NO REAL TRADING EXECUTION**")
-    
-    if latest_kalshi_json.exists():
-        market_data = load_json(latest_kalshi_json)
-        st.write(f"**Latest Snapshot:** {market_data.get('fetched_at_utc', 'N/A')}")
-        
-        found_count = market_data.get("markets_found", 0)
-        if found_count == 0:
-            st.warning("⚠️ **YELLOW: No Miami/KMIA Kalshi temperature market selected yet.**")
-            st.info("To fix this, add a known Kalshi market ticker or series ticker to `backend/config/kalshi_market_discovery.json`.")
-            st.markdown("[View Setup Guide](file:///Users/computer/Desktop/App%20Development/Kalshi/docs/KALSHI_MANUAL_TICKER_SETUP.md)")
-        else:
-            st.success(f"✅ {found_count} markets selected.")
+    with tabs[1]:
+        st.header("Latest Forecast Report")
+        if latest_forecast_md:
+            st.markdown(load_text(latest_forecast_md))
 
-        # Manual Tracking Info
-        with st.expander("Tracking Metadata", expanded=False):
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.write("**Known Tickers Used:**", market_data.get("known_market_tickers_used", []))
-                st.write("**Known Series Used:**", market_data.get("known_series_tickers_used", []))
-            with col_b:
-                st.write("**Missing Tickers:**", market_data.get("missing_known_tickers", []))
-                st.write("**Missing Series:**", market_data.get("missing_known_series", []))
-            
-            st.write("**Manual Matches:**", len(market_data.get("manual_matches", [])))
-            st.write("**Next Action:**", market_data.get("next_action", "N/A"))
+    with tabs[2]:
+        st.header("Weather Ingestion Status (KMIA)")
+        if latest_weather_json.exists():
+            st.json(load_json(latest_weather_json))
 
-        markets = market_data.get("markets", [])
-        if markets:
-            display_data = []
-            for m in markets:
-                display_data.append({
-                    "Ticker": m.get("ticker"),
-                    "Title": m.get("title"),
-                    "Subtitle": m.get("subtitle"),
-                    "Last Price": m.get("last_price"),
-                    "Yes Bid": m.get("yes_bid"),
-                    "Yes Ask": m.get("yes_ask")
-                })
-            st.dataframe(pd.DataFrame(display_data))
-        else:
-            st.info("No temperature markets currently tracked.")
-    else:
-        st.warning("No Kalshi market snapshots found.")
-        st.info("Run the following command to update market data:")
-        st.code("bash scripts/update_kalshi_market_data.sh")
+    with tabs[3]:
+        st.header("Kalshi Market Discovery")
+        if latest_kalshi_json.exists():
+            st.json(load_json(latest_kalshi_json))
 
-with tab5:
-    st.subheader("Paper Trading Ledger")
-    st.info("🚨 NO REAL TRADING EXECUTION - This ledger records simulated trades for evaluation purposes only.")
-    
-    ledger_path = ROOT / "backend" / "data" / "processed" / "paper_trading" / "paper_trade_ledger.jsonl"
-    if ledger_path.exists():
-        trades = []
-        with open(ledger_path, "r") as f:
-            for line in f:
-                try:
-                    trades.append(json.loads(line))
-                except:
-                    continue
-        
-        if trades:
+    with tabs[4]:
+        st.header("Paper Trading Ledger")
+        st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
+        LEDGER_FILE = PAPER_DIR / "paper_trade_ledger.jsonl"
+        if LEDGER_FILE.exists():
+            trades = []
+            with open(LEDGER_FILE, "r") as f:
+                for line in f:
+                    try:
+                        trades.append(json.loads(line))
+                    except:
+                        continue
             st.metric("Open Paper Trades", len(trades))
-            # Show latest trade at top
-            trades_df = pd.DataFrame(trades)
-            st.dataframe(trades_df.iloc[::-1])
+            if trades:
+                df_trades = pd.DataFrame(trades)
+                st.dataframe(df_trades.iloc[::-1])
         else:
             st.write("No paper trades recorded yet.")
-    else:
-        st.write("Ledger file not found.")
 
-    st.header("Paper Trading Analysis")
-    st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
-    
-    if p_data:
-        st.write(f"**Generated At:** {p_data.get('generated_at_utc')}")
-        st.write(f"**Forecast Source:** `{p_data.get('forecast_source')}`")
-        
-        signals = p_data.get("signals", [])
-        if signals:
-            st.subheader("All Quantitative Signals")
-            df_signals = pd.DataFrame(signals)
-            # Reorder for display
-            cols = ["ticker", "bin", "model_prob", "market_prob", "edge", "expected_value", "action", "confidence"]
-            st.dataframe(df_signals[cols].style.format({
-                "model_prob": "{:.1%}",
-                "market_prob": "{:.1%}",
-                "edge": "{:+.1%}",
-                "expected_value": "{:+.2f}"
-            }))
-        else:
-            st.info("No signals found for tracked markets.")
-    else:
-        st.warning("No paper trading signal data found.")
-        st.info("Run: `bash scripts/generate_paper_signal.sh` to generate signals.")
+        st.header("Latest Signals")
+        if p_data:
+            signals = p_data.get("signals", [])
+            if signals:
+                df_signals = pd.DataFrame(signals)
+                cols = ["market_ticker", "forecast_bin", "model_probability", "market_implied_probability", "edge", "expected_value", "paper_action", "confidence"]
+                st.dataframe(df_signals[cols].style.format({
+                    "model_probability": "{:.1%}",
+                    "market_implied_probability": "{:.1%}",
+                    "edge": "{:+.1%}",
+                    "expected_value": "{:+.2f}"
+                }))
 
-with tab6:
-    st.header("Latest Model Comparison")
-    content = load_text(latest_comparison_md)
-    if content:
-        st.markdown(content)
-    else:
-        st.info("No comparison reports available yet.")
+    with tabs[5]:
+        st.header("Latest Workflow Logs")
+        if latest_log:
+            st.code(load_text(latest_log)[-5000:], language="text")
 
-with tab7:
-    st.header("Aggregate Calibration")
-    if agg_cal_json.exists():
-        cal_data = load_json(agg_cal_json)
-        st.json(cal_data)
-    elif agg_cal_md.exists():
-        content = load_text(agg_cal_md)
-        st.markdown(content)
-    else:
-        st.info("Aggregate calibration data not found.")
+    with tabs[6]:
+        st.header("Discovered Files")
+        file_info = []
+        for d in [STATUS_DIR, REPORTS_DIR, LOGS_DIR, CAL_DIR, KALSHI_DIR, PAPER_DIR]:
+            if d.exists():
+                for f in d.glob("*"):
+                    if f.is_file():
+                        file_info.append({"Dir": d.name, "File": f.name, "Size": f.stat().st_size})
+        if file_info:
+            st.table(pd.DataFrame(file_info))
 
-with tab8:
-    st.header("Latest Workflow Logs")
-    if latest_log:
-        st.text(f"File: {latest_log}")
-        content = load_text(latest_log)
-        if content:
-            st.code(content[-10000:], language="text")
-    else:
-        st.info("No workflow logs found.")
-
-with tab9:
-    st.header("Discovered Files")
-    file_info = []
-    for d in [STATUS_DIR, REPORTS_DIR, LOGS_DIR, CAL_DIR, KALSHI_DIR, PAPER_DIR]:
-        if d.exists():
-            for f in d.glob("*"):
-                if f.is_file():
-                    file_info.append({
-                        "Name": f.name,
-                        "Path": str(f.relative_to(ROOT)),
-                        "Updated": datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
-                    })
-    if file_info:
-        df = pd.DataFrame(file_info)
-        st.table(df.sort_values(by="Updated", ascending=False))
-    else:
-        st.info("No files discovered in processed data directories.")
-
-with tab10:
-    st.header("Operator Notes & Commands")
-    st.markdown("""
-    ### Daily Workflow
-    To refresh forecasts and calibration:
-    ```bash
-    bash scripts/run_kmia_daily_workflow.sh
-    ```
-
-    ### Market Data
-    To update read-only Kalshi market data:
-    ```bash
-    bash scripts/update_kalshi_market_data.sh
-    ```
-
-    ### Paper Trading
-    To generate paper signals and edge analysis:
-    ```bash
-    bash scripts/generate_paper_signal.sh
-    ```
-
-    ### Status Generation
-    To regenerate the dashboard data:
-    ```bash
-    bash scripts/generate_daily_status.sh
-    ```
-
-    ### System Testing
-    To verify code safety and logic:
-    ```bash
-    bash scripts/run_tests.sh
-    ```
-
-    ---
-    **Operator Notice**: If market discovery finds 0 matching markets, the system status will show as **YELLOW**. This is an advisory state, not a system failure.
-    
-    **Security Notice**: This console is read-only. No trading actions can be performed from this interface. **NO REAL TRADING EXECUTION.**
-    """)
-
-st.divider()
-st.caption("KMIA Kalshi Predictor — Dry-Run Evaluation System")
+    with tabs[7]:
+        st.header("Operator Notes")
+        st.write("""
+        ### Daily Workflow
+        ```bash
+        bash scripts/run_kmia_daily_workflow.sh
+        bash scripts/generate_paper_signal.sh
+        bash scripts/record_paper_trade.sh
+        ```
+        """)

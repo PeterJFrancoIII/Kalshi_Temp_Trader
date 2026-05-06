@@ -14,11 +14,11 @@ def test_record_paper_trade_logic():
     # 1. Mock Signal with PAPER BUY CANDIDATE
     signal_data = {
         "best_signal": {
-            "ticker": "TEST-TICKER-1",
-            "action": "PAPER BUY CANDIDATE",
-            "bin": "85-86",
-            "model_prob": 0.4,
-            "market_prob": 0.2,
+            "market_ticker": "TEST-TICKER-1",
+            "paper_action": "PAPER BUY CANDIDATE",
+            "forecast_bin": "85-86",
+            "model_probability": 0.4,
+            "market_implied_probability": 0.2,
             "edge": 0.2
         }
     }
@@ -58,7 +58,7 @@ def test_record_paper_trade_logic():
             assert len(lines) == 1 # Still 1
             
         # Run with NO EDGE
-        signal_data["best_signal"]["action"] = "NO EDGE"
+        signal_data["best_signal"]["paper_action"] = "NO EDGE"
         with open(signal_file, "w") as f:
             json.dump(signal_data, f)
             
