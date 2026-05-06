@@ -2,32 +2,25 @@
 
 ## What to check
 
-For daily routines, see the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
+For daily tasks, see the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
 
 1. Open the console.
-2. Look at SYSTEM STATUS.
+2. Check the status color. See [What The Colors Mean](WHAT_THE_COLORS_MEAN.md).
 3. If GREEN, do nothing.
-4. If YELLOW, read ACTION NEEDED.
-5. If RED, check Logs tab.
+4. If YELLOW or RED, read the message.
 
 ## Safe commands
 
-- `bash scripts/run_tests.sh`: Run all system tests.
-- `bash scripts/generate_daily_status.sh`: Refresh system status report.
-- `bash scripts/run_kmia_daily_workflow.sh`: Run the full daily prediction workflow.
-- `bash scripts/update_kalshi_market_data.sh`: Update Kalshi market price data.
+- `bash scripts/run_tests.sh`: Run tests.
+- `bash scripts/generate_daily_status.sh`: Update status report.
+- `bash scripts/update_kalshi_market_data.sh`: Update market prices.
 
 ## Troubleshooting
 
-For quick fixes, see the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).
-
-## Daily Routine
-
-For daily routine checks, refer to the [Daily Simple Checklist](DAILY_SIMPLE_CHECKLIST.md).
+See the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).
 
 ## Safety
 
-This system is DRY-RUN / PAPER EVALUATION ONLY.
+**DRY-RUN / PAPER EVALUATION ONLY.**
 **NO REAL TRADING EXECUTION.**
-
-Do not add trading controls or API keys.
+Do not add trading or API keys.

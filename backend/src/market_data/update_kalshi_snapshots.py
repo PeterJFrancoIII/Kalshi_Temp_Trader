@@ -44,12 +44,20 @@ def main():
         attempts = discovery_result.get("endpoint_attempts", [])
         raw_count = discovery_result.get("total_raw_markets_seen", 0)
         
+        print(f"Discovery complete. Raw markets seen: {raw_count}")
+        for att in attempts:
+            print(f"  Endpoint: {att.get('endpoint')} -> Status: {att.get('status')} ({att.get('count', 0)} items)")
+            if att.get("error"):
+                print(f"    Error: {att.get('error')}")
+
         # Selection Logic
         selected = []
         for m in candidates:
             ticker = m.get("ticker", "").upper()
             series = m.get("series_ticker", "").upper()
-            text = (f"{m.get('title', '')} {m.get('subtitle', '')} {ticker} {series}").lower()
+            title = m.get("title", "")
+            subtitle = m.get("subtitle", "")
+            text = (f"{title} {subtitle} {ticker} {series}").lower()
             
             # 1. Check known tickers first
             if ticker in [t.upper() for t in known_markets] or series in [s.upper() for s in known_series]:
@@ -60,10 +68,16 @@ def main():
             if all(pt.lower() in text for pt in preferred_terms):
                 selected.append(m)
         
-        print(f"Total raw markets seen: {raw_count}")
-        print(f"Candidate markets: {len(candidates)}")
-        print(f"Selected Miami temperature markets: {len(selected)}")
+        print(f"Candidate markets (matched any term): {len(candidates)}")
+        print(f"Selected Miami/KMIA temperature markets: {len(selected)}")
         
+        if not selected and candidates:
+            print("\nPROVING NO MATCHES: Reviewing candidates that matched broad terms but failed selection:")
+            for m in candidates[:10]: # Show top 10
+                print(f"  - Ticker: {m.get('ticker')} | Title: {m.get('title')} | Sub: {m.get('subtitle')}")
+            if len(candidates) > 10:
+                print(f"  ... and {len(candidates)-10} more.")
+
         next_action = "None. System is healthy."
         warnings = []
         if not selected:
@@ -77,7 +91,11 @@ def main():
             "search_terms_used": search_terms,
             "endpoint_attempts": attempts,
             "total_raw_markets_seen": raw_count,
-            "candidate_markets": candidates,
+            "candidate_markets_count": len(candidates),
+            "candidate_markets_summary": [
+                {"ticker": m.get("ticker"), "title": m.get("title"), "subtitle": m.get("subtitle")}
+                for m in candidates
+            ],
             "selected_temperature_markets": selected,
             "markets_found": len(selected), # Compatibility
             "markets": selected,           # Compatibility
@@ -92,7 +110,7 @@ def main():
         }
         
         saved_path = client.save_market_snapshot(snapshot, OUTPUT_DIR)
-        print(f"Snapshot saved to: {saved_path}")
+        print(f"\nSnapshot saved to: {saved_path}")
         print("Success.")
         
     except Exception as e:

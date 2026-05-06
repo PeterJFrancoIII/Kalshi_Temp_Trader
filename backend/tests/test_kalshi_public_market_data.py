@@ -24,24 +24,51 @@ def test_kalshi_client_no_auth_references():
 
 def test_kalshi_client_mocked_discovery():
     """
-    Verify discovery logic with mocked API responses.
+    Verify that the client can find a specific Miami temperature market in a mock list.
     """
-    mock_response = MagicMock()
-    mock_response.json.return_value = {
+    # Mock for /markets
+    mock_markets_resp = MagicMock()
+    mock_markets_resp.json.return_value = {
         "markets": [
-            {"title": "Will it be hot in Miami?", "ticker": "MIA-HOT", "subtitle": "High temp > 90"},
-            {"title": "Rain in Seattle", "ticker": "SEA-RAIN", "subtitle": "Wet"}
+            {
+                "ticker": "MIA-HOT",
+                "title": "Miami High Temperature",
+                "subtitle": "Will it be 85?",
+                "category": "weather"
+            },
+            {
+                "ticker": "NYC-COLD",
+                "title": "NYC Temperature",
+                "subtitle": "Will it be 32?",
+                "category": "weather"
+            }
         ]
     }
-    mock_response.raise_for_status = MagicMock()
+    mock_markets_resp.raise_for_status = MagicMock()
 
-    with patch("requests.get", return_value=mock_response):
+    # Mock for /series
+    mock_series_resp = MagicMock()
+    mock_series_resp.json.return_value = {"series": []}
+    mock_series_resp.raise_for_status = MagicMock()
+
+    # Define side_effect to handle multiple calls
+    def side_effect(url, params=None, headers=None):
+        if "/markets" in url:
+            return mock_markets_resp
+        if "/series" in url:
+            return mock_series_resp
+        return MagicMock()
+
+    with patch("requests.get", side_effect=side_effect):
         client = KalshiPublicClient()
         result = client.discover_temperature_markets(["miami", "high"])
         discovered = result["candidate_markets"]
+        attempts = result["endpoint_attempts"]
     
     assert len(discovered) == 1
     assert discovered[0]["ticker"] == "MIA-HOT"
+    assert len(attempts) >= 2
+    assert attempts[0]["endpoint"] == "/markets"
 
 def test_kalshi_config_exists():
     """Verify that the discovery config file exists and is valid JSON."""
@@ -58,19 +85,32 @@ def test_kalshi_config_exists():
 
 def test_kalshi_client_broad_discovery():
     """
-    Verify discovery logic finds ANY matching term.
+    Verify discovery logic finds ANY matching term across multiple endpoints.
     """
-    mock_response = MagicMock()
-    mock_response.json.return_value = {
+    # Mock for /markets
+    mock_markets_resp = MagicMock()
+    mock_markets_resp.json.return_value = {
         "markets": [
             {"title": "Miami Heat", "ticker": "MIA-HEAT", "subtitle": "", "category": "weather"},
             {"title": "New York Weather", "ticker": "NYC-WX", "subtitle": "temperature", "category": "weather"},
             {"title": "Random Market", "ticker": "RND", "subtitle": "", "category": "finance"}
         ]
     }
-    mock_response.raise_for_status = MagicMock()
+    mock_markets_resp.raise_for_status = MagicMock()
 
-    with patch("requests.get", return_value=mock_response):
+    # Mock for /series
+    mock_series_resp = MagicMock()
+    mock_series_resp.json.return_value = {"series": []}
+    mock_series_resp.raise_for_status = MagicMock()
+
+    def side_effect(url, params=None, headers=None):
+        if "/markets" in url:
+            return mock_markets_resp
+        if "/series" in url:
+            return mock_series_resp
+        return MagicMock()
+
+    with patch("requests.get", side_effect=side_effect):
         client = KalshiPublicClient()
         # Should match MIA-HEAT (Miami) and NYC-WX (temperature)
         result = client.discover_temperature_markets(["Miami", "temperature"])

@@ -35,38 +35,65 @@ class KalshiPublicClient:
 
     def discover_temperature_markets(self, query_terms: List[str]) -> Dict[str, Any]:
         """
-        Broadly discover markets matching query terms.
-        Returns a dict with discovery metadata and the discovered markets.
+        Exhaustively discover markets matching query terms across multiple endpoints.
+        Returns a dict with detailed discovery metadata and candidates.
         """
         attempts = []
         all_markets = []
         
-        # Attempt 1: Get all open markets
-        path = "/markets"
-        params = {"status": "open", "limit": 1000}
-        attempts.append({"path": path, "params": params})
-        
+        # 1. Attempt: Get all open markets
+        m_path = "/markets"
+        m_params = {"status": "open", "limit": 1000}
+        attempts.append({"endpoint": m_path, "params": m_params})
         try:
-            response = self._get(path, params=params)
-            all_markets = response.get("markets", [])
+            m_resp = self._get(m_path, params=m_params)
+            markets = m_resp.get("markets", [])
+            all_markets.extend(markets)
+            attempts[-1]["count"] = len(markets)
+            attempts[-1]["status"] = "success"
         except Exception as e:
+            attempts[-1]["status"] = "error"
             attempts[-1]["error"] = str(e)
 
-        discovered = []
+        # 2. Attempt: Get all series (to check for weather series)
+        s_path = "/series"
+        attempts.append({"endpoint": s_path, "params": {}})
+        try:
+            s_resp = self._get(s_path)
+            series = s_resp.get("series", [])
+            attempts[-1]["count"] = len(series)
+            attempts[-1]["status"] = "success"
+            
+            # If we find a series matching 'temperature', 'weather', or 'miami'
+            # we could potentially crawl its markets specifically.
+            # For now, we just log the series count.
+        except Exception as e:
+            attempts[-1]["status"] = "error"
+            attempts[-1]["error"] = str(e)
+
+        # Candidate Discovery (Broad match)
+        candidates = []
+        seen_tickers = set()
+        
         for market in all_markets:
+            ticker = market.get("ticker", "")
+            if ticker in seen_tickers:
+                continue
+            seen_tickers.add(ticker)
+            
             search_text = (
                 f"{market.get('title', '')} {market.get('subtitle', '')} "
-                f"{market.get('ticker', '')} {market.get('category', '')}"
+                f"{ticker} {market.get('category', '')} {market.get('event_ticker', '')} "
+                f"{market.get('series_ticker', '')}"
             ).lower()
             
-            # Match ANY term for broad candidate discovery
             if any(term.lower() in search_text for term in query_terms):
-                discovered.append(market)
+                candidates.append(market)
                 
         return {
             "endpoint_attempts": attempts,
-            "total_raw_markets_seen": len(all_markets),
-            "candidate_markets": discovered
+            "total_raw_markets_seen": len(seen_tickers),
+            "candidate_markets": candidates
         }
 
     def save_market_snapshot(self, snapshot: Dict[str, Any], output_dir: Path) -> Path:

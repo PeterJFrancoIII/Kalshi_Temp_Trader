@@ -2,35 +2,19 @@
 
 ## 1. Open the console
 
-Use the browser link from the SSH tunnel.
+Use the browser link.
 
-## 2. Look at SYSTEM STATUS
+## 2. Check the status color
 
-### GREEN
+See [What The Colors Mean](WHAT_THE_COLORS_MEAN.md).
 
-Everything is working.
-Do nothing.
-
-### YELLOW
-
-The bot is working, but something needs attention.
-Read ACTION NEEDED.
-Most common reason:
-Kalshi market discovery found 0 markets.
-
-### RED
-
-Something important is broken.
-Go to the Logs tab.
-Run:
-
-```bash
-bash scripts/health_summary.sh
-```
+* **GREEN**: Everything is working. Do nothing.
+* **YELLOW**: Bot is working, but needs attention. Read the message.
+* **RED**: Something is broken. Run `bash scripts/health_summary.sh`.
 
 ## 3. Safe commands
 
-Run from the server:
+Run these from the server:
 
 ```bash
 cd /opt/kmia-kalshi
@@ -44,26 +28,15 @@ bash scripts/update_kalshi_market_data.sh
 
 ## 4. Git sync check
 
-Mac:
+The codes on Mac and server should match.
 
-```bash
-cd "/Users/computer/Desktop/App Development/Kalshi"
-git rev-parse HEAD
-```
-
-Server:
-
-```bash
-cd /opt/kmia-kalshi
-git rev-parse HEAD
-```
-
-The hashes should match.
+Mac: `git rev-parse HEAD`
+Server: `git rev-parse HEAD`
 
 ## 5. Safety
 
-**This system is DRY-RUN / PAPER EVALUATION ONLY.**
+**DRY-RUN / PAPER EVALUATION ONLY.**
 
 **NO REAL TRADING EXECUTION.**
 
-The bot must not place real Kalshi orders.
+The bot must not place real orders.
