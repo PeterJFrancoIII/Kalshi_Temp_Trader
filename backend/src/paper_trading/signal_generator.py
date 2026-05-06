@@ -40,26 +40,83 @@ def parse_forecast_bins_from_md(md_path: Path) -> Dict[str, float]:
     
     return bins
 
-def map_market_to_bin(title: str) -> Optional[str]:
-    """Maps Kalshi market titles to our internal bin labels."""
-    title = title.lower()
+def map_market_to_bin(m: Dict[str, Any], model_bins: Dict[str, float]) -> Dict[str, Any]:
+    """
+    Maps a Kalshi market to model bins and calculates the total model probability.
+    Returns { "bin_label": "...", "model_prob": 0.0, "warnings": [] }
+    """
+    title = m.get("title", "").lower()
+    subtitle = m.get("subtitle", "").lower()
+    text = (title + " " + subtitle).replace("\u00b0", "deg") # Handle degree symbol
     
-    # "between 81 and 82" -> "81-82"
-    between_match = re.search(r"between\s+(\d+)\s+and\s+(\d+)", title)
-    if between_match:
-        return f"{between_match.group(1)}-{between_match.group(2)}"
+    res = { "bin_label": "Unknown", "model_prob": 0.0, "warnings": [] }
     
-    # "87 degrees or above" -> ">=87"
-    above_match = re.search(r"(\d+)\s+degrees\s+or\s+above", title)
-    if above_match:
-        return f">={above_match.group(1)}"
+    # 1. Extract Range from Kalshi
+    k_low = -float('inf')
+    k_high = float('inf')
+    
+    # Patterns for Ranges
+    range_match = re.search(r"(\d+)(?:\s*deg|\s*degrees)?\s*(?:to|-|and)\s*(\d+)", text)
+    if range_match:
+        k_low = int(range_match.group(1))
+        k_high = int(range_match.group(2))
+    
+    # Patterns for Upper Thresholds
+    above_match = re.search(r"(\d+)\s*(?:deg|degrees)?\s*or\s*above", text)
+    if not range_match and above_match:
+        k_low = int(above_match.group(1))
+    elif not range_match:
+        above_match = re.search(r"(?:above\s+|>\s*)(\d+)", text)
+        if above_match:
+            k_low = int(above_match.group(1)) + 1
+            if ">=" in text: k_low -= 1
+
+    # Patterns for Lower Thresholds
+    below_match = re.search(r"(\d+)\s*(?:deg|degrees)?\s*or\s*below", text)
+    if not range_match and below_match:
+        k_high = int(below_match.group(1))
+    elif not range_match:
+        below_match = re.search(r"(?:below\s+|<\s*)(\d+)", text)
+        if below_match:
+            k_high = int(below_match.group(1)) - 1
+            if "<=" in text: k_high += 1
+    
+    if k_low == -float('inf') and k_high == float('inf'):
+        res["warnings"].append(f"Could not parse range from: {subtitle}")
+        return res
+
+    # 2. Map to Model Bins
+    # Model bins are: <=78, 79-80, 81-82, 83-84, 85-86, >=87
+    matched_bins = []
+    total_prob = 0.0
+    
+    for b_label, b_prob in model_bins.items():
+        # Parse model bin range
+        m_low = -float('inf')
+        m_high = float('inf')
         
-    # "78 degrees or below" -> "<=78"
-    below_match = re.search(r"(\d+)\s+degrees\s+or\s+below", title)
-    if below_match:
-        return f"<={below_match.group(1)}"
+        if "-" in b_label:
+            m_low, m_high = map(int, b_label.split("-"))
+        elif "<=" in b_label:
+            m_high = int(b_label.replace("<=", ""))
+        elif ">=" in b_label:
+            m_low = int(b_label.replace(">=", ""))
+            
+        # Check overlap: max(start) <= min(end)
+        overlap_start = max(k_low, m_low)
+        overlap_end = min(k_high, m_high)
         
-    return None
+        if overlap_start <= overlap_end:
+            matched_bins.append(b_label)
+            total_prob += b_prob
+            
+    if matched_bins:
+        res["bin_label"] = "/".join(matched_bins) if len(matched_bins) > 1 else matched_bins[0]
+        res["model_prob"] = total_prob
+    else:
+        res["warnings"].append(f"No model bin overlap for Kalshi range {k_low}-{k_high}")
+        
+    return res
 
 def generate_paper_signal():
     """Generates a quantitative edge report comparing model vs market."""
@@ -83,29 +140,54 @@ def generate_paper_signal():
         markets = market_data.get("markets", []) # Fallback to generic list
     
     signals = []
+    warnings = []
+    
+    if not model_bins:
+        warnings.append("No forecast bins available. Ensure daily workflow ran.")
+    if not markets:
+        warnings.append("No Kalshi markets available in snapshot.")
+
     for m in markets:
         ticker = m.get("ticker")
-        title = m.get("title", "")
-        bin_label = map_market_to_bin(title)
+        mapping = map_market_to_bin(m, model_bins)
         
-        # We need a match in our model bins to calculate edge
-        if not bin_label or bin_label not in model_bins:
+        if mapping["bin_label"] == "Unknown":
+            if mapping["warnings"]:
+                warnings.extend([f"{ticker}: {w}" for w in mapping["warnings"]])
             continue
             
-        model_prob = model_bins[bin_label]
+        model_prob = mapping["model_prob"]
         
-        # Extract Market Implied Probability
-        # yes_bid/yes_ask are in cents (0-100)
-        bid = m.get("yes_bid")
-        ask = m.get("yes_ask")
+        # Extract Market Price (0.0 - 1.0)
+        # Check for both cents (yes_ask) and dollars (yes_ask_dollars)
+        ask = m.get("yes_ask_dollars")
+        bid = m.get("yes_bid_dollars")
+        last = m.get("last_price_dollars")
         
+        # Fallback to cents if dollars missing
+        if ask is None and m.get("yes_ask") is not None:
+            ask = m.get("yes_ask") / 100.0
+        else:
+            ask = float(ask) if ask is not None else None
+            
+        if bid is None and m.get("yes_bid") is not None:
+            bid = m.get("yes_bid") / 100.0
+        else:
+            bid = float(bid) if bid is not None else None
+
+        if last is None and m.get("last_price") is not None:
+            last = m.get("last_price") / 100.0
+        else:
+            last = float(last) if last is not None else None
+
+        # Determine Implied Prob
         market_prob = None
-        if bid is not None and ask is not None:
-            market_prob = (bid + ask) / 200.0 # Midpoint as 0.0 - 1.0
+        if ask is not None and bid is not None:
+            market_prob = (ask + bid) / 2.0
         elif ask is not None:
-            market_prob = ask / 100.0 # Conservative: assume ask
-        elif bid is not None:
-            market_prob = bid / 100.0 # Optimistic: assume bid
+            market_prob = ask
+        elif last is not None:
+            market_prob = last
             
         edge = None
         ev = None
@@ -114,9 +196,8 @@ def generate_paper_signal():
         
         if market_prob is not None:
             edge = model_prob - market_prob
-            # Expected Value for a $1 payoff (100 cents)
-            # EV = (Prob of Win * Payoff) - Cost
-            cost = ask / 100.0 if ask is not None else market_prob
+            # Expected Value for a $1 payoff
+            cost = ask if ask is not None else market_prob
             ev = (model_prob * 1.0) - cost
             
             # Action logic
@@ -128,17 +209,21 @@ def generate_paper_signal():
             elif edge > 0:
                 action = "WATCH"
                 confidence = "low"
+        else:
+            warnings.append(f"{ticker}: No price data available.")
         
         signals.append({
             "ticker": ticker,
-            "bin": bin_label,
-            "title": title,
+            "bin": mapping["bin_label"],
+            "title": m.get("title"),
+            "subtitle": m.get("subtitle"),
             "model_prob": round(model_prob, 4),
             "market_prob": round(market_prob, 4) if market_prob is not None else None,
             "edge": round(edge, 4) if edge is not None else None,
             "expected_value": round(ev, 4) if ev is not None else None,
             "action": action,
-            "confidence": confidence
+            "confidence": confidence,
+            "warnings": mapping["warnings"]
         })
 
     # Sort signals by edge descending
@@ -152,6 +237,7 @@ def generate_paper_signal():
         "market_snapshot_source": str(SNAPSHOT_FILE.name),
         "signals": signals,
         "best_signal": best_signal,
+        "warnings": list(set(warnings)),
         "safety": {
             "no_real_trading": True,
             "disclaimer": "NO REAL TRADING EXECUTION - PAPER ONLY"

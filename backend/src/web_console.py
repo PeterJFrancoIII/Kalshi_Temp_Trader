@@ -413,6 +413,29 @@ with tab4:
         st.code("bash scripts/update_kalshi_market_data.sh")
 
 with tab5:
+    st.subheader("Paper Trading Ledger")
+    st.info("🚨 NO REAL TRADING EXECUTION - This ledger records simulated trades for evaluation purposes only.")
+    
+    ledger_path = ROOT / "backend" / "data" / "processed" / "paper_trading" / "paper_trade_ledger.jsonl"
+    if ledger_path.exists():
+        trades = []
+        with open(ledger_path, "r") as f:
+            for line in f:
+                try:
+                    trades.append(json.loads(line))
+                except:
+                    continue
+        
+        if trades:
+            st.metric("Open Paper Trades", len(trades))
+            # Show latest trade at top
+            trades_df = pd.DataFrame(trades)
+            st.dataframe(trades_df.iloc[::-1])
+        else:
+            st.write("No paper trades recorded yet.")
+    else:
+        st.write("Ledger file not found.")
+
     st.header("Paper Trading Analysis")
     st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
     
