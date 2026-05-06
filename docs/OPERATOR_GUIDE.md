@@ -26,6 +26,7 @@ To understand runtime output files and Git status, see [Git Hygiene](GIT_HYGIENE
 
 For details on simulated trades and performance tracking, see the [Paper Trading Feedback](PAPER_TRADING_FEEDBACK.md) guide.
 To monitor the background loop, see [Automated Paper Trading Loop](AUTOMATED_PAPER_LOOP.md).
+For strategy lessons, see [Learning Summary](LEARNING_SUMMARY.md).
 
 ## Safety
 
