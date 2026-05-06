@@ -13,6 +13,7 @@ See [What The Colors Mean](WHAT_THE_COLORS_MEAN.md).
 * **RED**: Something is broken. Run `bash scripts/health_summary.sh`.
 
 For monitoring simulated performance, see [Paper Trading Feedback](PAPER_TRADING_FEEDBACK.md).
+For background loop status, see [Automated Paper Trading Loop](AUTOMATED_PAPER_LOOP.md).
 
 ## 3. Safe commands
 

@@ -23,6 +23,7 @@ Specifically, check there if Today's Forecast says **Unknown**.
 ## Paper Trading
 
 For details on simulated trades and performance tracking, see the [Paper Trading Feedback](PAPER_TRADING_FEEDBACK.md) guide.
+To monitor the background loop, see [Automated Paper Trading Loop](AUTOMATED_PAPER_LOOP.md).
 
 ## Safety
 

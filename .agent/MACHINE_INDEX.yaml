@@ -31,6 +31,7 @@ critical_files:
   troubleshooting: docs/TROUBLESHOOTING_SIMPLE.md
   daily_checklist: docs/DAILY_SIMPLE_CHECKLIST.md
   paper_trading: docs/PAPER_TRADING_FEEDBACK.md
+  automated_paper_loop: docs/AUTOMATED_PAPER_LOOP.md
   governance: CODE_GOVERNANCE.md
 
 deployment:

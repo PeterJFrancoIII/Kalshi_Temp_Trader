@@ -32,5 +32,18 @@ class TestOperatorDocs(unittest.TestCase):
         self.assertIn("SETTLED TRADE", content)
         self.assertIn("simulated", content)
 
+    def test_automated_paper_loop_doc_exists(self):
+        """Verify that docs/AUTOMATED_PAPER_LOOP.md exists."""
+        self.assertTrue(os.path.exists(os.path.join(os.getcwd(), "docs", "AUTOMATED_PAPER_LOOP.md")))
+
+    def test_automated_paper_loop_doc_content(self):
+        """Verify the content of docs/AUTOMATED_PAPER_LOOP.md."""
+        with open(os.path.join(os.getcwd(), "docs", "AUTOMATED_PAPER_LOOP.md"), "r") as f:
+            content = f.read()
+        self.assertIn("NO REAL TRADING EXECUTION", content)
+        self.assertIn("paper-only", content)
+        self.assertIn("run_paper_trading_loop.sh", content)
+        self.assertIn("kmia-paper-trading-loop.timer", content)
+
 if __name__ == "__main__":
     unittest.main()
