@@ -22,6 +22,7 @@ See the [Simple Troubleshooting Guide](TROUBLESHOOTING_SIMPLE.md).
 Specifically, check there if Today's Forecast says **Unknown**.
 To understand runtime output files and Git status, see [Git Hygiene](GIT_HYGIENE.md).
 To correct incorrect market or weather data, see [Manual Data Corrections](MANUAL_DATA_CORRECTIONS.md).
+To monitor live weather feeds, see [Live NWS / KMIA Data](NWS_LIVE_DATA.md).
 
 ## Paper Trading
 
