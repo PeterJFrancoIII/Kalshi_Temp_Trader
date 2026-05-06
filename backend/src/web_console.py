@@ -186,13 +186,13 @@ if __name__ == "__main__":
         action_needed = "Run: bash scripts/update_kalshi_market_data.sh"
 
     # Extract Forecast Info
-    if latest_status_json:
-        status_data = load_json(latest_status_json)
+    status_data = load_json(latest_status_json) if latest_status_json else None
+    if isinstance(status_data, dict):
         forecast_info = status_data.get("forecast", {})
         if not forecast_info:
             f_dict = status_data.get("forecasts", {})
-            if f_dict:
-                forecast_info = f_dict.get("rules_v2_climatology") or next(iter(f_dict.values()))
+            if isinstance(f_dict, dict):
+                forecast_info = f_dict.get("rules_v2_climatology") or (next(iter(f_dict.values())) if f_dict else {})
                 
         if forecast_info:
             if isinstance(forecast_info, str):
@@ -202,7 +202,8 @@ if __name__ == "__main__":
             elif isinstance(forecast_info, dict):
                 forecast_val = str(forecast_info.get("best_single_number", "Unknown"))
                 top_bin = forecast_info.get("top_probability_bin", "Unknown")
-
+    
+    # Fallback to direct markdown parsing if status info is incomplete
     if forecast_val == "Unknown" or top_bin == "Unknown":
         summary = load_latest_forecast_summary(latest_forecast_md)
         forecast_val = summary.get("best_single_number", "Unknown")
@@ -242,20 +243,22 @@ if __name__ == "__main__":
         st.divider()
         st.subheader("🎯 Latest Paper Signal")
         best = p_data.get("best_signal")
-        if best:
+        if isinstance(best, dict):
             pcol1, pcol2, pcol3, pcol4 = st.columns(4)
             with pcol1:
-                st.write(f"**Action:** `{best.get('paper_action')}`")
-                st.write(f"**Confidence:** {best.get('confidence', 'Unknown').upper()}")
+                st.write(f"**Action:** `{best.get('paper_action', 'Unknown')}`")
+                st.write(f"**Confidence:** {str(best.get('confidence', 'Unknown')).upper()}")
             with pcol2:
-                st.write(f"**Ticker:** `{best.get('market_ticker')}`")
-                st.write(f"**Bin:** {best.get('forecast_bin')}")
+                st.write(f"**Ticker:** `{best.get('market_ticker', 'Unknown')}`")
+                st.write(f"**Bin:** {best.get('forecast_bin', 'Unknown')}")
             with pcol3:
                 st.write(f"**Model Prob:** {best.get('model_probability', 0):.1%}")
-                st.write(f"**Market Prob:** {best.get('market_implied_probability', 0):.1%}" if best.get('market_implied_probability') else "**Market Prob:** N/A")
+                st.write(f"**Market Prob:** {best.get('market_implied_probability', 0):.1%}" if best.get('market_implied_probability') is not None else "**Market Prob:** N/A")
             with pcol4:
                 st.write(f"**Edge:** {best.get('edge', 0):+.1%}" if best.get('edge') is not None else "**Edge:** N/A")
                 st.write(f"**EV ($1):** {best.get('expected_value', 0):+.2f}" if best.get('expected_value') is not None else "**EV:** N/A")
+        elif best:
+            st.warning(f"Best signal data is malformed: {best}")
 
     st.divider()
 

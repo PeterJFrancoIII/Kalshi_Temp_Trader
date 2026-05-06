@@ -182,43 +182,39 @@ def generate_paper_signal():
 
         # Determine Implied Prob
         market_prob = None
-        if ask is not None and bid is not None:
-            market_prob = (ask + bid) / 2.0
-        elif ask is not None:
+        if ask is not None:
             market_prob = ask
         elif last is not None:
             market_prob = last
+        
+        if market_prob is None:
+            warnings.append(f"{ticker}: No usable price data (yes_ask or last_price). Skipping.")
+            continue
             
-        edge = None
-        ev = None
+        edge = model_prob - market_prob
+        # Expected Value for a $1 payoff
+        cost = ask if ask is not None else market_prob
+        ev = (model_prob * 1.0) - cost
+        
+        # Action logic
         action = "NO EDGE"
         confidence = "low"
-        
-        if market_prob is not None:
-            edge = model_prob - market_prob
-            # Expected Value for a $1 payoff
-            cost = ask if ask is not None else market_prob
-            ev = (model_prob * 1.0) - cost
-            
-            # Action logic
-            if edge > 0.05: # > 5% edge
-                action = "PAPER BUY CANDIDATE"
-                confidence = "medium"
-                if edge > 0.15: # > 15% edge
-                    confidence = "high"
-            elif edge > 0:
-                action = "WATCH"
-        else:
-            warnings.append(f"{ticker}: No price data available.")
+        if edge > 0.05: # > 5% edge
+            action = "PAPER BUY CANDIDATE"
+            confidence = "medium"
+            if edge > 0.15: # > 15% edge
+                confidence = "high"
+        elif edge > 0:
+            action = "WATCH"
         
         signals.append({
             "market_ticker": ticker,
             "market_title": m.get("title"),
             "forecast_bin": mapping["bin_label"],
             "model_probability": round(model_prob, 4),
-            "market_implied_probability": round(market_prob, 4) if market_prob is not None else None,
-            "edge": round(edge, 4) if edge is not None else None,
-            "expected_value": round(ev, 4) if ev is not None else None,
+            "market_implied_probability": round(market_prob, 4),
+            "edge": round(edge, 4),
+            "expected_value": round(ev, 4),
             "paper_action": action,
             "confidence": confidence,
             "yes_ask": ask,

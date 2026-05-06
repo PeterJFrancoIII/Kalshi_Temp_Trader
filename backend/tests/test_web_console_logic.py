@@ -50,3 +50,15 @@ def test_load_latest_forecast_summary_string_path():
     summary = load_latest_forecast_summary(str(report_file))
     assert summary["best_single_number"] == "77"
     assert "77-78" in summary["top_probability_bin"]
+def test_load_latest_forecast_summary_malformed():
+    """Verify safe return for malformed content."""
+    temp_dir = Path(__file__).resolve().parent / "temp"
+    temp_dir.mkdir(exist_ok=True)
+    report_file = temp_dir / "malformed.md"
+    report_file.write_text("# Not a forecast\nJust some random text.")
+    
+    summary = load_latest_forecast_summary(report_file)
+    assert isinstance(summary, dict)
+    assert summary["best_single_number"] == "Unknown"
+    assert summary["top_probability_bin"] == "Unknown"
+    assert "malformed.md" in summary["source_file"]

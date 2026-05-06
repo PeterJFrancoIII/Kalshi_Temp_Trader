@@ -96,10 +96,60 @@ def test_generate_signal_logic():
         assert sig["market_ticker"] == "TEST-T90"
         # 90-91 is part of >=87 bin (prob 0.4)
         assert sig["model_probability"] == 0.4
-        # (0.1 + 0.08) / 2 = 0.09 market prob
-        assert abs(sig["market_implied_probability"] - 0.09) < 1e-6
-        assert sig["edge"] > 0.3
+        # Now uses yes_ask directly = 0.10
+        assert abs(sig["market_implied_probability"] - 0.10) < 1e-6
+        assert sig["edge"] >= 0.3
         assert sig["paper_action"] == "PAPER BUY CANDIDATE"
+    finally:
+        sg.REPORTS_DIR = original_reports
+        sg.SNAPSHOT_FILE = original_snapshot
+def test_generate_signal_safety_and_skipping():
+    """Verify safety field and price-based skipping."""
+    temp_dir = Path(__file__).resolve().parent / "temp"
+    temp_dir.mkdir(exist_ok=True)
+    
+    # 1. Create Mock Forecast
+    md_path = temp_dir / "kmia_forecast_mock_rules_v2_climatology.md"
+    md_path.write_text("## Probability Bins\n| 85-86 | 50.0% |")
+    
+    # 2. Create Mock Snapshot with one good market and one with no price
+    snapshot_path = temp_dir / "latest_kalshi_market_snapshot.json"
+    snapshot_data = {
+        "selected_temperature_markets": [
+            {
+                "ticker": "GOOD-TICKER",
+                "title": "Good",
+                "subtitle": "85\u00b0 to 86\u00b0",
+                "yes_ask_dollars": "0.10"
+            },
+            {
+                "ticker": "BAD-TICKER",
+                "title": "Bad",
+                "subtitle": "85\u00b0 to 86\u00b0",
+                "yes_ask": None,
+                "last_price": None
+            }
+        ]
+    }
+    with open(snapshot_path, "w") as f:
+        json.dump(snapshot_data, f)
+        
+    import paper_trading.signal_generator as sg
+    original_reports = sg.REPORTS_DIR
+    original_snapshot = sg.SNAPSHOT_FILE
+    sg.REPORTS_DIR = temp_dir
+    sg.SNAPSHOT_FILE = snapshot_path
+    
+    try:
+        report_path = sg.generate_paper_signal()
+        with open(report_path, "r") as f:
+            report = json.load(f)
+            
+        assert len(report["signals"]) == 1
+        assert report["signals"][0]["market_ticker"] == "GOOD-TICKER"
+        assert any("BAD-TICKER" in w for w in report["warnings"])
+        assert report["safety"]["no_real_trading"] is True
+        assert "NO REAL TRADING" in report["safety"]["disclaimer"]
     finally:
         sg.REPORTS_DIR = original_reports
         sg.SNAPSHOT_FILE = original_snapshot
