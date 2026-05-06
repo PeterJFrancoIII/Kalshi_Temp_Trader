@@ -27,14 +27,26 @@ def test_load_latest_forecast_summary_parsing():
 """
     report_file.write_text(report_content)
     
-    f_val, t_bin = load_latest_forecast_summary(report_file)
+    summary = load_latest_forecast_summary(report_file)
     
-    assert f_val == "82.5"
-    assert "81-82" in t_bin
-    assert "45.0%" in t_bin
+    assert summary["best_single_number"] == "82.5"
+    assert "81-82" in summary["top_probability_bin"]
+    assert "45.0%" in summary["top_probability_bin"]
 
 def test_load_latest_forecast_summary_missing():
     """Verify safe return for missing file."""
-    f_val, t_bin = load_latest_forecast_summary(Path("non_existent.md"))
-    assert f_val == "Unknown"
-    assert t_bin == "Unknown"
+    summary = load_latest_forecast_summary(Path("non_existent.md"))
+    assert summary["best_single_number"] == "Unknown"
+    assert summary["top_probability_bin"] == "Unknown"
+    assert len(summary["warnings"]) > 0
+
+def test_load_latest_forecast_summary_string_path():
+    """Verify that it handles string paths as well."""
+    temp_dir = Path(__file__).resolve().parent / "temp"
+    temp_dir.mkdir(exist_ok=True)
+    report_file = temp_dir / "test_string_path.md"
+    report_file.write_text("- **Forecast High:** 77°F\n## Probability Bins\n| 77-78 | 100% |")
+    
+    summary = load_latest_forecast_summary(str(report_file))
+    assert summary["best_single_number"] == "77"
+    assert "77-78" in summary["top_probability_bin"]

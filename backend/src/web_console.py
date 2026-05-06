@@ -49,22 +49,40 @@ import re
 def load_latest_forecast_summary(report_path):
     """
     Extracts today's forecast and top bin from the latest markdown report.
+    Returns a dict with status keys.
     """
-    if not report_path or not report_path.exists():
-        return "Unknown", "Unknown"
+    res = {
+        "best_single_number": "Unknown",
+        "top_probability_bin": "Unknown",
+        "source_file": str(report_path) if report_path else None,
+        "warnings": []
+    }
+
+    if not report_path:
+        return res
+
+    # Convert to Path if it's a string
+    if isinstance(report_path, str):
+        # If it's just a filename, assume it's in REPORTS_DIR
+        if not os.path.isabs(report_path) and "/" not in report_path:
+            report_path = REPORTS_DIR / report_path
+        else:
+            report_path = Path(report_path)
+
+    if not report_path.exists():
+        res["warnings"].append(f"Report file not found: {report_path.name}")
+        return res
     
     content = load_text(report_path)
     if not content:
-        return "Unknown", "Unknown"
-    
-    forecast_val = "Unknown"
-    top_bin = "Unknown"
+        res["warnings"].append(f"Report file empty: {report_path.name}")
+        return res
     
     # Extract Best Single Number
     # Look for: **Best Single-Number Estimate:** 85°F or **Forecast High:** 85°F
     sn_match = re.search(r"\*\*(?:Best Single-Number Estimate|Forecast High):\*\*\s*([\d.]+)", content)
     if sn_match:
-        forecast_val = sn_match.group(1)
+        res["best_single_number"] = sn_match.group(1)
         
     # Extract Probability Bins
     bin_section = re.search(r"## Probability Bins(.*?)(?:##|\Z)", content, re.DOTALL)
@@ -81,9 +99,9 @@ def load_latest_forecast_summary(report_path):
         if bins:
             # Sort by probability descending
             bins.sort(key=lambda x: x[1], reverse=True)
-            top_bin = f"{bins[0][0]} ({bins[0][1]}%)"
+            res["top_probability_bin"] = f"{bins[0][0]} ({bins[0][1]}%)"
             
-    return forecast_val, top_bin
+    return res
 
 # UI Header
 st.title("KMIA Kalshi Weather Console")
@@ -206,20 +224,27 @@ if latest_status_json:
         # Fallback to the 'forecasts' dict if 'forecast' is missing
         f_dict = status_data.get("forecasts", {})
         if f_dict:
-            # Pick first available or specific model
+            # Pick first available or specific model (these are filenames in the JSON)
             forecast_info = f_dict.get("rules_v2_climatology") or next(iter(f_dict.values()))
             
     if forecast_info:
-        forecast_val = str(forecast_info.get("best_single_number", "Unknown"))
-        top_bin = forecast_info.get("top_probability_bin", "Unknown")
+        if isinstance(forecast_info, str):
+            # It's a filename, parse the report
+            summary = load_latest_forecast_summary(forecast_info)
+            forecast_val = summary.get("best_single_number", "Unknown")
+            top_bin = summary.get("top_probability_bin", "Unknown")
+        elif isinstance(forecast_info, dict):
+            # It's already an object (possibly from an older/different schema)
+            forecast_val = str(forecast_info.get("best_single_number", "Unknown"))
+            top_bin = forecast_info.get("top_probability_bin", "Unknown")
 
-# Fallback to Markdown parsing if still Unknown
+# Fallback to Markdown parsing of the latest known forecast if still Unknown
 if forecast_val == "Unknown" or top_bin == "Unknown":
-    f_val, t_bin = load_latest_forecast_summary(latest_forecast_md)
+    summary = load_latest_forecast_summary(latest_forecast_md)
     if forecast_val == "Unknown":
-        forecast_val = f_val
+        forecast_val = summary.get("best_single_number", "Unknown")
     if top_bin == "Unknown":
-        top_bin = t_bin
+        top_bin = summary.get("top_probability_bin", "Unknown")
 
 # Display Summary Cards
 col1, col2, col3, col4 = st.columns(4)

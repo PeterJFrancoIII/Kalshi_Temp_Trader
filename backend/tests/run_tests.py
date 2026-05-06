@@ -196,7 +196,8 @@ from test_sync_tooling import (
 
 from test_web_console_logic import (
     test_load_latest_forecast_summary_parsing,
-    test_load_latest_forecast_summary_missing
+    test_load_latest_forecast_summary_missing,
+    test_load_latest_forecast_summary_string_path
 )
 
 from test_weather_ingestion import (
@@ -328,6 +329,7 @@ tests = [
     test_kalshi_manual_series_lookup,
     test_load_latest_forecast_summary_parsing,
     test_load_latest_forecast_summary_missing,
+    test_load_latest_forecast_summary_string_path,
     test_weather_status_serialization,
     test_stale_data_flag,
     test_observed_max_so_far,
