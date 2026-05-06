@@ -237,6 +237,14 @@ from test_manual_corrections import (
     test_get_correction_for_date as test_get_correction
 )
 
+from test_nws_live_client import (
+    test_c_to_f,
+    test_fetch_kmia_point_metadata,
+    test_build_live_nws_snapshot,
+    test_stale_data_detection,
+    test_missing_fields_no_crash
+)
+
 
 # Helper to run unittest classes in this runner
 def run_unittest_class(cls):
@@ -374,7 +382,12 @@ tests = [
     test_get_market_open_time_et,
     test_missing_file_fails_safely,
     test_invalid_json_fails_safely,
-    test_get_correction
+    test_get_correction,
+    test_c_to_f,
+    test_fetch_kmia_point_metadata,
+    test_build_live_nws_snapshot,
+    test_stale_data_detection,
+    test_missing_fields_no_crash
 ]
 
 

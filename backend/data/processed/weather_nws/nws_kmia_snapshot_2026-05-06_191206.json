@@ -1,0 +1,25 @@
+Fetching NWS KMIA live data...
+Error fetching point metadata: HTTPSConnectionPool(host='api.weather.gov', port=443): Max retries exceeded with url: /points/25.7959,-80.2870 (Caused by NameResolutionError("HTTPSConnection(host='api.weather.gov', port=443): Failed to resolve 'api.weather.gov' ([Errno 8] nodename nor servname provided, or not known)"))
+Error fetching latest observation: HTTPSConnectionPool(host='api.weather.gov', port=443): Max retries exceeded with url: /stations/KMIA/observations/latest (Caused by NameResolutionError("HTTPSConnection(host='api.weather.gov', port=443): Failed to resolve 'api.weather.gov' ([Errno 8] nodename nor servname provided, or not known)"))
+Error fetching recent observations: HTTPSConnectionPool(host='api.weather.gov', port=443): Max retries exceeded with url: /stations/KMIA/observations (Caused by NameResolutionError("HTTPSConnection(host='api.weather.gov', port=443): Failed to resolve 'api.weather.gov' ([Errno 8] nodename nor servname provided, or not known)"))
+{
+  "fetched_at_utc": "2026-05-06T23:12:06.835728+00:00",
+  "station": "KMIA",
+  "source": "api.weather.gov",
+  "latest_observation_time": null,
+  "current_temp_f": null,
+  "dewpoint_f": null,
+  "wind_speed_mph": null,
+  "wind_direction_degrees": null,
+  "observed_max_so_far_f": null,
+  "forecast_high_f": null,
+  "hourly_forecast_summary": null,
+  "stale_data": true,
+  "endpoint_status": "ERROR",
+  "warnings": [
+    "Could not fetch point metadata."
+  ],
+  "safety": {
+    "no_real_trading": true
+  }
+}

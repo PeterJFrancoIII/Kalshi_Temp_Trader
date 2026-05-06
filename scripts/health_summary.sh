@@ -60,11 +60,13 @@ DATA_DIR="$PROJECT_ROOT/backend/data/processed"
 LATEST_STATUS=$(ls -t "$DATA_DIR/status"/*.json 2>/dev/null | head -n 1)
 LATEST_FORECAST=$(ls -t "$DATA_DIR/reports"/kmia_forecast_*.md 2>/dev/null | head -n 1)
 LATEST_SNAPSHOT=$(ls -t "$DATA_DIR/kalshi_market_snapshots"/*.json 2>/dev/null | head -n 1)
+LATEST_NWS_SNAPSHOT=$(ls -t "$DATA_DIR/weather_nws"/*.json 2>/dev/null | head -n 1)
 CALIBRATION_FILE="$DATA_DIR/aggregate_calibration/aggregate_calibration.json"
 
 echo "Latest Status:   ${LATEST_STATUS:-NOT FOUND}"
 echo "Latest Forecast: ${LATEST_FORECAST:-NOT FOUND}"
 echo "Latest Snapshot: ${LATEST_SNAPSHOT:-NOT FOUND}"
+echo "Latest NWS:      ${LATEST_NWS_SNAPSHOT:-NOT FOUND}"
 
 # 5. Snapshot Market Count
 MARKETS_FOUND=0
@@ -79,7 +81,27 @@ else
     echo -e "${YELLOW}WARN: Latest snapshot missing or empty.${NC}"
 fi
 
-# 6. Resource Usage
+# 6. NWS Live Data Status
+NWS_LIVE_STATUS="MISSING"
+if [[ -n "$LATEST_NWS_SNAPSHOT" && -f "$LATEST_NWS_SNAPSHOT" ]]; then
+    if command -v jq >/dev/null 2>&1; then
+        IS_STALE=$(jq '.stale_data' "$LATEST_NWS_SNAPSHOT")
+        if [[ "$IS_STALE" == "false" ]]; then
+            NWS_LIVE_STATUS="CONNECTED"
+        else
+            NWS_LIVE_STATUS="STALE"
+        fi
+    else
+        if grep -q '"stale_data": false' "$LATEST_NWS_SNAPSHOT"; then
+            NWS_LIVE_STATUS="CONNECTED"
+        else
+            NWS_LIVE_STATUS="STALE"
+        fi
+    fi
+fi
+echo "NWS Live Data:   $NWS_LIVE_STATUS"
+
+# 7. Resource Usage
 DISK_USAGE=$(df -h / | tail -1 | awk '{print $5}')
 # Memory usage (portable-ish)
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -96,6 +118,7 @@ if [[ -z "$LATEST_STATUS" ]]; then echo -e "${YELLOW}WARN: Missing status file.$
 if [[ -z "$LATEST_FORECAST" ]]; then echo -e "${YELLOW}WARN: Missing forecast file.${NC}"; fi
 if [[ "$MARKETS_FOUND" -eq 0 ]]; then echo -e "${YELLOW}WARN: Zero markets found in latest snapshot.${NC}"; fi
 if [[ "$GIT_TREE" == "Dirty source changes" ]]; then echo -e "${YELLOW}WARN: Uncommitted source code changes exist.${NC}"; fi
+if [[ "$NWS_LIVE_STATUS" != "CONNECTED" ]]; then echo -e "${YELLOW}WARN: NWS Live Data is $NWS_LIVE_STATUS.${NC}"; fi
 
 # Final Status Logic
 # GREEN = console active, HTTP 200, status exists, forecast exists
@@ -122,7 +145,7 @@ fi
 
 if [[ "$CONSOLE_OK" == true && "$HTTP_OK" == true && "$FILES_OK" == true ]]; then
     # Could be GREEN or YELLOW
-    if [[ "$MARKETS_FOUND" -gt 0 && -f "$CALIBRATION_FILE" && -n "$LATEST_SNAPSHOT" && "$GIT_TREE" != "Dirty source changes" ]]; then
+    if [[ "$MARKETS_FOUND" -gt 0 && -f "$CALIBRATION_FILE" && -n "$LATEST_SNAPSHOT" && "$GIT_TREE" != "Dirty source changes" && "$NWS_LIVE_STATUS" == "CONNECTED" ]]; then
         STATUS_COLOR=$GREEN
         STATUS_TEXT="GREEN"
     else

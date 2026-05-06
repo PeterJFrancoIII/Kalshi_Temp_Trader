@@ -20,6 +20,7 @@ KALSHI_DIR = DATA / "kalshi_market_snapshots"
 HISTORY_FILE = DATA / "history" / "kmia_daily_history.jsonl"
 PAPER_DIR = DATA / "paper_trading"
 LEARNING_DIR = DATA / "learning"
+NWS_DIR = DATA / "weather_nws"
 
 try:
     from shared.manual_corrections import load_manual_corrections
@@ -126,6 +127,7 @@ if __name__ == "__main__":
     # Weather Data Ingestion Status
     WEATHER_INGESTION_DIR = DATA / "weather_ingestion"
     latest_weather_json = WEATHER_INGESTION_DIR / "latest_weather_ingestion_status.json"
+    latest_nws_json = NWS_DIR / "latest_nws_kmia_snapshot.json"
 
     # Sidebar Metrics
     st.sidebar.header("System Overview")
@@ -164,8 +166,14 @@ if __name__ == "__main__":
     else:
         weather_live = "❌ MISSING"
 
+    n_data = load_json(latest_nws_json) if latest_nws_json and latest_nws_json.exists() else {}
+    if n_data:
+        nws_live = "✅ CONNECTED" if not n_data.get("stale_data") else "⚠️ STALE"
+    else:
+        nws_live = "❌ MISSING"
+
     # Evaluate System Health
-    if not latest_status_json or not latest_forecast_md or (w_data and w_data.get("is_stale")):
+    if not latest_status_json or not latest_forecast_md or (w_data and w_data.get("is_stale")) or (n_data and n_data.get("stale_data")):
         system_status = "YELLOW"
         status_color = "warning"
         action_needed = "Review missing files or stale weather data."
@@ -233,6 +241,9 @@ if __name__ == "__main__":
         st.metric("WEATHER INGESTION", weather_live)
         if w_data:
             st.write(f"**Temp:** {w_data.get('current_temp_f', 'N/A')}°F")
+        st.metric("NWS LIVE DATA", nws_live)
+        if n_data:
+            st.write(f"**Live Temp:** {n_data.get('current_temp_f', 'N/A')}°F")
 
     with col4:
         st.metric("KALSHI MARKET", kalshi_status)
@@ -331,7 +342,7 @@ if __name__ == "__main__":
 
 
     # Main Tabs
-    tabs = st.tabs(["Status", "Forecast", "Weather", "Kalshi Market Data", "Paper Trading", "Learning", "Logs", "Files", "Operator Notes"])
+    tabs = st.tabs(["Status", "Forecast", "Weather", "Live NWS / KMIA Data", "Kalshi Market Data", "Paper Trading", "Learning", "Logs", "Files", "Operator Notes"])
     
     with tabs[0]:
         st.header("Latest System Status")
@@ -351,6 +362,27 @@ if __name__ == "__main__":
             st.json(load_json(latest_weather_json))
 
     with tabs[3]:
+        st.header("Live NWS Data (KMIA)")
+        if n_data:
+            nc1, nc2, nc3 = st.columns(3)
+            nc1.metric("Current Temp", f"{n_data.get('current_temp_f', 'N/A')}°F")
+            nc2.metric("Observed Max", f"{n_data.get('observed_max_so_far_f', 'N/A')}°F")
+            nc3.metric("Forecast High", f"{n_data.get('forecast_high_f', 'N/A')}°F")
+            
+            st.write(f"**Latest Observation Time:** {n_data.get('latest_observation_time', 'N/A')}")
+            st.write(f"**Stale Data:** {'Yes' if n_data.get('stale_data') else 'No'}")
+            st.write(f"**Endpoint Status:** {n_data.get('endpoint_status', 'N/A')}")
+            st.write(f"**Hourly Summary:** {n_data.get('hourly_forecast_summary', 'N/A')}")
+            
+            if n_data.get("warnings"):
+                st.warning(" | ".join(n_data.get("warnings")))
+                
+            with st.expander("Raw NWS Snapshot JSON"):
+                st.json(n_data)
+        else:
+            st.info("No live NWS snapshot found. Run `bash scripts/update_nws_live_data.sh`.")
+
+    with tabs[4]:
         st.header("Kalshi Market Discovery")
         if latest_kalshi_json.exists():
             st.json(load_json(latest_kalshi_json))
