@@ -189,6 +189,14 @@ from test_sync_tooling import (
     test_check_sync_status_runs
 )
 
+from test_health_summary import (
+    test_health_summary_script_exists,
+    test_health_summary_is_executable,
+    test_health_summary_safety_disclaimer,
+    test_health_summary_no_dangerous_commands,
+    test_health_summary_read_only
+)
+
 
 # Helper to run unittest classes in this runner
 def run_unittest_class(cls):
@@ -292,6 +300,11 @@ tests = [
     test_kalshi_updater_logic,
     test_scripts_contain_safety_disclaimer,
     test_check_sync_status_runs,
+    test_health_summary_script_exists,
+    test_health_summary_is_executable,
+    test_health_summary_safety_disclaimer,
+    test_health_summary_no_dangerous_commands,
+    test_health_summary_read_only,
     lambda: run_unittest_class(TestRulesModelV2),
     lambda: run_unittest_class(TestGenerateAggregateReport),
     lambda: run_unittest_class(TestOperationalScripts),
