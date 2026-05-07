@@ -3,7 +3,7 @@
 # NO REAL TRADING EXECUTION
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHONPATH="$ROOT_DIR/backend/src"
+export PYTHONPATH="$ROOT_DIR/backend/src"
 PYTHON_BIN="$ROOT_DIR/.venv/bin/python3"
 
 echo "===================================================="

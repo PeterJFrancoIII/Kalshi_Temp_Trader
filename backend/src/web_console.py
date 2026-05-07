@@ -320,6 +320,59 @@ if __name__ == "__main__":
         st.metric("Next Action", "Pending" if pending_settlements > 0 else "Ready")
         st.info(next_action)
 
+    # --- ACTIVE KALSHI CONTRACT FORECASTS (Operator Home) ---
+    st.divider()
+    st.subheader("📊 Active Kalshi Contract Forecasts")
+    st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
+    
+    if p_data:
+        best_sig = p_data.get("best_signal")
+        if best_sig:
+            st.write("### 🏆 Best Signal")
+            bs_col1, bs_col2, bs_col3, bs_col4, bs_col5, bs_col6 = st.columns(6)
+            bs_col1.write(f"**Ticker:** `{best_sig.get('market_ticker', 'N/A')}`")
+            bs_col2.write(f"**Model:** {best_sig.get('model_probability', 0)*100:.1f}%")
+            bs_col3.write(f"**Market:** {best_sig.get('market_probability', 0)*100:.1f}%")
+            bs_col4.write(f"**Edge:** {best_sig.get('edge', 0)*100:+.1f}%")
+            bs_col5.write(f"**Confidence:** {best_sig.get('confidence', 'N/A').upper()}")
+            bs_col6.write(f"**Action:** `{best_sig.get('paper_action', 'N/A')}`")
+
+        signals = p_data.get("signals", [])
+        if signals:
+            df_sig = pd.DataFrame(signals)
+            col_map_sig = {
+                "market_ticker": "Ticker",
+                "market_title": "Contract",
+                "status": "Status",
+                "threshold_f": "Threshold",
+                "condition_type": "Condition",
+                "model_probability": "Model %",
+                "market_probability": "Market %",
+                "edge": "Edge",
+                "time_to_close_minutes": "Time to Close",
+                "speed_to_roi_score": "Speed-to-ROI",
+                "paper_action": "Paper Action"
+            }
+            df_display_sig = df_sig.copy()
+            # Formatting
+            if "model_probability" in df_display_sig.columns:
+                df_display_sig["model_probability"] = df_display_sig["model_probability"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
+            if "market_probability" in df_display_sig.columns:
+                df_display_sig["market_probability"] = df_display_sig["market_probability"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
+            if "edge" in df_display_sig.columns:
+                df_display_sig["edge"] = df_display_sig["edge"].apply(lambda x: f"{x*100:+.1f}%" if pd.notnull(x) else "N/A")
+            if "time_to_close_minutes" in df_display_sig.columns:
+                df_display_sig["time_to_close_minutes"] = df_display_sig["time_to_close_minutes"].apply(lambda x: f"{x:.1f}m" if pd.notnull(x) else "N/A")
+            
+            existing_cols_sig = [c for c in col_map_sig.keys() if c in df_display_sig.columns]
+            df_final = df_display_sig[existing_cols_sig].rename(columns=col_map_sig)
+            st.dataframe(df_final, use_container_width=True, hide_index=True)
+        else:
+            st.info("No active contract signals found in latest signal data.")
+    else:
+        st.warning("No active contract forecasts found. Run:")
+        st.code("bash scripts/update_kalshi_market_data.sh\nbash scripts/generate_paper_signal.sh")
+
     # --- LEARNING SUMMARY ---
     latest_learning_json = LEARNING_DIR / "latest_learning_summary.json"
     l_data = load_json(latest_learning_json) if latest_learning_json.exists() else {}
@@ -360,7 +413,7 @@ if __name__ == "__main__":
 
 
     # Main Tabs
-    tabs = st.tabs(["Status", "Forecast", "Weather", "Live NWS / KMIA Data", "Kalshi Market Data", "Paper Trading", "Learning", "Prediction Quality", "Logs", "Files", "Operator Notes"])
+    tabs = st.tabs(["Status", "Active Kalshi Contract Forecasts", "Forecast", "Weather", "Live NWS / KMIA Data", "Kalshi Market Data", "Paper Trading", "Learning", "Prediction Quality", "Logs", "Files", "Operator Notes"])
     
     with tabs[0]:
         st.header("Latest System Status")
@@ -370,16 +423,65 @@ if __name__ == "__main__":
             st.markdown(load_text(latest_status_md))
 
     with tabs[1]:
+        st.header("📊 Active Kalshi Contract Forecasts")
+        st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
+        
+        if p_data:
+            best_sig = p_data.get("best_signal")
+            if best_sig:
+                st.subheader("🏆 Best Signal")
+                st.info(f"**{best_sig.get('market_ticker', 'N/A')}** | Edge: {best_sig.get('edge', 0)*100:+.1f}% | Action: {best_sig.get('paper_action', 'N/A')}")
+                bs_c1, bs_c2, bs_c3, bs_c4 = st.columns(4)
+                bs_c1.metric("Model Prob", f"{best_sig.get('model_probability', 0)*100:.1f}%")
+                bs_c2.metric("Market Prob", f"{best_sig.get('market_probability', 0)*100:.1f}%")
+                bs_c3.metric("Edge", f"{best_sig.get('edge', 0)*100:+.1f}%")
+                bs_c4.metric("Confidence", best_sig.get("confidence", "N/A").upper())
+
+            st.divider()
+            signals = p_data.get("signals", [])
+            if signals:
+                df_sig = pd.DataFrame(signals)
+                col_map_sig = {
+                    "market_ticker": "Ticker",
+                    "market_title": "Contract",
+                    "status": "Status",
+                    "threshold_f": "Threshold",
+                    "condition_type": "Condition",
+                    "model_probability": "Model %",
+                    "market_probability": "Market %",
+                    "edge": "Edge",
+                    "time_to_close_minutes": "Time to Close",
+                    "speed_to_roi_score": "Speed-to-ROI",
+                    "paper_action": "Paper Action"
+                }
+                df_display_sig = df_sig.copy()
+                if "model_probability" in df_display_sig.columns:
+                    df_display_sig["model_probability"] = df_display_sig["model_probability"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
+                if "market_probability" in df_display_sig.columns:
+                    df_display_sig["market_probability"] = df_display_sig["market_probability"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
+                if "edge" in df_display_sig.columns:
+                    df_display_sig["edge"] = df_display_sig["edge"].apply(lambda x: f"{x*100:+.1f}%" if pd.notnull(x) else "N/A")
+                
+                existing_cols_sig = [c for c in col_map_sig.keys() if c in df_display_sig.columns]
+                df_final = df_display_sig[existing_cols_sig].rename(columns=col_map_sig)
+                st.dataframe(df_final, use_container_width=True, hide_index=True)
+            else:
+                st.info("No active contract forecasts found in latest signal data.")
+        else:
+            st.warning("No active contract forecasts found. Run:")
+            st.code("bash scripts/update_kalshi_market_data.sh\nbash scripts/generate_paper_signal.sh")
+
+    with tabs[2]:
         st.header("Latest Forecast Report")
         if latest_forecast_md:
             st.markdown(load_text(latest_forecast_md))
 
-    with tabs[2]:
+    with tabs[3]:
         st.header("Weather Ingestion Status (KMIA)")
         if latest_weather_json.exists():
             st.json(load_json(latest_weather_json))
 
-    with tabs[3]:
+    with tabs[4]:
         st.header("Live NWS / KMIA Data")
         st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
         
@@ -448,12 +550,12 @@ if __name__ == "__main__":
         else:
             st.info("No live NWS snapshot found. Run `bash scripts/update_nws_live_data.sh`.")
 
-    with tabs[4]:
+    with tabs[5]:
         st.header("Kalshi Market Discovery")
         if latest_kalshi_json.exists():
             st.json(load_json(latest_kalshi_json))
 
-    with tabs[5]:
+    with tabs[6]:
         st.header("Paper Trading Performance")
         st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
         PERF_FILE = PAPER_DIR / "latest_paper_trading_performance.json"
@@ -551,14 +653,14 @@ if __name__ == "__main__":
             if signals:
                 df_signals = pd.DataFrame(signals)
                 cols = ["market_ticker", "forecast_bin", "model_probability", "market_implied_probability", "edge", "expected_value", "paper_action", "confidence"]
-                st.dataframe(df_signals[cols].style.format({
+                st.dataframe(df_signals[[c for c in cols if c in df_signals.columns]].style.format({
                     "model_probability": "{:.1%}",
                     "market_implied_probability": "{:.1%}",
                     "edge": "{:+.1%}",
                     "expected_value": "{:+.2f}"
                 }))
 
-    with tabs[6]:
+    with tabs[7]:
         st.header("🎓 Paper Trading Learning Summary")
         st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
         if latest_learning_json.exists():
@@ -570,7 +672,7 @@ if __name__ == "__main__":
         else:
             st.info("No learning summary found. Run `bash scripts/generate_learning_summary.sh`.")
 
-    with tabs[7]:
+    with tabs[8]:
         st.header("🎯 Prediction Quality Report")
         st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
         
@@ -588,12 +690,12 @@ if __name__ == "__main__":
         else:
             st.info("No prediction quality report found. Run `bash scripts/generate_prediction_quality_report.sh`.")
 
-    with tabs[8]:
+    with tabs[9]:
         st.header("Latest Workflow Logs")
         if latest_log:
             st.code(load_text(latest_log)[-5000:], language="text")
 
-    with tabs[9]:
+    with tabs[10]:
         st.header("Discovered Files")
         file_info = []
         for d in [STATUS_DIR, REPORTS_DIR, LOGS_DIR, CAL_DIR, KALSHI_DIR, PAPER_DIR]:
@@ -604,7 +706,7 @@ if __name__ == "__main__":
         if file_info:
             st.table(pd.DataFrame(file_info))
 
-    with tabs[10]:
+    with tabs[11]:
         st.header("Operator Notes")
         st.write("""
         ### Daily Workflow

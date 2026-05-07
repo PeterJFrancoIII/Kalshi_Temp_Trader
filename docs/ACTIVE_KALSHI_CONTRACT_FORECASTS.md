@@ -1,77 +1,43 @@
 # Active Kalshi Contract Forecasts
 
-The bot now treats active Kalshi Miami max-temperature contracts as the display layer for forecasts.
+This feature allows the bot to map model-generated probability distributions to active Kalshi market contracts for Miami (KMIA) high temperature.
 
-This means the console should show the contracts that are actually open or pending on Kalshi, not only the internal static model bins.
+## Overview
 
-The internal model may still use helper bins, but the operator should see the active Kalshi listings.
+The forecasting engine now extracts active contracts from Kalshi market snapshots and calculates:
+- **Model Probability**: The probability of the contract condition being met, based on the latest model forecast.
+- **Market Probability**: The implied probability from the current 'Yes' ask price (or last price).
+- **Edge**: The difference between Model Probability and Market Probability.
+- **Speed-to-ROI**: A normalized score representing the expected value per unit of time remaining until market close.
 
-## Why this matters
+## Web Console Display
 
-Kalshi contracts can change by date.
+The web console provides two main views for this data:
 
-The forecast report must match the currently active Miami max-temperature contracts for that date.
+### 1. Operator Home Section
+A summary section titled **Active Kalshi Contract Forecasts** appears on the main dashboard. It highlights the **Best Signal** (the contract with the highest positive edge) and provides a summary table of all active contracts.
 
-This helps paper trading compare:
+### 2. Dedicated Tab
+A tab titled **Active Kalshi Contract Forecasts** provides a full-page view of the contract signals, including detailed metrics like Time to Close and Speed-to-ROI.
 
-- Model probability
-- Kalshi market-implied probability
-- Edge
-- Expected value
-- Paper action
-
-## What the console should show
-
-The Active Kalshi Contract Forecasts table should show:
-
-- Ticker
-- Contract title
-- Status
-- Threshold
-- Condition
-- Model probability
-- Market probability
-- Edge
-- Time to close
-- Speed-to-ROI score
-- Paper action
-
-## Paper actions
-
-### NO EDGE
-
-The model does not see a useful simulated edge.
-
-### WATCH
-
-The contract may be interesting, but the signal is not strong enough.
-
-### PAPER BUY CANDIDATE
-
-The contract has a positive paper-only signal.
-
-This is not a real trade.
-
-## Important safety rule
-
-The bot is still:
-
-**DRY-RUN / PAPER EVALUATION ONLY.**
+## Safety & Governance
 
 **NO REAL TRADING EXECUTION.**
+All signals generated are for **PAPER EVALUATION ONLY**. The system does not have API keys for order execution and will never attempt to place real trades.
 
-The bot must not place real Kalshi orders.
+## Running the Pipeline
 
-## If contracts look wrong
+To update the data displayed in the console:
 
-Run:
+1. **Update Market Snapshots**:
+   ```bash
+   bash scripts/update_kalshi_market_data.sh
+   ```
 
-```bash
-bash scripts/update_kalshi_market_data.sh
-bash scripts/generate_paper_signal.sh
-bash scripts/health_summary.sh
-```
+2. **Generate Signals**:
+   ```bash
+   bash scripts/generate_paper_signal.sh
+   ```
 
-Then refresh the console.
-
-If the active contracts still look wrong, check the Kalshi Market Data tab and the latest market snapshot.
+3. **Refresh Web Console**:
+   The web console automatically reloads the latest `latest_paper_signal.json` file.
