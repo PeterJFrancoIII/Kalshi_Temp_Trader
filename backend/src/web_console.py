@@ -136,6 +136,31 @@ def load_latest_forecast_summary(report_path):
             
     return res
 
+def extract_nws_observation_rows(n_data):
+    candidate_paths = [
+        ("recent_observations_table",),
+        ("observations",),
+        ("recent_observations",),
+        ("live_observations",),
+        ("parsed_observations",),
+        ("api_inputs", "recent_observations_table"),
+        ("api_inputs", "observations"),
+        ("raw", "observations"),
+    ]
+    if not isinstance(n_data, dict):
+        return []
+    for path in candidate_paths:
+        node = n_data
+        for key in path:
+            if isinstance(node, dict):
+                node = node.get(key)
+            else:
+                node = None
+                break
+        if isinstance(node, list) and node and all(isinstance(x, dict) for x in node):
+            return node
+    return []
+
 # --- RENDERING HELPERS ---
 
 def render_operator_home(app_state):
@@ -299,31 +324,29 @@ def render_weather_nws(w_data, n_data):
             st.write(f"**Clouds:** {n_data.get('clouds_x100ft')}")
         
         st.subheader("Recent Observations (KMIA)")
-        obs_list = n_data.get("recent_observations_table", [])
-        if obs_list:
-            df_obs = pd.DataFrame(obs_list)
-            col_map = {
-                "date_et": "Date",
-                "time_et": "Time ET",
-                "temperature_f": "Temp °F",
-                "dewpoint_f": "Dew Point °F",
-                "relative_humidity_pct": "Humidity %",
-                "wind_direction_compass": "Wind Dir",
-                "wind_direction_degrees": "Wind Deg",
-                "wind_speed_mph": "Wind mph",
-                "wind_gust_mph": "Gust mph",
-                "sea_level_pressure_mb": "Sea Level mb",
-                "barometric_pressure_mb": "Pressure mb",
-                "precipitation_last_hour_in": "Precip 1h in",
-                "clouds_x100ft": "Clouds x100ft",
-                "text_description": "Description",
-                "raw_message": "Raw METAR"
-            }
-            existing_cols = [c for c in col_map.keys() if c in df_obs.columns]
-            df_display = df_obs[existing_cols].rename(columns=col_map)
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
+        obs_rows = extract_nws_observation_rows(n_data)
+        if obs_rows:
+            df_obs = pd.DataFrame(obs_rows)
+            display_columns = [
+                "time_et",
+                "temperature_f",
+                "dewpoint_f",
+                "relative_humidity_pct",
+                "wind_direction_compass",
+                "wind_direction_degrees",
+                "wind_speed_mph",
+                "wind_gust_mph",
+                "sea_level_pressure_mb",
+                "barometric_pressure_mb",
+                "precipitation_last_hour_in",
+                "clouds_x100ft",
+            ]
+            available_columns = [c for c in display_columns if c in df_obs.columns]
+            st.dataframe(df_obs[available_columns] if available_columns else df_obs, use_container_width=True, hide_index=True)
         else:
-            st.warning("No recent observations found in snapshot.")
+            st.warning("NWS snapshot loaded, but no parsed observation rows were found.")
+            if isinstance(n_data, dict):
+                st.caption("Available NWS snapshot keys: " + ", ".join(n_data.keys()))
         
         if n_data.get("warnings"):
             st.warning(" | ".join(n_data.get("warnings")))
