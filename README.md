@@ -1,5 +1,5 @@
 # KMIA Kalshi Temperature Prediction App
-
+Updated 5/7/26
 ## Overview
 
 This application predicts the official daily maximum temperature at KMIA (Miami International Airport) for Kalshi-style weather markets.
