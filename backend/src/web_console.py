@@ -176,7 +176,7 @@ def render_operator_home(app_state):
     pl_col1, pl_col2, pl_col3, pl_col4 = st.columns(4)
     with pl_col1:
         st.metric("Paper Loop", app_state["paper_loop_status"])
-        st.write(f"**Latest Signal:** `{app_state['latest_signal_action']}`")
+        st.write(f"**Best Signal:** `{app_state.get('latest_signal_ticker', 'N/A')} ({app_state['latest_signal_action']})`")
     with pl_col2:
         st.metric("Open Paper Trades", app_state["open_paper_trades"])
         st.write(f"**Pending Settlements:** {app_state['pending_settlements']}")
@@ -187,20 +187,7 @@ def render_operator_home(app_state):
         st.metric("Next Action", "Pending" if app_state["pending_settlements"] > 0 else "Ready")
         st.info(app_state["next_action"])
 
-    # Manual Corrections
-    corrections = load_manual_corrections()
-    if corrections:
-        st.divider()
-        st.subheader("🛠️ Manual Data Corrections")
-        for date, details in corrections.items():
-            status_text = details.get("settlement_status", "Active")
-            excluded = " (Excluded from Learning)" if details.get("exclude_from_learning") else ""
-            open_time = f" | Market Open: {details['market_open_time_et']} ET" if details.get("market_open_time_et") else ""
-            st.write(f"**{date}:** {status_text}{excluded}{open_time}")
-            if details.get("notes"):
-                for note in details["notes"]:
-                    st.write(f"- {note}")
-        st.info("🚨 **NO REAL TRADING EXECUTION**")
+    st.info("🚨 **NO REAL TRADING EXECUTION**")
 
 
 def render_active_forecasts(p_data):
@@ -406,6 +393,19 @@ def render_calibration_learning(pq_data, pq_md, l_data, cal_json, cal_md):
         with st.expander("View Calibration Markdown"):
             st.markdown(cal_md)
 
+    corrections = load_manual_corrections()
+    if corrections:
+        st.divider()
+        st.subheader("🛠️ Manual Data Corrections")
+        for date, details in corrections.items():
+            status_text = details.get("settlement_status", "Active")
+            excluded = " (Excluded from Learning)" if details.get("exclude_from_learning") else ""
+            open_time = f" | Market Open: {details['market_open_time_et']} ET" if details.get("market_open_time_et") else ""
+            st.write(f"**{date}:** {status_text}{excluded}{open_time}")
+            if details.get("notes"):
+                for note in details["notes"]:
+                    st.write(f"- {note}")
+
 
 def render_system_health(app_state):
     st.header("⚙️ System Health & Raw Data")
@@ -431,16 +431,15 @@ def render_system_health(app_state):
             with st.expander("View Kalshi JSON"):
                 st.json(load_json(app_state["latest_kalshi_json"]))
                 
-        st.subheader("Operator Notes")
-        with st.expander("View Workflow Commands"):
-            st.write('''
-            ### Daily Workflow
-            ```bash
-            bash scripts/run_kmia_daily_workflow.sh
-            bash scripts/generate_paper_signal.sh
-            bash scripts/record_paper_trade.sh
-            ```
-            ''')
+        st.subheader("Operator Notes & Workflow")
+        st.write('''
+        ### Daily Commands
+        ```bash
+        bash scripts/run_kmia_daily_workflow.sh
+        bash scripts/generate_paper_signal.sh
+        bash scripts/record_paper_trade.sh
+        ```
+        ''')
 
     st.divider()
     st.subheader("Latest Workflow Logs")
@@ -628,6 +627,7 @@ if __name__ == "__main__":
     best_sig = p_data.get("best_signal")
     if isinstance(best_sig, dict):
         app_state["latest_signal_action"] = best_sig.get("paper_action", "Unknown")
+        app_state["latest_signal_ticker"] = best_sig.get("market_ticker", "Unknown")
 
     # Next action logic
     if app_state["system_status"] != "GREEN":
