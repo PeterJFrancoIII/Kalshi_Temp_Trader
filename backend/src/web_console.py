@@ -47,6 +47,36 @@ def load_json(path):
             return json.load(f)
     return None
 
+def normalize_signal_df(df):
+    """Normalize aliases for signal dataframes."""
+    if "forecast_bin" not in df.columns and "bin" in df.columns:
+        df["forecast_bin"] = df["bin"]
+    if "contract_ticker" not in df.columns and "market_ticker" in df.columns:
+        df["contract_ticker"] = df["market_ticker"]
+    if "market_implied_probability" not in df.columns and "market_probability" in df.columns:
+        df["market_implied_probability"] = df["market_probability"]
+    if "action" not in df.columns and "paper_action" in df.columns:
+        df["action"] = df["paper_action"]
+    if "time_to_close" not in df.columns and "time_to_close_minutes" in df.columns:
+        df["time_to_close"] = df["time_to_close_minutes"]
+    if "speed_to_roi" not in df.columns and "speed_to_roi_score" in df.columns:
+        df["speed_to_roi"] = df["speed_to_roi_score"]
+    return df
+
+def safe_dataframe(df, display_columns, fallback_message="No displayable columns found.", formatters=None):
+    """Safely render a DataFrame ignoring missing columns."""
+    available_columns = [c for c in display_columns if c in df.columns]
+    if available_columns:
+        df_display = df[available_columns]
+        if formatters:
+            valid_formatters = {k: v for k, v in formatters.items() if k in available_columns}
+            st.dataframe(df_display.style.format(valid_formatters), use_container_width=True)
+        else:
+            st.dataframe(df_display, use_container_width=True)
+    else:
+        st.info(fallback_message)
+        st.dataframe(df, use_container_width=True)
+
 def load_latest_forecast_summary(report_path):
     """
     Extracts today's forecast and top bin from the latest markdown report.
@@ -340,6 +370,7 @@ if __name__ == "__main__":
         signals = p_data.get("signals", [])
         if signals:
             df_sig = pd.DataFrame(signals)
+            df_sig = normalize_signal_df(df_sig)
             col_map_sig = {
                 "market_ticker": "Ticker",
                 "market_title": "Contract",
@@ -596,6 +627,7 @@ if __name__ == "__main__":
                 signals = s_data.get("signals", [])
                 if signals:
                     df_sig = pd.DataFrame(signals)
+                    df_sig = normalize_signal_df(df_sig)
                     # Map columns
                     col_map_sig = {
                         "market_ticker": "Ticker",
@@ -652,13 +684,15 @@ if __name__ == "__main__":
             signals = p_data.get("signals", [])
             if signals:
                 df_signals = pd.DataFrame(signals)
+                df_signals = normalize_signal_df(df_signals)
                 cols = ["market_ticker", "forecast_bin", "model_probability", "market_implied_probability", "edge", "expected_value", "paper_action", "confidence"]
-                st.dataframe(df_signals[[c for c in cols if c in df_signals.columns]].style.format({
+                formatters = {
                     "model_probability": "{:.1%}",
                     "market_implied_probability": "{:.1%}",
                     "edge": "{:+.1%}",
                     "expected_value": "{:+.2f}"
-                }))
+                }
+                safe_dataframe(df_signals, cols, "No displayable contract forecast columns found.", formatters=formatters)
 
     with tabs[7]:
         st.header("🎓 Paper Trading Learning Summary")
