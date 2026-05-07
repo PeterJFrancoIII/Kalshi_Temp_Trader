@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 import pandas as pd
 import re
+from typing import Optional, Tuple
 
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
@@ -27,13 +28,19 @@ try:
 except ImportError:
     def load_manual_corrections(): return {}
 
-def get_latest_file(directory, pattern):
+def latest_file(directory: Path, pattern: str) -> Optional[Path]:
     if not directory.exists():
         return None
-    files = list(Path(directory).glob(pattern))
+    files = list(directory.glob(pattern))
     if not files:
         return None
     return max(files, key=os.path.getmtime)
+
+def load_latest_json(directory: Path, pattern: str) -> tuple[Optional[dict], Optional[Path]]:
+    path = latest_file(directory, pattern)
+    if path:
+        return load_json(path), path
+    return None, None
 
 def load_text(path):
     if path and path.exists():
@@ -142,15 +149,15 @@ if __name__ == "__main__":
     st.error("🚨 **DRY-RUN / PAPER EVALUATION ONLY — NO REAL TRADING EXECUTION**")
 
     # Discovery
-    latest_status_json = get_latest_file(STATUS_DIR, "kmia_daily_status_*.json")
-    latest_status_md = get_latest_file(STATUS_DIR, "kmia_daily_status_*.md")
-    latest_forecast_md = get_latest_file(REPORTS_DIR, "kmia_forecast_*rules_v2_climatology*.md")
+    latest_status_json = latest_file(STATUS_DIR, "kmia_daily_status_*.json")
+    latest_status_md = latest_file(STATUS_DIR, "kmia_daily_status_*.md")
+    latest_forecast_md = latest_file(REPORTS_DIR, "kmia_forecast_*rules_v2_climatology*.md")
     if not latest_forecast_md:
-        latest_forecast_md = get_latest_file(REPORTS_DIR, "kmia_forecast_*.md")
+        latest_forecast_md = latest_file(REPORTS_DIR, "kmia_forecast_*.md")
 
-    latest_comparison_md = get_latest_file(REPORTS_DIR, "kmia_comparison_*.md")
+    latest_comparison_md = latest_file(REPORTS_DIR, "kmia_comparison_*.md")
     latest_kalshi_json = KALSHI_DIR / "latest_kalshi_market_snapshot.json"
-    latest_log = get_latest_file(LOGS_DIR, "kmia_daily_workflow_*.log")
+    latest_log = latest_file(LOGS_DIR, "kmia_daily_workflow_*.log")
     agg_cal_json = CAL_DIR / "aggregate_calibration.json"
     agg_cal_md = CAL_DIR / "aggregate_calibration.md"
 
@@ -189,16 +196,31 @@ if __name__ == "__main__":
     system_status = "GREEN"
     status_color = "success"
     action_needed = "None. System is working."
-    w_data = load_json(latest_weather_json) if latest_weather_json and latest_weather_json.exists() else {}
-
-    if w_data:
-        weather_live = "✅ CONNECTED" if not w_data.get("is_stale") else "⚠️ STALE"
+    # --- WEATHER INGESTION ---
+    # Treat as present if any recent status file exists
+    w_data, w_path = load_latest_json(STATUS_DIR, "kmia_daily_status_*.json")
+    if w_path:
+        weather_live = "✅ CONNECTED"
     else:
         weather_live = "❌ MISSING"
 
-    n_data = load_json(latest_nws_json) if latest_nws_json and latest_nws_json.exists() else {}
+    # --- NWS LIVE DATA ---
+    # First try latest, then fallback to newest timestamped
+    latest_nws_path = NWS_DIR / "latest_nws_kmia_snapshot.json"
+    if not latest_nws_path.exists():
+        latest_nws_path = latest_file(NWS_DIR, "nws_kmia_snapshot_*.json")
+    
+    n_data = load_json(latest_nws_path) if latest_nws_path else {}
     if n_data:
-        nws_live = "✅ CONNECTED" if not n_data.get("stale_data") else "⚠️ STALE"
+        # CONNECTED if not stale, or not error, or has temp
+        is_stale = n_data.get("stale_data", False)
+        is_error = n_data.get("endpoint_status") == "ERROR"
+        has_temp = n_data.get("current_temp_f") is not None
+        
+        if not is_stale or not is_error or has_temp:
+            nws_live = "✅ CONNECTED"
+        else:
+            nws_live = "⚠️ STALE"
     else:
         nws_live = "❌ MISSING"
 
@@ -269,11 +291,14 @@ if __name__ == "__main__":
 
     with col3:
         st.metric("WEATHER INGESTION", weather_live)
-        if w_data:
-            st.write(f"**Temp:** {w_data.get('current_temp_f', 'N/A')}°F")
+        if w_path:
+            st.caption(f"Source: {w_path.name}")
+        
         st.metric("NWS LIVE DATA", nws_live)
-        if n_data:
-            st.write(f"**Live Temp:** {n_data.get('current_temp_f', 'N/A')}°F")
+        if latest_nws_path:
+            st.caption(f"Source: {latest_nws_path.name}")
+            if n_data:
+                st.write(f"**Live Temp:** {n_data.get('current_temp_f', 'N/A')}°F")
 
     with col4:
         st.metric("KALSHI MARKET", kalshi_status)
