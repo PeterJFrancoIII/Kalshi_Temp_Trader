@@ -29,7 +29,8 @@ RAW_DIR = ROOT / "backend" / "data" / "raw" / "weather_company"
 LATEST_FILE = PROCESSED_DIR / "latest_twc_kmia_snapshot.json"
 
 DEFAULT_ENDPOINTS = {
-    "current_conditions": os.getenv("TWC_CURRENT_CONDITIONS_PATH", "/v3/wx/conditions/current"),
+    # Confirmed working for this API key on 2026-05-07.
+    "current_conditions": os.getenv("TWC_CURRENT_CONDITIONS_PATH", "/v3/wx/observations/current"),
     "daily_forecast": os.getenv("TWC_DAILY_FORECAST_PATH", "/v3/wx/forecast/daily/15day"),
     # Confirmed working for this API key on 2026-05-07. Required for apples-to-apples comparison against NWS hourly rows.
     "hourly_forecast": os.getenv("TWC_HOURLY_FORECAST_PATH", "/v3/wx/forecast/hourly/15day"),
@@ -138,14 +139,19 @@ def normalize_current(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(data, dict):
         return {}
     return {
-        "temperature_f": pick(data, "temperature", "temp", "temperatureMaxSince7Am"),
+        "temperature_f": pick(data, "temperature", "temp", "temperatureMaxSince7Am", "temperatureFeelsLike"),
         "dewpoint_f": pick(data, "temperatureDewPoint", "dewPoint", "dewpt"),
         "relative_humidity_pct": pick(data, "relativeHumidity", "humidity"),
         "wind_speed_mph": pick(data, "windSpeed", "wspd"),
         "wind_direction_degrees": pick(data, "windDirection", "wdir"),
         "wind_direction_cardinal": pick(data, "windDirectionCardinal", "wdirCardinal"),
-        "phrase": pick(data, "wxPhraseLong", "phrase", "narrative"),
-        "observation_time_utc": pick(data, "validTimeUtc", "observationTimeUtc", "expireTimeGmt"),
+        "cloud_cover_pct": pick(data, "cloudCover"),
+        "cloud_cover_phrase": pick(data, "cloudCoverPhrase"),
+        "pressure_altimeter_in": pick(data, "pressureAltimeter"),
+        "pressure_mean_sea_level_mb": pick(data, "pressureMeanSeaLevel"),
+        "precip_1h_in": pick(data, "precip1Hour"),
+        "phrase": pick(data, "wxPhraseLong", "phrase", "narrative", "cloudCoverPhrase"),
+        "observation_time_utc": pick(data, "validTimeUtc", "observationTimeUtc", "expireTimeGmt", "expirationTimeUtc"),
     }
 
 
