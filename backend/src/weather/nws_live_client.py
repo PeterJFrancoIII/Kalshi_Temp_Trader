@@ -82,7 +82,6 @@ def parse_forecast_wind_speed_mph(value: Any) -> Optional[float]:
         return float(value)
     if not isinstance(value, str):
         return None
-    # NWS often returns strings such as "10 mph", "5 to 10 mph", or "10 mph with gusts as high as 20 mph".
     import re
     nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", value)]
     if not nums:
@@ -126,6 +125,32 @@ def normalize_nws_hourly_period(period: Dict[str, Any]) -> Dict[str, Any]:
         "detailedForecast": period.get("detailedForecast"),
         "raw_message": period.get("shortForecast"),
         "isDaytime": period.get("isDaytime"),
+        "period_number": period.get("number"),
+    }
+
+def normalize_nws_daily_period(period: Dict[str, Any]) -> Dict[str, Any]:
+    start = period.get("startTime")
+    try:
+        dt_et = to_et(start) if start else None
+        forecast_date_et = dt_et.strftime("%Y-%m-%d") if dt_et else None
+        day_name = dt_et.strftime("%a %m/%d") if dt_et else period.get("name")
+    except Exception:
+        forecast_date_et = None
+        day_name = period.get("name")
+    return {
+        "valid_time_utc": start,
+        "forecast_date_et": forecast_date_et,
+        "display_day": day_name,
+        "period_name": period.get("name"),
+        "isDaytime": period.get("isDaytime"),
+        "temperature_f": period.get("temperature"),
+        "temperature_unit": period.get("temperatureUnit"),
+        "wind_speed_mph": parse_forecast_wind_speed_mph(period.get("windSpeed")),
+        "wind_direction_compass": period.get("windDirection"),
+        "precip_probability_pct": parse_probability_percent(period.get("probabilityOfPrecipitation")),
+        "shortForecast": period.get("shortForecast"),
+        "detailedForecast": period.get("detailedForecast"),
+        "raw_message": period.get("detailedForecast") or period.get("shortForecast"),
         "period_number": period.get("number"),
     }
 
@@ -185,6 +210,7 @@ def build_live_nws_snapshot() -> Dict[str, Any]:
         "source": "api.weather.gov",
         "timeseries_source_url": "https://www.weather.gov/wrh/timeseries?site=kmia",
         "api_observations_url": "https://api.weather.gov/stations/KMIA/observations",
+        "api_daily_forecast_url": None,
         "api_hourly_forecast_url": None,
         "latest_observation_time": None,
         "current_temp_f": None,
@@ -196,6 +222,8 @@ def build_live_nws_snapshot() -> Dict[str, Any]:
         "clouds_x100ft": None,
         "observed_max_so_far_f": None,
         "forecast_high_f": None,
+        "daily_forecast": [],
+        "daily_forecast_count": 0,
         "hourly_forecast_summary": None,
         "hourly_forecast": [],
         "hourly_forecast_count": 0,
@@ -215,6 +243,7 @@ def build_live_nws_snapshot() -> Dict[str, Any]:
     props = meta.get("properties", {})
     forecast_url = props.get("forecast")
     hourly_url = props.get("forecastHourly")
+    snapshot["api_daily_forecast_url"] = forecast_url
     snapshot["api_hourly_forecast_url"] = hourly_url
 
     recent_feats = fetch_recent_kmia_observations(limit=100)
@@ -277,10 +306,14 @@ def build_live_nws_snapshot() -> Dict[str, Any]:
     if forecast_url:
         f_data = fetch_kmia_forecast(forecast_url)
         periods = f_data.get("properties", {}).get("periods", [])
+        snapshot["daily_forecast"] = [normalize_nws_daily_period(p) for p in periods]
+        snapshot["daily_forecast_count"] = len(snapshot["daily_forecast"])
         for p in periods:
             if p.get("isDaytime"):
                 snapshot["forecast_high_f"] = p.get("temperature")
                 break
+        if not periods:
+            snapshot["warnings"].append("No NWS daily forecast periods returned.")
 
     if hourly_url:
         h_data = fetch_kmia_hourly_forecast(hourly_url)
