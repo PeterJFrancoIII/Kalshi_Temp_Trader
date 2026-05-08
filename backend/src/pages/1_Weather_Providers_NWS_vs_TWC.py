@@ -400,7 +400,7 @@ def render_controls() -> Tuple[int, str, List[str], bool, bool, int, bool]:
     auto_update = st.sidebar.checkbox("Auto-update stale provider snapshots", value=True)
     auto_rerun = st.sidebar.checkbox("Auto-refresh page", value=True)
     refresh_seconds = st.sidebar.slider("Page refresh seconds", 30, 300, DEFAULT_AUTO_REFRESH_SECONDS, 15)
-    tolerance = st.sidebar.slider("Forecast/observed match tolerance", 5, 180, 75, 5)
+    tolerance = st.sidebar.slider("Forecast/observed match tolerance", 5, 180, 20, 5)
     direction = st.sidebar.selectbox("Match method", ["nearest", "backward", "forward"], index=0)
     groups = st.sidebar.multiselect("Show comparison groups", ["temperature", "humidity", "wind", "source_text"], default=["temperature", "wind"])
     show_raw = st.sidebar.checkbox("Show raw JSON expanders", value=False)
@@ -439,28 +439,25 @@ def render_summary(nws: Dict[str, Any], twc: Dict[str, Any], matched: pd.DataFra
     st.caption(f"Snapshot age — NWS: {int(nws_age or 0)}s | TWC: {int(twc_age or 0)}s")
 
 
-def render_provider_tables(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.DataFrame) -> None:
+def render_provider_tables(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.DataFrame, matched: pd.DataFrame, groups: List[str]) -> None:
     st.subheader("Hourly Forecast Tables")
-    tab1, tab2 = st.tabs(["NWS Hourly Forecast", "TWC Hourly Forecast"])
+    tab1, tab2, tab3 = st.tabs([
+        "Matched Hourly Forecast Interval Comparison",
+        "NWS Hourly Forecast",
+        "TWC Hourly Forecast",
+    ])
     with tab1:
-        st.dataframe(to_display_df(nws_forecast_df, "NWS", max_rows=72), width="stretch", hide_index=True)
+        render_matched_table(matched, groups)
     with tab2:
+        st.dataframe(to_display_df(nws_forecast_df, "NWS", max_rows=72), width="stretch", hide_index=True)
+    with tab3:
         st.dataframe(to_display_df(twc_forecast_df, "TWC", max_rows=72), width="stretch", hide_index=True)
 
 
 def render_observed_tables(nws_observed_df: pd.DataFrame, twc_observed_df: pd.DataFrame, matched_observed: pd.DataFrame, twc: Dict[str, Any]) -> None:
     st.subheader("Observed Tables")
-    tab1, tab2, tab3 = st.tabs(["NWS Observed", "TWC Observed", "Matched Hourly Observed Interval Comparison"])
+    tab1, tab2, tab3 = st.tabs(["Matched Hourly Observed Interval Comparison", "NWS Observed", "TWC Observed"])
     with tab1:
-        st.dataframe(to_display_df(nws_observed_df.sort_values("time_utc", ascending=False), "NWS", max_rows=48), width="stretch", hide_index=True)
-    with tab2:
-        if twc_observed_df.empty:
-            status = twc.get("endpoint_status", {}).get("current_conditions", {}) if isinstance(twc, dict) else {}
-            st.warning("No TWC observed/current-condition rows are available. TWC current conditions are currently not authorized or not returned for this key.")
-            st.json(status)
-        else:
-            st.dataframe(to_display_df(twc_observed_df.sort_values("time_utc", ascending=False), "TWC", max_rows=48), width="stretch", hide_index=True)
-    with tab3:
         if matched_observed.empty:
             st.warning("No matched observed intervals yet. This requires both NWS observed rows and TWC observed/current-condition rows.")
         else:
@@ -469,6 +466,15 @@ def render_observed_tables(nws_observed_df: pd.DataFrame, twc_observed_df: pd.Da
             if not vals.empty:
                 st.markdown("**Observed Temperature Spread Summary**")
                 st.dataframe(pd.DataFrame([{"Metric": "TWC Observed - NWS Observed", "Median": vals.median(), "Mean": vals.mean(), "Max Abs": vals.abs().max(), "Count": len(vals)}]), width="stretch", hide_index=True)
+    with tab2:
+        st.dataframe(to_display_df(nws_observed_df.sort_values("time_utc", ascending=False), "NWS", max_rows=48), width="stretch", hide_index=True)
+    with tab3:
+        if twc_observed_df.empty:
+            status = twc.get("endpoint_status", {}).get("current_conditions", {}) if isinstance(twc, dict) else {}
+            st.warning("No TWC observed/current-condition rows are available. TWC current conditions are currently not authorized or not returned for this key.")
+            st.json(status)
+        else:
+            st.dataframe(to_display_df(twc_observed_df.sort_values("time_utc", ascending=False), "TWC", max_rows=48), width="stretch", hide_index=True)
 
 
 def render_matched_table(matched: pd.DataFrame, groups: List[str]) -> None:
@@ -486,18 +492,8 @@ def render_matched_table(matched: pd.DataFrame, groups: List[str]) -> None:
 
 def render_daily_forecasts(nws_daily: pd.DataFrame, twc_daily: pd.DataFrame, matched_daily: pd.DataFrame) -> None:
     st.subheader("Daily Forecast Summary")
-    tab1, tab2, tab3 = st.tabs(["NWS Daily Forecast", "TWC Daily Forecast", "Matched Daily Forecast Comparison"])
+    tab1, tab2, tab3 = st.tabs(["Matched Daily Forecast Comparison", "NWS Daily Forecast", "TWC Daily Forecast"])
     with tab1:
-        if nws_daily.empty:
-            st.warning("No NWS daily forecast rows found. Run `bash scripts/update_nws_live_data.sh` after pulling the latest branch.")
-        else:
-            st.dataframe(nws_daily[[c for c in DAILY_COLUMNS if c in nws_daily.columns]], width="stretch", hide_index=True)
-    with tab2:
-        if twc_daily.empty:
-            st.warning("No TWC daily forecast rows found. Run `bash scripts/update_twc_kmia_data.sh`.")
-        else:
-            st.dataframe(twc_daily[[c for c in DAILY_COLUMNS if c in twc_daily.columns]], width="stretch", hide_index=True)
-    with tab3:
         if matched_daily.empty:
             st.warning("No matched daily forecast rows found yet.")
         else:
@@ -506,6 +502,16 @@ def render_daily_forecasts(nws_daily: pd.DataFrame, twc_daily: pd.DataFrame, mat
             if not vals.empty:
                 st.markdown("**Daily High Spread Summary**")
                 st.dataframe(pd.DataFrame([{"Metric": "TWC Daily High - NWS Daily High", "Median": vals.median(), "Mean": vals.mean(), "Max Abs": vals.abs().max(), "Count": len(vals)}]), width="stretch", hide_index=True)
+    with tab2:
+        if nws_daily.empty:
+            st.warning("No NWS daily forecast rows found. Run `bash scripts/update_nws_live_data.sh` after pulling the latest branch.")
+        else:
+            st.dataframe(nws_daily[[c for c in DAILY_COLUMNS if c in nws_daily.columns]], width="stretch", hide_index=True)
+    with tab3:
+        if twc_daily.empty:
+            st.warning("No TWC daily forecast rows found. Run `bash scripts/update_twc_kmia_data.sh`.")
+        else:
+            st.dataframe(twc_daily[[c for c in DAILY_COLUMNS if c in twc_daily.columns]], width="stretch", hide_index=True)
 
 
 def main() -> None:
@@ -546,9 +552,7 @@ def main() -> None:
     st.caption(f"TWC source: {latest_twc.name if latest_twc else 'missing'}")
     render_summary(nws, twc, matched, nws_age, twc_age)
     st.divider()
-    render_provider_tables(nws_forecast_df, twc_forecast_df)
-    st.divider()
-    render_matched_table(matched, groups)
+    render_provider_tables(nws_forecast_df, twc_forecast_df, matched, groups)
     st.divider()
     render_daily_forecasts(nws_daily, twc_daily, matched_daily)
     st.divider()
