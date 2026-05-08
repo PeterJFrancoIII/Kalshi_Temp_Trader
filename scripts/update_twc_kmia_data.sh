@@ -79,6 +79,7 @@ PY
 mv "$TMP_FILE" "$LATEST_FILE"
 TIMESTAMP_FILE="$DATA_DIR/twc_kmia_snapshot_$(date -u +%Y-%m-%d_%H%M%S).json"
 cp "$LATEST_FILE" "$TIMESTAMP_FILE"
+python3 "$PROJECT_ROOT/scripts/archive_observed_history.py"
 
 echo "✅ Success: Saved TWC snapshot to $LATEST_FILE"
 echo "✅ Success: Archiving as $TIMESTAMP_FILE"
