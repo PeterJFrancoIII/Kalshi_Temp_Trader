@@ -213,6 +213,32 @@ def normalize_nws_observed(nws: Dict[str, Any]) -> pd.DataFrame:
     return normalize_rows(extract_nws_observed_rows(nws), "NWS", "Observed")
 
 
+def normalize_twc_observed(twc: Dict[str, Any]) -> pd.DataFrame:
+    current = twc.get("current_conditions", {}) if isinstance(twc, dict) else {}
+    if not isinstance(current, dict) or not current:
+        return pd.DataFrame(columns=["provider", "type", "time_utc", "time_et", "temperature_f", "dewpoint_f", "relative_humidity_pct", "wind_direction_degrees", "wind_direction", "wind_speed_mph", "wind_gust_mph", "clouds", "precip_probability_pct", "phrase"])
+    if not any(current.get(k) is not None for k in ["temperature_f", "dewpoint_f", "relative_humidity_pct", "wind_speed_mph"]):
+        return pd.DataFrame(columns=["provider", "type", "time_utc", "time_et", "temperature_f", "dewpoint_f", "relative_humidity_pct", "wind_direction_degrees", "wind_direction", "wind_speed_mph", "wind_gust_mph", "clouds", "precip_probability_pct", "phrase"])
+    ts = parse_ts(current.get("observation_time_utc")) or parse_ts(twc.get("fetched_at_utc"))
+    row = {
+        "provider": "TWC",
+        "type": "Observed",
+        "time_utc": ts,
+        "time_et": format_et(ts),
+        "temperature_f": first_number(current, "temperature_f"),
+        "dewpoint_f": first_number(current, "dewpoint_f"),
+        "relative_humidity_pct": first_number(current, "relative_humidity_pct"),
+        "wind_direction_degrees": first_number(current, "wind_direction_degrees"),
+        "wind_direction": current.get("wind_direction_cardinal"),
+        "wind_speed_mph": first_number(current, "wind_speed_mph"),
+        "wind_gust_mph": None,
+        "clouds": None,
+        "precip_probability_pct": None,
+        "phrase": current.get("phrase"),
+    }
+    return pd.DataFrame([row])
+
+
 def normalize_nws_forecast(nws: Dict[str, Any]) -> pd.DataFrame:
     return normalize_rows(extract_nws_forecast_rows(nws), "NWS", "Forecast")
 
@@ -324,6 +350,30 @@ def build_matched_table(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.DataF
     return pd.DataFrame(rows)
 
 
+def build_observed_match(nws_observed_df: pd.DataFrame, twc_observed_df: pd.DataFrame, tolerance_minutes: int, match_direction: str) -> pd.DataFrame:
+    if nws_observed_df.empty or twc_observed_df.empty:
+        return pd.DataFrame()
+    direction = match_direction if match_direction in ("backward", "forward") else "nearest"
+    merged = pd.merge_asof(nws_observed_df.sort_values("time_utc"), twc_observed_df.sort_values("time_utc"), on="time_utc", direction=direction, tolerance=pd.Timedelta(minutes=tolerance_minutes), suffixes=("_nws", "_twc"))
+    rows = []
+    for _, r in merged.iterrows():
+        if pd.isna(r.get("provider_twc")):
+            continue
+        rows.append({
+            "Time ET": format_et(r.get("time_utc")),
+            "NWS Observed °F": compact_num(r.get("temperature_f_nws")),
+            "TWC Observed °F": compact_num(r.get("temperature_f_twc")),
+            "Observed Temp Spread": r.get("temperature_f_twc") - r.get("temperature_f_nws") if pd.notna(r.get("temperature_f_twc")) and pd.notna(r.get("temperature_f_nws")) else None,
+            "NWS Dewpoint °F": compact_num(r.get("dewpoint_f_nws")),
+            "TWC Dewpoint °F": compact_num(r.get("dewpoint_f_twc")),
+            "NWS Wind mph": compact_num(r.get("wind_speed_mph_nws")),
+            "TWC Wind mph": compact_num(r.get("wind_speed_mph_twc")),
+            "NWS Raw": r.get("phrase_nws"),
+            "TWC Phrase": r.get("phrase_twc"),
+        })
+    return pd.DataFrame(rows)
+
+
 def build_daily_match(nws_daily: pd.DataFrame, twc_daily: pd.DataFrame) -> pd.DataFrame:
     if nws_daily.empty or twc_daily.empty:
         return pd.DataFrame()
@@ -350,7 +400,7 @@ def render_controls() -> Tuple[int, str, List[str], bool, bool, int, bool]:
     auto_update = st.sidebar.checkbox("Auto-update stale provider snapshots", value=True)
     auto_rerun = st.sidebar.checkbox("Auto-refresh page", value=True)
     refresh_seconds = st.sidebar.slider("Page refresh seconds", 30, 300, DEFAULT_AUTO_REFRESH_SECONDS, 15)
-    tolerance = st.sidebar.slider("Forecast match tolerance", 5, 180, 75, 5)
+    tolerance = st.sidebar.slider("Forecast/observed match tolerance", 5, 180, 75, 5)
     direction = st.sidebar.selectbox("Match method", ["nearest", "backward", "forward"], index=0)
     groups = st.sidebar.multiselect("Show comparison groups", ["temperature", "humidity", "wind", "source_text"], default=["temperature", "wind"])
     show_raw = st.sidebar.checkbox("Show raw JSON expanders", value=False)
@@ -374,7 +424,7 @@ def render_summary(nws: Dict[str, Any], twc: Dict[str, Any], matched: pd.DataFra
     features = twc.get("derived_features", {}) if isinstance(twc, dict) else {}
     st.header("🌦️ Forecast Providers: NWS KMIA vs The Weather Company")
     st.error("🚨 NO REAL TRADING EXECUTION — DRY-RUN / PAPER EVALUATION ONLY")
-    st.info("This page compares NWS forecast rows against TWC forecast rows. NWS observed KMIA station rows are shown separately for verification only.")
+    st.info("Forecast rows are compared separately from observed/verification rows. NWS KMIA observations remain the official verification target.")
     cols = st.columns(4)
     cols[0].metric("NWS Observed Temp", f"{nws.get('current_temp_f', 'N/A')}°F")
     cols[1].metric("NWS Observed Max", f"{nws.get('observed_max_so_far_f', 'N/A')}°F")
@@ -389,15 +439,36 @@ def render_summary(nws: Dict[str, Any], twc: Dict[str, Any], matched: pd.DataFra
     st.caption(f"Snapshot age — NWS: {int(nws_age or 0)}s | TWC: {int(twc_age or 0)}s")
 
 
-def render_provider_tables(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.DataFrame, nws_observed_df: pd.DataFrame) -> None:
+def render_provider_tables(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.DataFrame) -> None:
     st.subheader("Hourly Forecast Tables")
-    tab1, tab2, tab3 = st.tabs(["NWS Hourly Forecast", "TWC Hourly Forecast", "NWS KMIA Observed / Verification"])
+    tab1, tab2 = st.tabs(["NWS Hourly Forecast", "TWC Hourly Forecast"])
     with tab1:
         st.dataframe(to_display_df(nws_forecast_df, "NWS", max_rows=72), width="stretch", hide_index=True)
     with tab2:
         st.dataframe(to_display_df(twc_forecast_df, "TWC", max_rows=72), width="stretch", hide_index=True)
-    with tab3:
+
+
+def render_observed_tables(nws_observed_df: pd.DataFrame, twc_observed_df: pd.DataFrame, matched_observed: pd.DataFrame, twc: Dict[str, Any]) -> None:
+    st.subheader("Observed Tables")
+    tab1, tab2, tab3 = st.tabs(["NWS Observed", "TWC Observed", "Matched Hourly Observed Interval Comparison"])
+    with tab1:
         st.dataframe(to_display_df(nws_observed_df.sort_values("time_utc", ascending=False), "NWS", max_rows=48), width="stretch", hide_index=True)
+    with tab2:
+        if twc_observed_df.empty:
+            status = twc.get("endpoint_status", {}).get("current_conditions", {}) if isinstance(twc, dict) else {}
+            st.warning("No TWC observed/current-condition rows are available. TWC current conditions are currently not authorized or not returned for this key.")
+            st.json(status)
+        else:
+            st.dataframe(to_display_df(twc_observed_df.sort_values("time_utc", ascending=False), "TWC", max_rows=48), width="stretch", hide_index=True)
+    with tab3:
+        if matched_observed.empty:
+            st.warning("No matched observed intervals yet. This requires both NWS observed rows and TWC observed/current-condition rows.")
+        else:
+            st.dataframe(matched_observed, width="stretch", hide_index=True)
+            vals = matched_observed["Observed Temp Spread"].dropna() if "Observed Temp Spread" in matched_observed else pd.Series(dtype=float)
+            if not vals.empty:
+                st.markdown("**Observed Temperature Spread Summary**")
+                st.dataframe(pd.DataFrame([{"Metric": "TWC Observed - NWS Observed", "Median": vals.median(), "Mean": vals.mean(), "Max Abs": vals.abs().max(), "Count": len(vals)}]), width="stretch", hide_index=True)
 
 
 def render_matched_table(matched: pd.DataFrame, groups: List[str]) -> None:
@@ -463,9 +534,11 @@ def main() -> None:
     nws_age = file_age_seconds(latest_nws)
     twc_age = file_age_seconds(latest_twc)
     nws_observed_df = normalize_nws_observed(nws)
+    twc_observed_df = normalize_twc_observed(twc)
     nws_forecast_df = normalize_nws_forecast(nws)
     twc_forecast_df = normalize_twc_forecast(twc)
     matched = build_matched_table(nws_forecast_df, twc_forecast_df, tolerance, direction)
+    matched_observed = build_observed_match(nws_observed_df, twc_observed_df, tolerance, direction)
     nws_daily = normalize_nws_daily(nws)
     twc_daily = normalize_twc_daily(twc)
     matched_daily = build_daily_match(nws_daily, twc_daily)
@@ -473,11 +546,13 @@ def main() -> None:
     st.caption(f"TWC source: {latest_twc.name if latest_twc else 'missing'}")
     render_summary(nws, twc, matched, nws_age, twc_age)
     st.divider()
-    render_provider_tables(nws_forecast_df, twc_forecast_df, nws_observed_df)
+    render_provider_tables(nws_forecast_df, twc_forecast_df)
     st.divider()
     render_matched_table(matched, groups)
     st.divider()
     render_daily_forecasts(nws_daily, twc_daily, matched_daily)
+    st.divider()
+    render_observed_tables(nws_observed_df, twc_observed_df, matched_observed, twc)
     if show_raw:
         st.divider()
         with st.expander("NWS raw JSON"):
