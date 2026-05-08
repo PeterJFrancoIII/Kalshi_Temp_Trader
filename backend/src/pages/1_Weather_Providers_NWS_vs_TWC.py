@@ -27,6 +27,7 @@ DISPLAY_COLUMNS = [
     "Time ET", "Provider", "Type", "Temp °F", "Dewpoint °F", "RH %", "Wind",
     "Wind mph", "Gust mph", "Clouds", "Precip %", "Phrase / Raw",
 ]
+DAILY_COLUMNS = ["Day", "Provider", "Period", "High °F", "Low °F", "Precip %", "Wind", "Wind mph", "Narrative"]
 
 
 def latest_file(directory: Path, pattern: str) -> Optional[Path]:
@@ -51,10 +52,7 @@ def run_update(script: Path, label: str) -> Tuple[bool, str]:
     if not script.exists():
         return False, f"{label} update script not found: {script}"
     try:
-        result = subprocess.run(
-            ["bash", str(script)], cwd=str(ROOT), capture_output=True,
-            text=True, timeout=45, env=os.environ.copy()
-        )
+        result = subprocess.run(["bash", str(script)], cwd=str(ROOT), capture_output=True, text=True, timeout=45, env=os.environ.copy())
         msg = (result.stdout or "")[-1200:]
         if result.stderr:
             msg += "\n" + result.stderr[-1200:]
@@ -102,6 +100,34 @@ def format_et(ts: Any) -> str:
     return "N/A" if parsed is None else parsed.tz_convert("America/New_York").strftime("%m/%d %I:%M %p")
 
 
+def format_day(ts: Any, fallback: Any = None) -> str:
+    parsed = parse_ts(ts)
+    if parsed is not None:
+        return parsed.tz_convert("America/New_York").strftime("%a %m/%d")
+    if fallback:
+        try:
+            parsed_fb = pd.to_datetime(fallback, errors="coerce")
+            if not pd.isna(parsed_fb):
+                return parsed_fb.strftime("%a %m/%d")
+        except Exception:
+            pass
+    return str(fallback or "N/A")
+
+
+def date_key(ts: Any, fallback: Any = None) -> Optional[str]:
+    parsed = parse_ts(ts)
+    if parsed is not None:
+        return parsed.tz_convert("America/New_York").strftime("%Y-%m-%d")
+    if fallback:
+        try:
+            parsed_fb = pd.to_datetime(fallback, errors="coerce")
+            if not pd.isna(parsed_fb):
+                return parsed_fb.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    return None
+
+
 def first_number(row: Dict[str, Any], *keys: str) -> Optional[float]:
     for key in keys:
         val = row.get(key)
@@ -146,21 +172,11 @@ def provider_status(value: Dict[str, Any], provider: str) -> str:
 
 
 def extract_nws_observed_rows(nws: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return first_list(nws, [
-        ("recent_observations_table",), ("observations",), ("recent_observations",),
-        ("api_inputs", "recent_observations_table"), ("api_inputs", "observations"), ("raw", "observations"),
-    ])
+    return first_list(nws, [("recent_observations_table",), ("observations",), ("recent_observations",), ("api_inputs", "recent_observations_table"), ("api_inputs", "observations"), ("raw", "observations")])
 
 
 def extract_nws_forecast_rows(nws: Dict[str, Any]) -> List[Dict[str, Any]]:
-    rows = first_list(nws, [
-        ("hourly_forecast",), ("forecast_hourly",), ("hourly",),
-        ("api_inputs", "hourly_forecast"), ("raw", "hourly_forecast"),
-        ("forecast", "hourly"), ("forecasts", "hourly"),
-        ("api_forecast_hourly",), ("forecast_periods",),
-        ("properties", "periods"), ("raw", "forecast", "properties", "periods"),
-    ])
-    return rows
+    return first_list(nws, [("hourly_forecast",), ("forecast_hourly",), ("hourly",), ("api_inputs", "hourly_forecast"), ("raw", "hourly_forecast"), ("forecast", "hourly"), ("forecasts", "hourly"), ("api_forecast_hourly",), ("forecast_periods",), ("properties", "periods"), ("raw", "forecast", "properties", "periods")])
 
 
 def normalize_rows(rows: List[Dict[str, Any]], provider: str, row_type: str) -> pd.DataFrame:
@@ -206,6 +222,59 @@ def normalize_twc_forecast(twc: Dict[str, Any]) -> pd.DataFrame:
     return normalize_rows([r for r in rows if isinstance(r, dict)], "TWC", "Forecast")
 
 
+def normalize_nws_daily(nws: Dict[str, Any]) -> pd.DataFrame:
+    rows = nws.get("daily_forecast", []) if isinstance(nws, dict) else []
+    out = []
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("isDaytime", True):
+            continue
+        valid = row.get("valid_time_utc")
+        key = date_key(valid, row.get("forecast_date_et"))
+        high = first_number(row, "temperature_f", "temperature")
+        out.append({
+            "date_key": key,
+            "Day": row.get("display_day") or format_day(valid, row.get("forecast_date_et")),
+            "Provider": "NWS",
+            "Period": row.get("period_name") or "Day",
+            "High °F": compact_num(high),
+            "Low °F": None,
+            "Precip %": compact_num(first_number(row, "precip_probability_pct", "precipChance", "pop")),
+            "Wind": row.get("wind_direction_compass") or row.get("wind_direction"),
+            "Wind mph": compact_num(first_number(row, "wind_speed_mph", "windSpeed")),
+            "Narrative": row.get("shortForecast") or row.get("detailedForecast") or row.get("raw_message"),
+        })
+    df = pd.DataFrame(out)
+    if not df.empty:
+        df = df.sort_values("date_key")
+    return df
+
+
+def normalize_twc_daily(twc: Dict[str, Any]) -> pd.DataFrame:
+    rows = twc.get("daily_forecast", []) if isinstance(twc, dict) else []
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        valid = row.get("valid_time_utc")
+        key = date_key(valid)
+        out.append({
+            "date_key": key,
+            "Day": format_day(valid),
+            "Provider": "TWC",
+            "Period": "Daily",
+            "High °F": compact_num(first_number(row, "max_temp_f", "temperatureMax")),
+            "Low °F": compact_num(first_number(row, "min_temp_f", "temperatureMin")),
+            "Precip %": compact_num(first_number(row, "precip_probability_pct", "precipChance", "pop")),
+            "Wind": None,
+            "Wind mph": None,
+            "Narrative": row.get("narrative"),
+        })
+    df = pd.DataFrame(out)
+    if not df.empty:
+        df = df.sort_values("date_key")
+    return df
+
+
 def to_display_df(df: pd.DataFrame, provider_label: Optional[str] = None, max_rows: Optional[int] = None) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=DISPLAY_COLUMNS)
@@ -231,10 +300,7 @@ def build_matched_table(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.DataF
     if nws_forecast_df.empty or twc_forecast_df.empty:
         return pd.DataFrame()
     direction = match_direction if match_direction in ("backward", "forward") else "nearest"
-    merged = pd.merge_asof(
-        nws_forecast_df.sort_values("time_utc"), twc_forecast_df.sort_values("time_utc"),
-        on="time_utc", direction=direction, tolerance=pd.Timedelta(minutes=tolerance_minutes), suffixes=("_nws", "_twc")
-    )
+    merged = pd.merge_asof(nws_forecast_df.sort_values("time_utc"), twc_forecast_df.sort_values("time_utc"), on="time_utc", direction=direction, tolerance=pd.Timedelta(minutes=tolerance_minutes), suffixes=("_nws", "_twc"))
     rows = []
     for _, r in merged.iterrows():
         if pd.isna(r.get("provider_twc")):
@@ -254,6 +320,27 @@ def build_matched_table(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.DataF
             "TWC Wind mph": compact_num(r.get("wind_speed_mph_twc")),
             "NWS Phrase": r.get("phrase_nws"),
             "TWC Phrase": r.get("phrase_twc"),
+        })
+    return pd.DataFrame(rows)
+
+
+def build_daily_match(nws_daily: pd.DataFrame, twc_daily: pd.DataFrame) -> pd.DataFrame:
+    if nws_daily.empty or twc_daily.empty:
+        return pd.DataFrame()
+    merged = pd.merge(nws_daily, twc_daily, on="date_key", how="inner", suffixes=(" NWS", " TWC"))
+    rows = []
+    for _, r in merged.iterrows():
+        nws_high = r.get("High °F NWS")
+        twc_high = r.get("High °F TWC")
+        rows.append({
+            "Day": r.get("Day NWS") or r.get("Day TWC"),
+            "NWS High °F": nws_high,
+            "TWC High °F": twc_high,
+            "Daily High Spread": twc_high - nws_high if pd.notna(nws_high) and pd.notna(twc_high) else None,
+            "NWS Precip %": r.get("Precip % NWS"),
+            "TWC Precip %": r.get("Precip % TWC"),
+            "NWS Narrative": r.get("Narrative NWS"),
+            "TWC Narrative": r.get("Narrative TWC"),
         })
     return pd.DataFrame(rows)
 
@@ -287,7 +374,7 @@ def render_summary(nws: Dict[str, Any], twc: Dict[str, Any], matched: pd.DataFra
     features = twc.get("derived_features", {}) if isinstance(twc, dict) else {}
     st.header("🌦️ Forecast Providers: NWS KMIA vs The Weather Company")
     st.error("🚨 NO REAL TRADING EXECUTION — DRY-RUN / PAPER EVALUATION ONLY")
-    st.info("This page compares **NWS forecast rows** against **TWC forecast rows**. NWS observed KMIA station rows are shown separately for verification only.")
+    st.info("This page compares NWS forecast rows against TWC forecast rows. NWS observed KMIA station rows are shown separately for verification only.")
     cols = st.columns(4)
     cols[0].metric("NWS Observed Temp", f"{nws.get('current_temp_f', 'N/A')}°F")
     cols[1].metric("NWS Observed Max", f"{nws.get('observed_max_so_far_f', 'N/A')}°F")
@@ -303,11 +390,9 @@ def render_summary(nws: Dict[str, Any], twc: Dict[str, Any], matched: pd.DataFra
 
 
 def render_provider_tables(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.DataFrame, nws_observed_df: pd.DataFrame) -> None:
-    st.subheader("Provider Forecast Tables — Same Column Format")
+    st.subheader("Hourly Forecast Tables")
     tab1, tab2, tab3 = st.tabs(["NWS Hourly Forecast", "TWC Hourly Forecast", "NWS KMIA Observed / Verification"])
     with tab1:
-        if nws_forecast_df.empty:
-            st.warning("No NWS hourly forecast rows found in the current NWS snapshot. The NWS client may need to persist hourly forecast periods into the snapshot.")
         st.dataframe(to_display_df(nws_forecast_df, "NWS", max_rows=72), width="stretch", hide_index=True)
     with tab2:
         st.dataframe(to_display_df(twc_forecast_df, "TWC", max_rows=72), width="stretch", hide_index=True)
@@ -316,27 +401,40 @@ def render_provider_tables(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.Da
 
 
 def render_matched_table(matched: pd.DataFrame, groups: List[str]) -> None:
-    st.subheader("Matched Forecast Interval Comparison")
+    st.subheader("Matched Hourly Forecast Interval Comparison")
     if matched.empty:
-        st.warning("No matched NWS/TWC forecast intervals found. Check that the NWS snapshot includes hourly forecast rows and that TWC hourly rows are present.")
+        st.warning("No matched NWS/TWC forecast intervals found. Check that NWS and TWC hourly forecast rows are present.")
         return
     view = matched[[c for c in matched_columns(groups) if c in matched.columns]].copy()
     st.dataframe(view, width="stretch", hide_index=True)
     vals = matched["Forecast Spread"].dropna() if "Forecast Spread" in matched else pd.Series(dtype=float)
     if not vals.empty:
-        st.markdown("**Forecast Spread Summary**")
+        st.markdown("**Hourly Forecast Spread Summary**")
         st.dataframe(pd.DataFrame([{"Metric": "TWC Forecast - NWS Forecast", "Median": vals.median(), "Mean": vals.mean(), "Max Abs": vals.abs().max(), "Count": len(vals)}]), width="stretch", hide_index=True)
 
 
-def render_daily_twc(twc: Dict[str, Any]) -> None:
-    daily = twc.get("daily_forecast", []) if isinstance(twc, dict) else []
-    if not daily:
-        return
-    st.subheader("TWC Daily Forecast Summary")
-    df = pd.DataFrame(daily)
-    rename = {"valid_time_utc": "Valid UTC", "max_temp_f": "Max °F", "min_temp_f": "Min °F", "precip_probability_pct": "Precip %", "narrative": "Narrative"}
-    cols = [c for c in rename if c in df.columns]
-    st.dataframe(df[cols].rename(columns=rename), width="stretch", hide_index=True)
+def render_daily_forecasts(nws_daily: pd.DataFrame, twc_daily: pd.DataFrame, matched_daily: pd.DataFrame) -> None:
+    st.subheader("Daily Forecast Summary")
+    tab1, tab2, tab3 = st.tabs(["NWS Daily Forecast", "TWC Daily Forecast", "Matched Daily Forecast Comparison"])
+    with tab1:
+        if nws_daily.empty:
+            st.warning("No NWS daily forecast rows found. Run `bash scripts/update_nws_live_data.sh` after pulling the latest branch.")
+        else:
+            st.dataframe(nws_daily[[c for c in DAILY_COLUMNS if c in nws_daily.columns]], width="stretch", hide_index=True)
+    with tab2:
+        if twc_daily.empty:
+            st.warning("No TWC daily forecast rows found. Run `bash scripts/update_twc_kmia_data.sh`.")
+        else:
+            st.dataframe(twc_daily[[c for c in DAILY_COLUMNS if c in twc_daily.columns]], width="stretch", hide_index=True)
+    with tab3:
+        if matched_daily.empty:
+            st.warning("No matched daily forecast rows found yet.")
+        else:
+            st.dataframe(matched_daily, width="stretch", hide_index=True)
+            vals = matched_daily["Daily High Spread"].dropna() if "Daily High Spread" in matched_daily else pd.Series(dtype=float)
+            if not vals.empty:
+                st.markdown("**Daily High Spread Summary**")
+                st.dataframe(pd.DataFrame([{"Metric": "TWC Daily High - NWS Daily High", "Median": vals.median(), "Mean": vals.mean(), "Max Abs": vals.abs().max(), "Count": len(vals)}]), width="stretch", hide_index=True)
 
 
 def main() -> None:
@@ -368,6 +466,9 @@ def main() -> None:
     nws_forecast_df = normalize_nws_forecast(nws)
     twc_forecast_df = normalize_twc_forecast(twc)
     matched = build_matched_table(nws_forecast_df, twc_forecast_df, tolerance, direction)
+    nws_daily = normalize_nws_daily(nws)
+    twc_daily = normalize_twc_daily(twc)
+    matched_daily = build_daily_match(nws_daily, twc_daily)
     st.caption(f"NWS source: {latest_nws.name if latest_nws else 'missing'}")
     st.caption(f"TWC source: {latest_twc.name if latest_twc else 'missing'}")
     render_summary(nws, twc, matched, nws_age, twc_age)
@@ -376,7 +477,7 @@ def main() -> None:
     st.divider()
     render_matched_table(matched, groups)
     st.divider()
-    render_daily_twc(twc)
+    render_daily_forecasts(nws_daily, twc_daily, matched_daily)
     if show_raw:
         st.divider()
         with st.expander("NWS raw JSON"):
