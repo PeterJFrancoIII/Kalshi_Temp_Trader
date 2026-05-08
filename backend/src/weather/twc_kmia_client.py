@@ -2,8 +2,9 @@
 
 NWS KMIA remains the settlement/verification target. This client pulls TWC
 point data into a normalized local snapshot. Daily TWC data is useful as a
-forecast summary, but only TWC hourly rows are marked comparison-ready against
-NWS hourly KMIA station observations.
+forecast summary. TWC observed history is built locally by archiving each
+successful current observation because the current API entitlement only returns
+one observed row at a time.
 """
 
 import json
@@ -27,12 +28,11 @@ ROOT = Path(__file__).resolve().parents[3]
 PROCESSED_DIR = ROOT / "backend" / "data" / "processed" / "weather_company"
 RAW_DIR = ROOT / "backend" / "data" / "raw" / "weather_company"
 LATEST_FILE = PROCESSED_DIR / "latest_twc_kmia_snapshot.json"
+OBSERVED_HISTORY_FILE = PROCESSED_DIR / "twc_observed_history.jsonl"
 
 DEFAULT_ENDPOINTS = {
-    # Confirmed working for this API key on 2026-05-07.
     "current_conditions": os.getenv("TWC_CURRENT_CONDITIONS_PATH", "/v3/wx/observations/current"),
     "daily_forecast": os.getenv("TWC_DAILY_FORECAST_PATH", "/v3/wx/forecast/daily/15day"),
-    # Confirmed working for this API key on 2026-05-07. Required for apples-to-apples comparison against NWS hourly rows.
     "hourly_forecast": os.getenv("TWC_HOURLY_FORECAST_PATH", "/v3/wx/forecast/hourly/15day"),
 }
 
@@ -164,17 +164,7 @@ def normalize_daily(data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     narrative = list_field(data, "narrative", "daypartNarrative")
     pop = list_field(data, "precipChance", "probabilityOfPrecipitation", "pop")
     n = max(len(valid), len(max_t), len(min_t), len(narrative), len(pop), 0)
-    return [
-        {
-            "index": i,
-            "valid_time_utc": at(valid, i),
-            "max_temp_f": at(max_t, i),
-            "min_temp_f": at(min_t, i),
-            "narrative": at(narrative, i),
-            "precip_probability_pct": at(pop, i),
-        }
-        for i in range(n)
-    ]
+    return [{"index": i, "valid_time_utc": at(valid, i), "max_temp_f": at(max_t, i), "min_temp_f": at(min_t, i), "narrative": at(narrative, i), "precip_probability_pct": at(pop, i)} for i in range(n)]
 
 
 def normalize_hourly(data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -192,23 +182,7 @@ def normalize_hourly(data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     pop = list_field(data, "precipChance", "probabilityOfPrecipitation", "pop")
     phrase = list_field(data, "wxPhraseLong", "phrase", "narrative")
     n = max(len(valid_utc), len(valid_local), len(temp), len(dew), len(rh), len(wspd), len(wdir), len(wcard), len(cloud), len(pop), len(phrase), 0)
-    return [
-        {
-            "index": i,
-            "valid_time_utc": at(valid_utc, i),
-            "valid_time_local": at(valid_local, i),
-            "temperature_f": at(temp, i),
-            "dewpoint_f": at(dew, i),
-            "relative_humidity_pct": at(rh, i),
-            "wind_speed_mph": at(wspd, i),
-            "wind_direction_degrees": at(wdir, i),
-            "wind_direction_cardinal": at(wcard, i),
-            "cloud_cover_pct": at(cloud, i),
-            "precip_probability_pct": at(pop, i),
-            "phrase": at(phrase, i),
-        }
-        for i in range(n)
-    ]
+    return [{"index": i, "valid_time_utc": at(valid_utc, i), "valid_time_local": at(valid_local, i), "temperature_f": at(temp, i), "dewpoint_f": at(dew, i), "relative_humidity_pct": at(rh, i), "wind_speed_mph": at(wspd, i), "wind_direction_degrees": at(wdir, i), "wind_direction_cardinal": at(wcard, i), "cloud_cover_pct": at(cloud, i), "precip_probability_pct": at(pop, i), "phrase": at(phrase, i)} for i in range(n)]
 
 
 def derive_features(daily: List[Dict[str, Any]], hourly: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -248,6 +222,44 @@ def comparison_metadata(endpoint_status: Dict[str, Any], hourly: List[Dict[str, 
     }
 
 
+def append_observed_history(snapshot: Dict[str, Any]) -> None:
+    current = snapshot.get("current_conditions", {})
+    status = snapshot.get("endpoint_status", {}).get("current_conditions", {}).get("status")
+    if status != "OK" or not isinstance(current, dict):
+        return
+    if current.get("temperature_f") is None and current.get("dewpoint_f") is None:
+        return
+
+    observed = dict(current)
+    observed.update({
+        "provider": "the_weather_company",
+        "station": "KMIA",
+        "geocode": snapshot.get("geocode", KMIA_GEOCODE),
+        "fetched_at_utc": snapshot.get("fetched_at_utc", utc_now()),
+    })
+
+    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    existing_keys = set()
+    if OBSERVED_HISTORY_FILE.exists():
+        try:
+            with OBSERVED_HISTORY_FILE.open("r") as f:
+                for line in f:
+                    try:
+                        row = json.loads(line)
+                        key = row.get("observation_time_utc") or row.get("fetched_at_utc")
+                        if key:
+                            existing_keys.add(str(key))
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+    key = observed.get("observation_time_utc") or observed.get("fetched_at_utc")
+    if key and str(key) in existing_keys:
+        return
+    with OBSERVED_HISTORY_FILE.open("a") as f:
+        f.write(json.dumps(observed, sort_keys=True) + "\n")
+
+
 def normalize_bundle(raw: Dict[str, Any]) -> Dict[str, Any]:
     responses = raw.get("responses", {})
     current = normalize_current(responses.get("current_conditions"))
@@ -267,6 +279,7 @@ def normalize_bundle(raw: Dict[str, Any]) -> Dict[str, Any]:
         "language": raw.get("language", LANGUAGE),
         "endpoint_status": endpoint_status,
         "current_conditions": current,
+        "observed_history_file": str(OBSERVED_HISTORY_FILE),
         "daily_forecast": daily,
         "hourly_forecast": hourly,
         "derived_features": derive_features(daily, hourly),
@@ -279,6 +292,7 @@ def normalize_bundle(raw: Dict[str, Any]) -> Dict[str, Any]:
 def save_snapshot(snapshot: Dict[str, Any], raw: Dict[str, Any]) -> Tuple[Path, Path]:
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR.mkdir(parents=True, exist_ok=True)
+    append_observed_history(snapshot)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
     timestamp_file = PROCESSED_DIR / f"twc_kmia_snapshot_{stamp}.json"
     raw_file = RAW_DIR / f"twc_kmia_raw_{stamp}.json"
