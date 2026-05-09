@@ -15,6 +15,25 @@ ROOT = Path(__file__).resolve().parents[3]
 SIGNAL_FILE = ROOT / "backend" / "data" / "processed" / "paper_trading" / "latest_paper_signal.json"
 LEDGER_FILE = ROOT / "backend" / "data" / "processed" / "paper_trading" / "paper_trade_ledger.jsonl"
 
+def signal_market_probability(best_signal: Dict[str, Any]) -> Any:
+    """Return the market probability using the current field name first.
+
+    Older signal payloads used market_implied_probability. Current signal payloads
+    use market_probability. Keep both aliases so historical/paper data remains
+    readable while avoiding None entries for new signals.
+    """
+    current = best_signal.get("market_probability")
+    if current is not None:
+        return current
+    return best_signal.get("market_implied_probability")
+
+def signal_entry_price(best_signal: Dict[str, Any]) -> Any:
+    """Return the simulated entry price without treating valid 0.0 as missing."""
+    yes_ask = best_signal.get("yes_ask")
+    if yes_ask is not None:
+        return yes_ask
+    return signal_market_probability(best_signal)
+
 def record_paper_trade():
     """
     Reads the latest paper signal and records a trade in the ledger if an edge is found.
@@ -64,9 +83,9 @@ def record_paper_trade():
         "market_ticker": ticker,
         "forecast_bin": best_signal.get("forecast_bin"),
         "model_probability": best_signal.get("model_probability"),
-        "market_probability": best_signal.get("market_implied_probability"),
+        "market_probability": signal_market_probability(best_signal),
         "edge": best_signal.get("edge"),
-        "simulated_entry_price": best_signal.get("yes_ask") or best_signal.get("market_implied_probability"),
+        "simulated_entry_price": signal_entry_price(best_signal),
         "paper_action": action,
         "market_open_time_et": best_signal.get("market_open_time_et"),
         "status": "OPEN",
