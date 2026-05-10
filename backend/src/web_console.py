@@ -21,6 +21,7 @@ KALSHI_DIR = DATA / "kalshi_market_snapshots"
 PAPER_DIR = DATA / "paper_trading"
 LEARNING_DIR = DATA / "learning"
 NWS_DIR = DATA / "weather_nws"
+TWC_DIR = DATA / "weather_company"
 WEATHER_INGESTION_DIR = DATA / "weather_ingestion"
 
 try:
@@ -123,29 +124,67 @@ def snapshot_status(data: Any, path: Optional[Path]) -> str:
     return "✅ CONNECTED"
 
 
-def load_available_comparison_sources() -> dict[str, Any]:
-    """Exact source-loading logic from pages/4_TWC_vs_NWS_Comparison.py.
+def extract_provider_forecast_rows(payload: Any) -> list[dict[str, Any]]:
+    """Return hourly/forecast rows from a provider snapshot.
 
-    Keep this aligned with the standalone page so the main-console tab renders
-    the full TWC vs NWS comparison instead of an empty placeholder.
+    The comparison renderer expects direct provider rows, not full snapshot
+    dictionaries. This helper makes the embedded main-console tab behave like
+    the provider page by extracting the actual forecast arrays.
     """
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if not isinstance(payload, dict):
+        return []
+    for key in [
+        "hourly_forecast",
+        "forecast_hourly",
+        "hourly",
+        "hourly_forecasts",
+        "forecast_rows",
+        "forecasts",
+        "data",
+        "rows",
+    ]:
+        rows = payload.get(key)
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+    for parent_key in ["forecast", "api_inputs", "derived_features", "raw"]:
+        parent = payload.get(parent_key)
+        if isinstance(parent, dict):
+            nested = extract_provider_forecast_rows(parent)
+            if nested:
+                return nested
+    return []
+
+
+def load_available_comparison_sources() -> dict[str, Any]:
+    """Load all local payloads needed by the TWC vs NWS comparison tab."""
     latest_status_json = latest_file(STATUS_DIR, "kmia_daily_status_*.json")
     latest_weather_ingestion_json = WEATHER_INGESTION_DIR / "latest_weather_ingestion_status.json"
     latest_nws_json = NWS_DIR / "latest_nws_kmia_snapshot.json"
     if not latest_nws_json.exists():
         latest_nws_json = latest_file(NWS_DIR, "nws_kmia_snapshot_*.json")
-
+    latest_twc_json = TWC_DIR / "latest_twc_kmia_snapshot.json"
+    if not latest_twc_json.exists():
+        latest_twc_json = latest_file(TWC_DIR, "twc_kmia_snapshot_*.json")
     latest_report_json = latest_file(REPORTS_DIR, "*.json")
+
+    nws_payload = load_json(latest_nws_json)
+    twc_payload = load_json(latest_twc_json)
 
     sources: dict[str, Any] = {
         "status": load_json(latest_status_json),
         "weather_ingestion": load_json(latest_weather_ingestion_json),
-        "nws": load_json(latest_nws_json),
+        "nws": nws_payload,
+        "twc": twc_payload,
+        "nws_forecast": extract_provider_forecast_rows(nws_payload),
+        "twc_forecast": extract_provider_forecast_rows(twc_payload),
         "latest_report_json": load_json(latest_report_json),
         "source_files": {
             "status": str(latest_status_json) if latest_status_json else None,
             "weather_ingestion": str(latest_weather_ingestion_json) if latest_weather_ingestion_json.exists() else None,
             "nws": str(latest_nws_json) if latest_nws_json else None,
+            "twc": str(latest_twc_json) if latest_twc_json else None,
             "latest_report_json": str(latest_report_json) if latest_report_json else None,
         },
     }
@@ -185,6 +224,10 @@ def load_console_state() -> dict[str, Any]:
     if not latest_nws_path.exists():
         latest_nws_path = latest_file(NWS_DIR, "nws_kmia_snapshot_*.json")
     n_data = load_json(latest_nws_path) if latest_nws_path else {}
+    latest_twc_path = TWC_DIR / "latest_twc_kmia_snapshot.json"
+    if not latest_twc_path.exists():
+        latest_twc_path = latest_file(TWC_DIR, "twc_kmia_snapshot_*.json")
+    t_data = load_json(latest_twc_path) if latest_twc_path else {}
 
     p_data = load_json(PAPER_DIR / "latest_paper_signal.json") or {}
     perf = load_json(PAPER_DIR / "latest_paper_trading_performance.json") or {}
@@ -232,6 +275,7 @@ def load_console_state() -> dict[str, Any]:
         "top_bin": fsum["top_probability_bin"],
         "weather_live": "✅ CONNECTED" if comparison_sources.get("weather_ingestion") or latest_status_json else "❌ MISSING",
         "nws_live": snapshot_status(n_data, latest_nws_path),
+        "twc_live": snapshot_status(t_data, latest_twc_path),
         "kalshi_status": kalshi_status,
         "kalshi_last_upd": kalshi_last_upd,
         "paper_loop_status": "Active" if p_data else "Missing Data",
@@ -248,7 +292,9 @@ def load_console_state() -> dict[str, Any]:
         "latest_kalshi_json": latest_kalshi_json,
         "latest_log": latest_log,
         "latest_nws_path": latest_nws_path,
+        "latest_twc_path": latest_twc_path,
         "n_data": n_data,
+        "t_data": t_data,
         "p_data": p_data,
         "perf": perf,
         "trades": trades,
@@ -265,7 +311,7 @@ def load_console_state() -> dict[str, Any]:
 def render_home(state: dict[str, Any]) -> None:
     st.header("🏠 Operator Home")
     st.error("🚨 DRY-RUN / PAPER EVALUATION ONLY — NO REAL TRADING EXECUTION")
-    cols = st.columns(4)
+    cols = st.columns(5)
     cols[0].metric("System", state["system_status"])
     cols[0].caption(state["action_needed"])
     cols[1].metric("Forecast", f"{state['forecast_val']}°F")
@@ -273,8 +319,11 @@ def render_home(state: dict[str, Any]) -> None:
     cols[2].metric("NWS Live Data", state["nws_live"])
     if state.get("latest_nws_path"):
         cols[2].caption(state["latest_nws_path"].name)
-    cols[3].metric("Kalshi Market", state["kalshi_status"])
-    cols[3].caption(f"Updated: {state['kalshi_last_upd']}")
+    cols[3].metric("TWC Weather Data", state["twc_live"])
+    if state.get("latest_twc_path"):
+        cols[3].caption(state["latest_twc_path"].name)
+    cols[4].metric("Kalshi Market", state["kalshi_status"])
+    cols[4].caption(f"Updated: {state['kalshi_last_upd']}")
     st.divider()
     pcols = st.columns(4)
     pcols[0].metric("Paper Loop", state["paper_loop_status"])
