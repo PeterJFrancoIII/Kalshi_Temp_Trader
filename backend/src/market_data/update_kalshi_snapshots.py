@@ -172,6 +172,33 @@ def main():
                     }
                     orderbook_warnings.append(f"Failed to fetch orderbook for {ticker}")
                     
+                # Fallback logic if orderbook depth is empty
+                ob = orderbooks[ticker]
+                if not ob.get("yes_bids") and not ob.get("no_bids"):
+                    # Use fallback from market snapshot if available
+                    has_fallback = False
+                    fallback_fields = ["yes_bid_dollars", "yes_ask_dollars", "no_bid_dollars", "no_ask_dollars"]
+                    for field in fallback_fields:
+                        if m.get(field) is not None:
+                            has_fallback = True
+                            break
+                            
+                    if has_fallback:
+                        ob["top_yes_bid_dollars"] = float(m.get("yes_bid_dollars")) if m.get("yes_bid_dollars") else None
+                        ob["top_yes_ask_dollars"] = float(m.get("yes_ask_dollars")) if m.get("yes_ask_dollars") else None
+                        ob["top_no_bid_dollars"] = float(m.get("no_bid_dollars")) if m.get("no_bid_dollars") else None
+                        ob["top_no_ask_dollars"] = float(m.get("no_ask_dollars")) if m.get("no_ask_dollars") else None
+                        ob["last_price_dollars"] = float(m.get("last_price_dollars")) if m.get("last_price_dollars") else None
+                        
+                        ob["yes_bid_size"] = int(float(m.get("yes_bid_size_fp"))) if m.get("yes_bid_size_fp") else None
+                        ob["yes_ask_size"] = int(float(m.get("yes_ask_size_fp"))) if m.get("yes_ask_size_fp") else None
+                        ob["no_bid_size"] = int(float(m.get("no_bid_size_fp"))) if m.get("no_bid_size_fp") else None
+                        ob["no_ask_size"] = int(float(m.get("no_ask_size_fp"))) if m.get("no_ask_size_fp") else None
+                        
+                        ob["top_of_book_source"] = "market_snapshot_fallback"
+                        ob["price_units"] = "dollars"
+                        ob["warnings"].append("Orderbook depth unavailable; using market snapshot top-of-book prices.")
+                    
         # Write Orderbook Artifact
         orderbook_artifact = {
             "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -184,7 +211,7 @@ def main():
         ob_filepath = LATEST_KALSHI_ORDERBOOKS
         try:
             with open(ob_filepath, 'w') as f:
-                json.dump(orderbook_artifact, f, indent=2)
+                f.write(json.dumps(orderbook_artifact, indent=2))
             print(f"Orderbooks saved to: {ob_filepath}")
         except Exception as e:
             print(f"Error writing orderbooks artifact: {e}")

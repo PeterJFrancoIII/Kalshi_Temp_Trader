@@ -211,12 +211,38 @@ def derive_orderbook_prices(orderbook: dict) -> dict:
     
     if yes_bids and len(yes_bids) > 0:
         prices["top_yes_bid"] = yes_bids[0][0]
+    else:
+        # Fallback to market snapshot prices (convert dollars to cents)
+        val = orderbook.get("top_yes_bid_dollars")
+        if val is not None:
+            prices["top_yes_bid"] = int(val * 100)
+            
     if no_bids and len(no_bids) > 0:
         prices["top_no_bid"] = no_bids[0][0]
+    else:
+        val = orderbook.get("top_no_bid_dollars")
+        if val is not None:
+            prices["top_no_bid"] = int(val * 100)
         
-    if prices["top_no_bid"] is not None:
+    # Derived Ask Logic following priority:
+    # 1. Real orderbook depth derived values
+    # 2. Direct market snapshot fields
+    # 3. Derived opposite-side fallback
+    
+    # YES Ask
+    if no_bids and len(no_bids) > 0:
+        prices["derived_yes_ask"] = 100 - no_bids[0][0]
+    elif orderbook.get("top_yes_ask_dollars") is not None:
+        prices["derived_yes_ask"] = int(orderbook.get("top_yes_ask_dollars") * 100)
+    elif prices["top_no_bid"] is not None:
         prices["derived_yes_ask"] = 100 - prices["top_no_bid"]
-    if prices["top_yes_bid"] is not None:
+        
+    # NO Ask
+    if yes_bids and len(yes_bids) > 0:
+        prices["derived_no_ask"] = 100 - yes_bids[0][0]
+    elif orderbook.get("top_no_ask_dollars") is not None:
+        prices["derived_no_ask"] = int(orderbook.get("top_no_ask_dollars") * 100)
+    elif prices["top_yes_bid"] is not None:
         prices["derived_no_ask"] = 100 - prices["top_yes_bid"]
         
     return prices

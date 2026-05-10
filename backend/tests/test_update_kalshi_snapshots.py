@@ -8,6 +8,15 @@ import os
 # Ensure src is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
+# Mock missing modules to allow imports without internet/dependencies
+sys.modules['requests'] = MagicMock()
+sys.modules['pydantic'] = MagicMock()
+sys.modules['beautifulsoup4'] = MagicMock()
+sys.modules['sqlalchemy'] = MagicMock()
+sys.modules['python-dateutil'] = MagicMock()
+sys.modules['dateutil'] = MagicMock()
+sys.modules['dateutil.parser'] = MagicMock()
+
 # Import main but we will patch things before calling it
 from market_data.update_kalshi_snapshots import main
 
@@ -151,6 +160,81 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
         snapshot = args[0]
         self.assertEqual(snapshot["status"], "EMPTY")
         self.assertEqual(len(snapshot["selected_temperature_markets"]), 0)
+
+    @patch('market_data.update_kalshi_snapshots.KalshiPublicClient')
+    @patch('market_data.update_kalshi_snapshots.Path')
+    def test_orderbook_fallback(self, mock_path, mock_client_class):
+        """Test that empty orderbook + market snapshot prices produces fallback fields."""
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+        
+        # Mock paths
+        mock_path_inst = MagicMock()
+        mock_path_inst.exists.return_value = False
+        mock_path.return_value = mock_path_inst
+        
+        # Mock discovery returning a market with prices
+        mock_client.discover_temperature_markets.return_value = {
+            "candidate_markets": [
+                {
+                    "ticker": "MOCK-FALLBACK",
+                    "title": "Miami High Temperature",
+                    "subtitle": "Will it be high?",
+                    "yes_bid_dollars": "0.08",
+                    "yes_ask_dollars": "0.10",
+                    "no_bid_dollars": "0.90",
+                    "no_ask_dollars": "0.92",
+                    "yes_bid_size_fp": "100",
+                    "yes_ask_size_fp": "200",
+                    "no_bid_size_fp": "300",
+                    "no_ask_size_fp": "400",
+                    "last_price_dollars": "0.09"
+                }
+            ],
+            "endpoint_attempts": [],
+            "total_raw_markets_seen": 1
+        }
+        mock_client.get_market.return_value = None
+        mock_client.get_markets_for_series.return_value = []
+        
+        # Mock get_orderbook to fail (forcing empty orderbook)
+        mock_client.get_orderbook.side_effect = Exception("API Error")
+        
+        # Mock save_market_snapshot
+        mock_client.save_market_snapshot.return_value = "mock_path"
+        
+        m_open = mock_open()
+        m_open.return_value.read.return_value = "{}"
+        m_write = MagicMock()
+        m_open.return_value.write = m_write
+        
+        with patch('builtins.open', m_open):
+            try:
+                main()
+            except SystemExit:
+                pass
+                
+        # Now check what was written!
+        calls = m_write.call_args_list
+        found_fallback = False
+        for call in calls:
+            content = call[0][0]
+            if "top_yes_bid_dollars" in content:
+                found_fallback = True
+                data = json.loads(content)
+                ob = data["orderbooks"]["MOCK-FALLBACK"]
+                self.assertEqual(ob["top_yes_bid_dollars"], 0.08)
+                self.assertEqual(ob["top_yes_ask_dollars"], 0.10)
+                self.assertEqual(ob["top_no_bid_dollars"], 0.90)
+                self.assertEqual(ob["top_no_ask_dollars"], 0.92)
+                self.assertEqual(ob["last_price_dollars"], 0.09)
+                self.assertEqual(ob["yes_bid_size"], 100)
+                self.assertEqual(ob["yes_ask_size"], 200)
+                self.assertEqual(ob["no_bid_size"], 300)
+                self.assertEqual(ob["no_ask_size"], 400)
+                self.assertEqual(ob["top_of_book_source"], "market_snapshot_fallback")
+                
+        self.assertTrue(found_fallback)
 
 if __name__ == '__main__':
     unittest.main()

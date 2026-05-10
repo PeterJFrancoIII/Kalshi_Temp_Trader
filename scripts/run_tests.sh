@@ -16,7 +16,7 @@ fi
 
 cd "$BACKEND_DIR"
 
-export PYTHONPATH="${PYTHONPATH:-}:$BACKEND_DIR/src:$BACKEND_DIR/tests"
+export PYTHONPATH="$BACKEND_DIR/src:$BACKEND_DIR/tests"
 
 echo "Running Kalshi Backend Tests from $BACKEND_DIR..."
 echo "PYTHONPATH: $PYTHONPATH"
