@@ -185,3 +185,31 @@ def test_extract_market_rows():
     assert len(rows) == 1
     assert rows[0]["paper_action"] is None
     assert rows[0]["yes_ask"] == 70
+
+def test_is_signal_stale_or_mismatched():
+    from src.web_console import is_signal_stale_or_mismatched
+    
+    # Case 1: Active markets empty, best signal is candidate -> True
+    p_data = {"best_signal": {"market_ticker": "T1", "paper_action": "PAPER BUY CANDIDATE"}}
+    mkts = {"selected_temperature_markets": []}
+    assert is_signal_stale_or_mismatched(p_data, mkts) is True
+    
+    # Case 2: Best signal ticker missing from active markets -> True
+    p_data = {"best_signal": {"market_ticker": "T1", "paper_action": "PAPER BUY CANDIDATE"}}
+    mkts = {"selected_temperature_markets": [{"ticker": "T2"}]}
+    assert is_signal_stale_or_mismatched(p_data, mkts) is True
+    
+    # Case 3: Best signal ticker present in active markets -> False
+    p_data = {"best_signal": {"market_ticker": "T1", "paper_action": "PAPER BUY CANDIDATE"}}
+    mkts = {"selected_temperature_markets": [{"ticker": "T1"}]}
+    assert is_signal_stale_or_mismatched(p_data, mkts) is False
+    
+    # Case 4: Best signal is not candidate -> False
+    p_data = {"best_signal": {"market_ticker": "T1", "paper_action": "HOLD"}}
+    mkts = {"selected_temperature_markets": []}
+    assert is_signal_stale_or_mismatched(p_data, mkts) is False
+    
+    # Case 5: No best signal -> False
+    p_data = {}
+    mkts = {"selected_temperature_markets": []}
+    assert is_signal_stale_or_mismatched(p_data, mkts) is False

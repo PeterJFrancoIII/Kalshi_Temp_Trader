@@ -221,6 +221,13 @@ def generate_paper_signal(
                 raw_int_dist = forecast_data.get("integer_distribution", {})
                 integer_dist = {int(k): v for k, v in raw_int_dist.items()}
     
+    # Extract forecast date
+    forecast_date_str = None
+    if forecast_file:
+        file_ts = parse_timestamp_from_filename(forecast_file.name)
+        if file_ts:
+            forecast_date_str = file_ts.strftime("%Y-%m-%d")
+            
     # 2. Load and Map Active Markets
     snapshot_to_use = snapshot_path if snapshot_path else SNAPSHOT_FILE
     
@@ -235,11 +242,15 @@ def generate_paper_signal(
     
     signals = []
     global_warnings = []
+    status = "OK"
     
     if not model_bins:
         global_warnings.append("No forecast bins available. Ensure daily workflow ran.")
+        status = "NO_SIGNAL"
+        
     if not markets:
-        global_warnings.append("No active KMIA Kalshi markets available in snapshot.")
+        global_warnings.append("No active KXHIGHMIA markets available in current market snapshot.")
+        status = "NO_SIGNAL"
 
     for m in markets:
         ticker = m.get("ticker")
@@ -262,6 +273,15 @@ def generate_paper_signal(
         else: last = float(last) if last is not None else None
 
         executable_price = select_executable_price(ask, last)
+        
+        if executable_price is None or executable_price == 0:
+            global_warnings.append(f"{ticker}: No usable price data. Skipping.")
+            continue
+            
+        ticker_date = parse_ticker_date(ticker)
+        is_stale = False
+        if ticker_date and forecast_date_str and ticker_date < forecast_date_str:
+            is_stale = True
         
         # Legacy compatibility bridge:
         # Historical markdown reports may still contain coarse fixed bins.
@@ -302,15 +322,12 @@ def generate_paper_signal(
                     "yes_bid": bid,
                     "last_price": last,
                     "warnings": [f"Probability for bin {bin_str} not found in forecast"],
-                    "market_open_time_et": get_market_open_time_et(parse_ticker_date(ticker)) if ticker else None
+                    "market_open_time_et": get_market_open_time_et(ticker_date) if ticker_date else None,
+                    "stale": is_stale
                 })
                 continue
         else:
             global_warnings.append(f"{ticker}: Could not convert contract mapping to bin string.")
-            continue
-            
-        if executable_price is None or executable_price == 0:
-            global_warnings.append(f"{ticker}: No usable price data. Skipping.")
             continue
             
         fee_adjusted_breakeven = calculate_fee_adjusted_breakeven(executable_price)
@@ -333,7 +350,12 @@ def generate_paper_signal(
         # Action logic
         action = "NO EDGE"
         confidence = "low"
-        if edge > 0.05:
+        
+        if is_stale:
+            action = "NO SIGNAL"
+            edge = -999.0
+            ev = -999.0
+        elif edge > 0.05:
             action = "PAPER BUY CANDIDATE"
             confidence = "medium"
             if edge > 0.15: confidence = "high"
@@ -359,14 +381,18 @@ def generate_paper_signal(
             "yes_ask": ask,
             "yes_bid": bid,
             "last_price": last,
-            "market_open_time_et": get_market_open_time_et(parse_ticker_date(ticker)) if ticker else None
+            "market_open_time_et": get_market_open_time_et(ticker_date) if ticker_date else None,
+            "stale": is_stale
         })
 
-    signals.sort(key=lambda x: x["edge"], reverse=True)
-    best_signal = signals[0] if signals else None
+    signals.sort(key=lambda x: x["edge"] if x["edge"] is not None else -999.0, reverse=True)
+    
+    # If best signal has edge -999 or is None, it means all are stale or no edge!
+    best_signal = signals[0] if signals and signals[0]["edge"] is not None and signals[0]["edge"] > -900 else None
     
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "status": status,
         "forecast_source": str(forecast_file.name) if forecast_file else None,
         "market_snapshot_source": str(snapshot_to_use.name) if snapshot_to_use else None,
         "signals": signals,

@@ -281,6 +281,17 @@ def extract_market_rows(markets: list, paper_signals: dict, orderbooks: dict) ->
 
 # --- RENDERING HELPERS ---
 
+def is_signal_stale_or_mismatched(p_data, mkts):
+    """Checks if the best signal is stale or mismatched with active markets."""
+    best_sig = extract_best_signal(p_data)
+    active_markets = mkts.get("selected_temperature_markets", []) if mkts else []
+    active_tickers = [m.get("ticker") for m in active_markets]
+    
+    if len(active_markets) == 0 or (best_sig and best_sig.get("market_ticker") not in active_tickers):
+        if best_sig and best_sig.get("paper_action") == "PAPER BUY CANDIDATE":
+            return True
+    return False
+
 def render_command_center(app_state, p_data, mkts):
     st.header("🏠 Command Center")
     
@@ -338,8 +349,11 @@ def render_command_center(app_state, p_data, mkts):
     # 5. Best Signal Panel
     st.subheader("🏆 Best Signal")
     best_sig = extract_best_signal(p_data)
-        
-    if best_sig:
+    
+    # Defensive checks
+    if is_signal_stale_or_mismatched(p_data, mkts):
+        st.error("### NO SIGNAL — stale or mismatched paper signal ignored.")
+    elif best_sig:
         st.info(f"**{best_sig.get('market_ticker', 'N/A')}** | Action: {best_sig.get('paper_action', 'N/A')}")
         sc1, sc2, sc3, sc4 = st.columns(4)
         sc1.metric("Model Prob", f"{best_sig.get('model_probability', 0)*100:.1f}%")

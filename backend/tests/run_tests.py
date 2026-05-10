@@ -35,6 +35,7 @@ if _MISSING:
     )
     sys.exit(1)
 
+from test_paper_signal_generator import TestPaperSignalGenerator
 from test_calibration_metrics import (
     test_temp_to_bin_logic,
     test_top_bin_logic,
@@ -212,11 +213,6 @@ from test_weather_ingestion import (
     test_history_record_count
 )
 
-from test_paper_signal_generator import (
-    test_parse_forecast_bins,
-    test_generate_signal_logic
-)
-
 from test_paper_ledger import (
     test_record_paper_trade_logic
 )
@@ -385,8 +381,6 @@ tests = [
     test_stale_data_flag,
     test_observed_max_so_far,
     test_history_record_count,
-    test_parse_forecast_bins,
-    test_generate_signal_logic,
     test_record_paper_trade_logic,
     test_scripts_contain_safety_disclaimer,
     test_check_sync_status_runs,
@@ -428,7 +422,8 @@ tests = [
     test_normalize_twc_forecast_returns_twc_forecast_dataframe,
     test_build_matched_table_returns_nearest_forecasts,
     test_build_observed_match_returns_forecast_error_rows,
-    lambda: run_unittest_class(TestKalshiPublicClient)
+    lambda: run_unittest_class(TestKalshiPublicClient),
+    lambda: run_unittest_class(TestPaperSignalGenerator)
 ]
 
 
