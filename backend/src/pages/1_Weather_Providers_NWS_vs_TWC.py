@@ -322,11 +322,31 @@ def to_display_df(df: pd.DataFrame, provider_label: Optional[str] = None, max_ro
     return out[DISPLAY_COLUMNS]
 
 
+def normalize_time_utc_for_merge(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+    df_copy = df.copy()
+    df_copy["time_utc"] = pd.to_datetime(df_copy["time_utc"], utc=True).astype("datetime64[ns, UTC]")
+    df_copy = df_copy.dropna(subset=["time_utc"]).sort_values("time_utc")
+    return df_copy
+
+
 def build_matched_table(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.DataFrame, tolerance_minutes: int, match_direction: str) -> pd.DataFrame:
-    if nws_forecast_df.empty or twc_forecast_df.empty:
-        return pd.DataFrame()
+    nws_norm = normalize_time_utc_for_merge(nws_forecast_df)
+    twc_norm = normalize_time_utc_for_merge(twc_forecast_df)
+    
+    expected_cols = [
+        "Time ET", "NWS Forecast °F", "TWC Forecast °F", "Forecast Spread",
+        "NWS Dewpoint °F", "TWC Dewpoint °F", "NWS RH %", "TWC RH %",
+        "NWS Wind", "TWC Wind", "NWS Wind mph", "TWC Wind mph",
+        "NWS Phrase", "TWC Phrase"
+    ]
+    
+    if nws_norm.empty or twc_norm.empty:
+        return pd.DataFrame(columns=expected_cols)
+        
     direction = match_direction if match_direction in ("backward", "forward") else "nearest"
-    merged = pd.merge_asof(nws_forecast_df.sort_values("time_utc"), twc_forecast_df.sort_values("time_utc"), on="time_utc", direction=direction, tolerance=pd.Timedelta(minutes=tolerance_minutes), suffixes=("_nws", "_twc"))
+    merged = pd.merge_asof(nws_norm, twc_norm, on="time_utc", direction=direction, tolerance=pd.Timedelta(minutes=tolerance_minutes), suffixes=("_nws", "_twc"))
     rows = []
     for _, r in merged.iterrows():
         if pd.isna(r.get("provider_twc")):
@@ -351,10 +371,20 @@ def build_matched_table(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.DataF
 
 
 def build_observed_match(nws_observed_df: pd.DataFrame, twc_observed_df: pd.DataFrame, tolerance_minutes: int, match_direction: str) -> pd.DataFrame:
-    if nws_observed_df.empty or twc_observed_df.empty:
-        return pd.DataFrame()
+    nws_norm = normalize_time_utc_for_merge(nws_observed_df)
+    twc_norm = normalize_time_utc_for_merge(twc_observed_df)
+    
+    expected_cols = [
+        "Time ET", "NWS Observed °F", "TWC Observed °F", "Observed Temp Spread",
+        "NWS Dewpoint °F", "TWC Dewpoint °F", "NWS Wind mph", "TWC Wind mph",
+        "NWS Raw", "TWC Phrase"
+    ]
+    
+    if nws_norm.empty or twc_norm.empty:
+        return pd.DataFrame(columns=expected_cols)
+        
     direction = match_direction if match_direction in ("backward", "forward") else "nearest"
-    merged = pd.merge_asof(nws_observed_df.sort_values("time_utc"), twc_observed_df.sort_values("time_utc"), on="time_utc", direction=direction, tolerance=pd.Timedelta(minutes=tolerance_minutes), suffixes=("_nws", "_twc"))
+    merged = pd.merge_asof(nws_norm, twc_norm, on="time_utc", direction=direction, tolerance=pd.Timedelta(minutes=tolerance_minutes), suffixes=("_nws", "_twc"))
     rows = []
     for _, r in merged.iterrows():
         if pd.isna(r.get("provider_twc")):
@@ -372,6 +402,8 @@ def build_observed_match(nws_observed_df: pd.DataFrame, twc_observed_df: pd.Data
             "TWC Phrase": r.get("phrase_twc"),
         })
     return pd.DataFrame(rows)
+
+
 
 
 def build_daily_match(nws_daily: pd.DataFrame, twc_daily: pd.DataFrame) -> pd.DataFrame:

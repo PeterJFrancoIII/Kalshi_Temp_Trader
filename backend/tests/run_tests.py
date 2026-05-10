@@ -249,6 +249,11 @@ from test_nws_live_client import (
 
 from test_kalshi_contract_mapper import TestKalshiContractMapper
 from test_paper_signal_enhanced import TestPaperSignalEnhanced
+from test_weather_providers_page import (
+    test_normalize_time_utc_for_merge,
+    test_build_matched_table_with_mixed_resolutions,
+    test_build_matched_table_empty_input
+)
 
 
 # Helper to run unittest classes in this runner
@@ -396,7 +401,10 @@ tests = [
     test_stale_data_detection,
     test_missing_fields_no_crash,
     lambda: run_unittest_class(TestKalshiContractMapper),
-    lambda: run_unittest_class(TestPaperSignalEnhanced)
+    lambda: run_unittest_class(TestPaperSignalEnhanced),
+    test_normalize_time_utc_for_merge,
+    test_build_matched_table_with_mixed_resolutions,
+    test_build_matched_table_empty_input
 ]
 
 

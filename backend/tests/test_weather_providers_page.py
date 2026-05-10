@@ -49,39 +49,121 @@ def test_normalize_twc_forecast_returns_twc_forecast_dataframe():
     assert df.iloc[0]["temperature_f"] == 84
 
 
-def test_build_matched_table_joins_nws_and_twc_by_timestamp():
+def test_build_matched_table_returns_nearest_forecasts():
     page = load_page_module()
-    nws = page.normalize_nws_forecast(
-        {"hourly_forecast": [{"valid_time_utc": 1_700_000_000, "temperature_f": 83, "wind_speed_mph": 8}]}
+    nws_df = pd.DataFrame(
+        {
+            "time_utc": pd.to_datetime(["2026-05-10T12:00:00Z"]),
+            "temperature_f": [83],
+            "wind_speed_mph": [8],
+            "provider": ["NWS"],
+            "type": ["Forecast"],
+        }
     )
-    twc = page.normalize_twc_forecast(
-        {"hourly_forecast": [{"valid_time_utc": 1_700_000_000, "temperature_f": 85, "wind_speed_mph": 10}]}
+    twc_df = pd.DataFrame(
+        {
+            "time_utc": pd.to_datetime(["2026-05-10T12:05:00Z"]),
+            "temperature_f": [84],
+            "wind_speed_mph": [10],
+            "provider": ["TWC"],
+            "type": ["Forecast"],
+        }
     )
-    matched = page.build_matched_table(nws, twc, tolerance_minutes=5, match_direction="nearest")
+    matched = page.build_matched_table(nws_df, twc_df)
     assert len(matched) == 1
-    assert matched.iloc[0]["NWS Forecast °F"] == 83
-    assert matched.iloc[0]["TWC Forecast °F"] == 85
-    assert matched.iloc[0]["Forecast Spread"] == 2
+    assert matched.iloc[0]["nws_temperature_f"] == 83
+    assert matched.iloc[0]["twc_temperature_f"] == 84
 
 
-def test_build_daily_match_joins_daily_highs_by_date_key():
+def test_build_observed_match_returns_forecast_error_rows():
     page = load_page_module()
-    nws_daily = pd.DataFrame(
-        [{"date_key": "2026-05-10", "Day": "Sun 05/10", "High °F": 86, "Precip %": 20, "Narrative": "Warm"}]
+    forecast_df = pd.DataFrame(
+        {
+            "time_utc": pd.to_datetime(["2026-05-10T12:00:00Z"]),
+            "temperature_f": [83],
+            "wind_speed_mph": [8],
+            "provider": ["NWS"],
+            "type": ["Forecast"],
+        }
     )
-    twc_daily = pd.DataFrame(
-        [{"date_key": "2026-05-10", "Day": "Sun 05/10", "High °F": 88, "Precip %": 30, "Narrative": "Hot"}]
+    observed_df = pd.DataFrame(
+        {
+            "time_utc": pd.to_datetime(["2026-05-10T12:02:00Z"]),
+            "temperature_f": [85],
+            "wind_speed_mph": [9],
+            "provider": ["NWS"],
+            "type": ["Observed"],
+        }
     )
-    matched = page.build_daily_match(nws_daily, twc_daily)
+    matched = page.build_observed_match(forecast_df, observed_df, "NWS")
     assert len(matched) == 1
-    assert matched.iloc[0]["NWS High °F"] == 86
-    assert matched.iloc[0]["TWC High °F"] == 88
-    assert matched.iloc[0]["Daily High Spread"] == 2
+    assert matched.iloc[0]["forecast_temperature_f"] == 83
+    assert matched.iloc[0]["observed_temperature_f"] == 85
+    assert matched.iloc[0]["temperature_error_f"] == -2
 
 
-def test_empty_inputs_return_empty_dataframes():
+def test_normalize_time_utc_for_merge():
     page = load_page_module()
-    assert page.normalize_nws_forecast({}).empty
-    assert page.normalize_twc_forecast({}).empty
-    assert page.build_matched_table(pd.DataFrame(), pd.DataFrame(), 5, "nearest").empty
-    assert page.build_daily_match(pd.DataFrame(), pd.DataFrame()).empty
+    df = pd.DataFrame(
+        {
+            "time_utc": pd.Series(
+                pd.to_datetime(["2026-05-10T12:00:00Z"], utc=True).values.astype("datetime64[us]")
+            ).dt.tz_localize("UTC"),
+            "temperature_f": [83],
+        }
+    )
+
+    result = page.normalize_time_utc_for_merge(df)
+
+    assert not result.empty
+    assert str(result["time_utc"].dtype) == "datetime64[ns, UTC]"
+
+
+def test_build_matched_table_with_mixed_resolutions():
+    page = load_page_module()
+    nws_df = pd.DataFrame(
+        {
+            "time_utc": pd.Series(
+                pd.to_datetime(["2026-05-10T12:00:00Z"], utc=True).values.astype("datetime64[us]")
+            ).dt.tz_localize("UTC"),
+            "temperature_f": [83],
+            "wind_speed_mph": [8],
+            "provider": ["NWS"],
+            "type": ["Forecast"],
+        }
+    )
+    twc_df = pd.DataFrame(
+        {
+            "time_utc": pd.Series(
+                pd.to_datetime(["2026-05-10T12:00:30Z"], utc=True).values.astype("datetime64[s]")
+            ).dt.tz_localize("UTC"),
+            "temperature_f": [84],
+            "wind_speed_mph": [10],
+            "provider": ["TWC"],
+            "type": ["Forecast"],
+        }
+    )
+
+    matched = page.build_matched_table(nws_df, twc_df)
+
+    assert len(matched) == 1
+    assert matched.iloc[0]["nws_temperature_f"] == 83
+    assert matched.iloc[0]["twc_temperature_f"] == 84
+
+
+def test_build_matched_table_empty_input():
+    page = load_page_module()
+    nws_df = pd.DataFrame(columns=["time_utc", "temperature_f", "wind_speed_mph"])
+    twc_df = pd.DataFrame(
+        {
+            "time_utc": pd.to_datetime(["2026-05-10T12:00:00Z"], utc=True),
+            "temperature_f": [84],
+            "wind_speed_mph": [10],
+        }
+    )
+
+    matched = page.build_matched_table(nws_df, twc_df)
+
+    assert matched.empty
+    assert "nws_time_utc" in matched.columns
+    assert "twc_time_utc" in matched.columns
