@@ -98,3 +98,90 @@ def test_aggregate_warnings():
     
     # Test with missing warnings
     assert len(aggregate_warnings({}, {}, {}, {})) == 0
+
+
+def test_derive_orderbook_prices():
+    from src.web_console import derive_orderbook_prices
+    
+    # Test normal case
+    ob = {
+        "yes_bids": [[60, 10]],
+        "no_bids": [[30, 20]]
+    }
+    prices = derive_orderbook_prices(ob)
+    assert prices["top_yes_bid"] == 60
+    assert prices["top_no_bid"] == 30
+    assert prices["derived_yes_ask"] == 70 # 100 - 30
+    assert prices["derived_no_ask"] == 40 # 100 - 60
+    
+    # Test empty bids
+    ob = {"yes_bids": [], "no_bids": []}
+    prices = derive_orderbook_prices(ob)
+    assert prices["top_yes_bid"] is None
+    assert prices["derived_yes_ask"] is None
+    
+    # Test invalid input
+    assert derive_orderbook_prices(None)["top_yes_bid"] is None
+
+def test_calculate_hypothetical_costs():
+    from src.web_console import calculate_hypothetical_costs
+    
+    prices = {
+        "top_yes_bid": 60,
+        "top_no_bid": 30,
+        "derived_yes_ask": 70,
+        "derived_no_ask": 40
+    }
+    
+    costs = calculate_hypothetical_costs(10, prices)
+    assert costs["buy_yes_cost"] == 7.0 # 10 * 70 / 100
+    assert costs["buy_no_cost"] == 4.0 # 10 * 40 / 100
+    assert costs["sell_yes_proceeds"] == 6.0 # 10 * 60 / 100
+    assert costs["sell_no_proceeds"] == 3.0 # 10 * 30 / 100
+    assert costs["max_payout"] == 10.0
+    
+    # Test with missing prices
+    costs = calculate_hypothetical_costs(10, {})
+    assert costs["buy_yes_cost"] is None
+
+def test_extract_market_rows():
+    from src.web_console import extract_market_rows
+    
+    markets = [
+        {
+            "ticker": "T1",
+            "title": "Title 1",
+            "yes_bid": 60,
+            "yes_ask": 70,
+            "last_price": 65
+        }
+    ]
+    paper_signals = {
+        "signals": [
+            {
+                "market_ticker": "T1",
+                "paper_action": "BUY_YES",
+                "expected_value": 0.5
+            }
+        ]
+    }
+    orderbooks = {
+        "orderbooks": {
+            "T1": {
+                "yes_bids": [[60, 10]],
+                "no_bids": [[30, 20]]
+            }
+        }
+    }
+    
+    rows = extract_market_rows(markets, paper_signals, orderbooks)
+    assert len(rows) == 1
+    assert rows[0]["ticker"] == "T1"
+    assert rows[0]["paper_action"] == "BUY_YES"
+    assert rows[0]["yes_ask"] == 70
+    
+    # Test with no signals/orderbooks
+    rows = extract_market_rows(markets, {}, {})
+    assert len(rows) == 1
+    assert rows[0]["paper_action"] is None
+    assert rows[0]["yes_ask"] == 70

@@ -182,6 +182,103 @@ def aggregate_warnings(p_data: dict, mkts: dict, n_data: dict, status_data: dict
     return all_warnings
 
 
+def derive_orderbook_prices(orderbook: dict) -> dict:
+    """
+    Derives YES/NO asks from bids (100 - opposite bid).
+    """
+    prices = {
+        "top_yes_bid": None,
+        "top_no_bid": None,
+        "derived_yes_ask": None,
+        "derived_no_ask": None
+    }
+    if not isinstance(orderbook, dict):
+        return prices
+        
+    yes_bids = orderbook.get("yes_bids", [])
+    no_bids = orderbook.get("no_bids", [])
+    
+    if yes_bids and len(yes_bids) > 0:
+        prices["top_yes_bid"] = yes_bids[0][0]
+    if no_bids and len(no_bids) > 0:
+        prices["top_no_bid"] = no_bids[0][0]
+        
+    if prices["top_no_bid"] is not None:
+        prices["derived_yes_ask"] = 100 - prices["top_no_bid"]
+    if prices["top_yes_bid"] is not None:
+        prices["derived_no_ask"] = 100 - prices["top_yes_bid"]
+        
+    return prices
+
+
+def calculate_hypothetical_costs(quantity: int, prices: dict) -> dict:
+    """
+    Calculates costs and proceeds for paper trading.
+    """
+    results = {
+        "buy_yes_cost": None,
+        "buy_no_cost": None,
+        "sell_yes_proceeds": None,
+        "sell_no_proceeds": None,
+        "max_payout": quantity * 1.00,
+        "max_loss_buy_yes": None,
+        "max_loss_buy_no": None
+    }
+    
+    if prices.get("derived_yes_ask") is not None:
+        results["buy_yes_cost"] = quantity * prices["derived_yes_ask"] / 100.0
+        results["max_loss_buy_yes"] = results["buy_yes_cost"]
+    if prices.get("derived_no_ask") is not None:
+        results["buy_no_cost"] = quantity * prices["derived_no_ask"] / 100.0
+        results["max_loss_buy_no"] = results["buy_no_cost"]
+        
+    if prices.get("top_yes_bid") is not None:
+        results["sell_yes_proceeds"] = quantity * prices["top_yes_bid"] / 100.0
+    if prices.get("top_no_bid") is not None:
+        results["sell_no_proceeds"] = quantity * prices["top_no_bid"] / 100.0
+        
+    return results
+
+
+def extract_market_rows(markets: list, paper_signals: dict, orderbooks: dict) -> list[dict]:
+    """
+    Aggregates data for the active contracts table.
+    """
+    rows = []
+    if not isinstance(markets, list):
+        return rows
+        
+    signals = paper_signals.get("signals", []) if isinstance(paper_signals, dict) else []
+    signal_map = {sig.get("market_ticker"): sig for sig in signals if sig.get("market_ticker")}
+    
+    obs_dict = orderbooks.get("orderbooks", {}) if isinstance(orderbooks, dict) else {}
+    
+    for mkt in markets:
+        ticker = mkt.get("ticker")
+        sig = signal_map.get(ticker, {})
+        ob = obs_dict.get(ticker, {})
+        
+        prices = derive_orderbook_prices(ob)
+        
+        row = {
+            "ticker": ticker,
+            "bin": mkt.get("contract_bin") or mkt.get("ticker"),
+            "title": mkt.get("title", ""),
+            "subtitle": mkt.get("subtitle", ""),
+            "yes_bid": prices["top_yes_bid"] if prices["top_yes_bid"] is not None else mkt.get("yes_bid"),
+            "yes_ask": prices["derived_yes_ask"] if prices["derived_yes_ask"] is not None else mkt.get("yes_ask"),
+            "last_price": mkt.get("last_price"),
+            "model_probability": sig.get("model_probability"),
+            "market_probability": sig.get("market_probability"),
+            "edge": sig.get("edge"),
+            "expected_value": sig.get("expected_value"),
+            "paper_action": sig.get("paper_action"),
+            "warnings": ", ".join(mkt.get("warnings", [])) if mkt.get("warnings") else ""
+        }
+        rows.append(row)
+    return rows
+
+
 # --- RENDERING HELPERS ---
 
 def render_command_center(app_state, p_data, mkts):
@@ -304,6 +401,122 @@ def render_command_center(app_state, p_data, mkts):
         if app_state.get("latest_status_json"):
             st.json(load_json(app_state["latest_status_json"]))
 
+
+def render_kalshi_market_console(m_data, o_data, s_data):
+    st.header("🏪 Kalshi Market Console")
+    st.warning("🚨 **DRY-RUN / PAPER ONLY — NO REAL TRADING EXECUTION**")
+    
+    # 3. Market status summary
+    col1, col2, col3, col4 = st.columns(4)
+    m_time = m_data.get("fetched_at_utc", "N/A") if isinstance(m_data, dict) else "N/A"
+    o_time = o_data.get("fetched_at_utc", "N/A") if isinstance(o_data, dict) else "N/A"
+    col1.metric("Market Snapshot Time", m_time)
+    col2.metric("Orderbook Snapshot Time", o_time)
+    
+    markets = m_data.get("markets", []) if isinstance(m_data, dict) else []
+    obs = o_data.get("orderbooks", {}) if isinstance(o_data, dict) else {}
+    col3.metric("Market Count", len(markets))
+    col4.metric("Orderbook Count", len(obs))
+    
+    status = o_data.get("status", "N/A") if isinstance(o_data, dict) else "N/A"
+    st.write(f"**Orderbook Status:** {status}")
+    
+    warnings = []
+    if isinstance(m_data, dict) and m_data.get("warnings"):
+        warnings.extend(m_data["warnings"])
+    if isinstance(o_data, dict) and o_data.get("warnings"):
+        warnings.extend(o_data["warnings"])
+        
+    if warnings:
+        for w in warnings:
+            st.warning(w)
+            
+    if status == "EMPTY":
+        st.info("No active KXHIGHMIA markets/orderbooks available.")
+        st.write("You can run the following command to update data:")
+        st.code("bash scripts/update_kalshi_market_data.sh", language="bash")
+        
+    # 4. Active contract table
+    rows = extract_market_rows(markets, s_data, o_data)
+    if rows:
+        st.subheader("Active Contracts")
+        st.dataframe(rows)
+        
+        # 5. Selected contract control
+        tickers = [r["ticker"] for r in rows]
+        selected_ticker = st.selectbox("Select Contract Ticker", tickers)
+        
+        if selected_ticker:
+            selected_row = next((r for r in rows if r["ticker"] == selected_ticker), None)
+            ob = obs.get(selected_ticker, {})
+            prices = derive_orderbook_prices(ob)
+            
+            st.subheader(f"Contract: {selected_row['title'] if selected_row else selected_ticker}")
+            st.write(f"**Bin:** {selected_row['bin'] if selected_row else 'N/A'}")
+            
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Top YES Bid", prices["top_yes_bid"] if prices["top_yes_bid"] is not None else "N/A")
+            c2.metric("Top NO Bid", prices["top_no_bid"] if prices["top_no_bid"] is not None else "N/A")
+            c3.metric("Derived YES Ask", prices["derived_yes_ask"] if prices["derived_yes_ask"] is not None else "N/A")
+            c4.metric("Derived NO Ask", prices["derived_no_ask"] if prices["derived_no_ask"] is not None else "N/A")
+            
+            st.info("💡 **Derived Ask Logic:** Kalshi orderbooks show YES and NO bids. YES ask can be derived from the best NO bid as 100 - NO bid; NO ask can be derived from the best YES bid as 100 - YES bid.")
+            
+            # 6. Orderbook depth
+            st.subheader("Orderbook Depth")
+            dc1, dc2 = st.columns(2)
+            with dc1:
+                st.write("**YES Bids**")
+                yes_bids = ob.get("yes_bids", [])
+                if yes_bids:
+                    st.dataframe(yes_bids[:5], columns=["Price", "Quantity"])
+                else:
+                    st.write("No bids available.")
+            with dc2:
+                st.write("**NO Bids**")
+                no_bids = ob.get("no_bids", [])
+                if no_bids:
+                    st.dataframe(no_bids[:5], columns=["Price", "Quantity"])
+                else:
+                    st.write("No bids available.")
+                    
+            # 7. Hypothetical cost calculator
+            st.subheader("Hypothetical Cost Calculator")
+            quantity = st.number_input("Contracts Quantity", min_value=1, value=1, step=1)
+            
+            costs = calculate_hypothetical_costs(quantity, prices)
+            
+            buy_yes_str = f"${costs['buy_yes_cost']:.2f}" if costs.get("buy_yes_cost") is not None else "N/A"
+            buy_no_str = f"${costs['buy_no_cost']:.2f}" if costs.get("buy_no_cost") is not None else "N/A"
+            sell_yes_str = f"${costs['sell_yes_proceeds']:.2f}" if costs.get("sell_yes_proceeds") is not None else "N/A"
+            sell_no_str = f"${costs['sell_no_proceeds']:.2f}" if costs.get("sell_no_proceeds") is not None else "N/A"
+            
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                st.write("**Buy Estimates**")
+                st.write(f"Buy YES estimated cost: {buy_yes_str}")
+                st.write(f"Buy NO estimated cost: {buy_no_str}")
+                st.write(f"Max loss for buy side = estimated cost")
+            with cc2:
+                st.write("**Sell Estimates**")
+                st.write(f"Sell YES estimated proceeds: {sell_yes_str}")
+                st.write(f"Sell NO estimated proceeds: {sell_no_str}")
+                st.write(f"Max payout: ${costs['max_payout']:.2f}")
+                
+            st.button("Calculate Only", disabled=True, help="Paper calculation only")
+    else:
+        if status != "EMPTY":
+            st.info("No active KXHIGHMIA markets available.")
+            
+    # 9. Raw artifacts
+    st.divider()
+    st.subheader("🔍 Raw Artifacts")
+    with st.expander("Raw Market Snapshot JSON"):
+        st.json(m_data)
+    with st.expander("Raw Orderbook Snapshot JSON"):
+        st.json(o_data)
+    with st.expander("Raw Paper Signal JSON"):
+        st.json(s_data)
 
 
 def render_active_forecasts(p_data):
@@ -616,6 +829,9 @@ if __name__ == "__main__":
     latest_paper_json = PAPER_DIR / "latest_paper_signal.json"
     p_data = load_json(latest_paper_json) if latest_paper_json.exists() else {}
     
+    latest_orderbooks_json = KALSHI_DIR / "latest_kalshi_orderbooks.json"
+    o_data = load_json(latest_orderbooks_json) if latest_orderbooks_json.exists() else {}
+    
     PERF_FILE = PAPER_DIR / "latest_paper_trading_performance.json"
     perf = load_json(PERF_FILE) if PERF_FILE.exists() else {}
     
@@ -776,6 +992,7 @@ if __name__ == "__main__":
     # --- MAIN TABS ---
     tabs = st.tabs([
         "Command Center", 
+        "Kalshi Market Console",
         "Active Kalshi Forecasts", 
         "Paper Trading", 
         "Weather / NWS", 
@@ -787,16 +1004,19 @@ if __name__ == "__main__":
         render_command_center(app_state, p_data, mkts)
         
     with tabs[1]:
-        render_active_forecasts(p_data)
+        render_kalshi_market_console(mkts, o_data, p_data)
         
     with tabs[2]:
-        render_paper_trading(perf, settlements, trades)
+        render_active_forecasts(p_data)
         
     with tabs[3]:
-        render_weather_nws(w_data, n_data)
+        render_paper_trading(perf, settlements, trades)
         
     with tabs[4]:
-        render_calibration_learning(pq_data, pq_md, l_data, cal_json, cal_md)
+        render_weather_nws(w_data, n_data)
         
     with tabs[5]:
+        render_calibration_learning(pq_data, pq_md, l_data, cal_json, cal_md)
+        
+    with tabs[6]:
         render_system_health(app_state)
