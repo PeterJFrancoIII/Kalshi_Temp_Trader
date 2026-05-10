@@ -17,11 +17,12 @@ except ImportError:
     def get_market_open_time_et(date_str): return None
 
 from market_data.kalshi_contract_mapper import parse_kalshi_markets
+from shared.artifact_paths import LATEST_KALSHI_MARKET_SNAPSHOT, LATEST_PAPER_SIGNAL
 
 # Resolve ROOT
 ROOT = Path(__file__).resolve().parents[3]
 REPORTS_DIR = ROOT / "backend" / "data" / "processed" / "reports"
-SNAPSHOT_FILE = ROOT / "backend" / "data" / "processed" / "kalshi_market_snapshots" / "latest_kalshi_market_snapshot.json"
+SNAPSHOT_FILE = LATEST_KALSHI_MARKET_SNAPSHOT
 OUTPUT_DIR = ROOT / "backend" / "data" / "processed" / "paper_trading"
 
 
@@ -405,7 +406,7 @@ def generate_paper_signal(
     }
     
     ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    latest_path = OUTPUT_DIR / "latest_paper_signal.json"
+    latest_path = LATEST_PAPER_SIGNAL
     ts_path = OUTPUT_DIR / f"paper_signal_{ts}.json"
     
     with open(latest_path, "w") as f:

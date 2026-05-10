@@ -29,6 +29,8 @@ try:
 except ImportError:
     def load_manual_corrections(): return {}
 
+from shared.artifact_paths import LATEST_NWS_KMIA_SNAPSHOT, LATEST_KALSHI_MARKET_SNAPSHOT, LATEST_KALSHI_ORDERBOOKS, LATEST_PAPER_SIGNAL
+
 # --- CORE HELPERS ---
 def latest_file(directory: Path, pattern: str) -> Optional[Path]:
     if not directory.exists():
@@ -828,7 +830,7 @@ if __name__ == "__main__":
     if not latest_forecast_md:
         latest_forecast_md = latest_file(REPORTS_DIR, "kmia_forecast_*.md")
 
-    latest_kalshi_json = KALSHI_DIR / "latest_kalshi_market_snapshot.json"
+    latest_kalshi_json = LATEST_KALSHI_MARKET_SNAPSHOT
     latest_log = latest_file(LOGS_DIR, "kmia_daily_workflow_*.log")
     
     agg_cal_json_path = CAL_DIR / "aggregate_calibration.json"
@@ -843,16 +845,16 @@ if __name__ == "__main__":
     w_data = w_data_ingest or w_data_status # Combine or use what's available
     
     # NWS
-    latest_nws_path = NWS_DIR / "latest_nws_kmia_snapshot.json"
+    latest_nws_path = LATEST_NWS_KMIA_SNAPSHOT
     if not latest_nws_path.exists():
         latest_nws_path = latest_file(NWS_DIR, "nws_kmia_snapshot_*.json")
     n_data = load_json(latest_nws_path) if latest_nws_path else {}
 
     # Paper Trading
-    latest_paper_json = PAPER_DIR / "latest_paper_signal.json"
+    latest_paper_json = LATEST_PAPER_SIGNAL
     p_data = load_json(latest_paper_json) if latest_paper_json.exists() else {}
     
-    latest_orderbooks_json = KALSHI_DIR / "latest_kalshi_orderbooks.json"
+    latest_orderbooks_json = LATEST_KALSHI_ORDERBOOKS
     o_data = load_json(latest_orderbooks_json) if latest_orderbooks_json.exists() else {}
     
     PERF_FILE = PAPER_DIR / "latest_paper_trading_performance.json"

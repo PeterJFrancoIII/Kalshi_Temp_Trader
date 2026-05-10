@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any
 from market_data.kalshi_public_client import KalshiPublicClient
+from shared.artifact_paths import LATEST_KALSHI_ORDERBOOKS
 
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
@@ -158,7 +159,7 @@ def main():
             "orderbooks": orderbooks
         }
         
-        ob_filepath = OUTPUT_DIR / "latest_kalshi_orderbooks.json"
+        ob_filepath = LATEST_KALSHI_ORDERBOOKS
         try:
             with open(ob_filepath, 'w') as f:
                 json.dump(orderbook_artifact, f, indent=2)
