@@ -156,16 +156,14 @@ def test_stale_data_detection():
                     snap = build_live_nws_snapshot()
                     assert snap["stale_data"] is True
 
-def test_missing_fields_no_crash(monkeypatch):
-    monkeypatch.setattr(nws_live_client, "fetch_kmia_point_metadata", lambda: {})
-    monkeypatch.setattr(
-        nws_live_client,
-        "fetch_recent_kmia_observations",
-        lambda limit=100: [{"properties": {"timestamp": datetime.now(timezone.utc).isoformat()}}],
-    )
-    monkeypatch.setattr(nws_live_client, "fetch_kmia_obhistory_html", lambda: None)
-
-    snap = build_live_nws_snapshot()
+def test_missing_fields_no_crash():
+    with patch("weather.nws_live_client.fetch_kmia_point_metadata", return_value={}):
+        with patch(
+            "weather.nws_live_client.fetch_recent_kmia_observations",
+            return_value=[{"properties": {"timestamp": datetime.now(timezone.utc).isoformat()}}],
+        ):
+            with patch("weather.nws_live_client.fetch_kmia_obhistory_html", return_value=None):
+                snap = build_live_nws_snapshot()
 
     assert snap["station"] == "KMIA"
     assert snap["current_temp_f"] is None
@@ -188,20 +186,18 @@ class DummyObservation:
         self.raw_metar = "KMIA TEST"
 
 
-def test_build_live_snapshot_uses_obhistory_fallback(monkeypatch):
+def test_build_live_snapshot_uses_obhistory_fallback():
     now_utc = datetime.now(timezone.utc)
     obs_time = now_utc - timedelta(minutes=20)
 
-    monkeypatch.setattr(nws_live_client, "fetch_kmia_point_metadata", lambda: {})
-    monkeypatch.setattr(nws_live_client, "fetch_recent_kmia_observations", lambda limit=100: [])
-    monkeypatch.setattr(nws_live_client, "fetch_kmia_obhistory_html", lambda: "<html>fallback</html>")
-    monkeypatch.setattr(
-        nws_live_client,
-        "parse_obhistory",
-        lambda html, reference_datetime=None: ([DummyObservation(obs_time, 84.0, 73.0)], []),
-    )
-
-    snapshot = nws_live_client.build_live_nws_snapshot()
+    with patch("weather.nws_live_client.fetch_kmia_point_metadata", return_value={}):
+        with patch("weather.nws_live_client.fetch_recent_kmia_observations", return_value=[]):
+            with patch("weather.nws_live_client.fetch_kmia_obhistory_html", return_value="<html>fallback</html>"):
+                with patch(
+                    "weather.nws_live_client.parse_obhistory",
+                    return_value=([DummyObservation(obs_time, 84.0, 73.0)], []),
+                ):
+                    snapshot = nws_live_client.build_live_nws_snapshot()
 
     assert snapshot["station"] == "KMIA"
     assert snapshot["endpoint_status"] == "PARTIAL"
@@ -213,12 +209,11 @@ def test_build_live_snapshot_uses_obhistory_fallback(monkeypatch):
     assert snapshot["recent_observations_table"][0]["source"] == "weather.gov_obhistory"
 
 
-def test_build_live_snapshot_errors_when_api_and_fallback_empty(monkeypatch):
-    monkeypatch.setattr(nws_live_client, "fetch_kmia_point_metadata", lambda: {})
-    monkeypatch.setattr(nws_live_client, "fetch_recent_kmia_observations", lambda limit=100: [])
-    monkeypatch.setattr(nws_live_client, "fetch_kmia_obhistory_html", lambda: None)
-
-    snapshot = nws_live_client.build_live_nws_snapshot()
+def test_build_live_snapshot_errors_when_api_and_fallback_empty():
+    with patch("weather.nws_live_client.fetch_kmia_point_metadata", return_value={}):
+        with patch("weather.nws_live_client.fetch_recent_kmia_observations", return_value=[]):
+            with patch("weather.nws_live_client.fetch_kmia_obhistory_html", return_value=None):
+                snapshot = nws_live_client.build_live_nws_snapshot()
 
     assert snapshot["endpoint_status"] == "ERROR"
     assert snapshot["recent_observations_table"] == []
