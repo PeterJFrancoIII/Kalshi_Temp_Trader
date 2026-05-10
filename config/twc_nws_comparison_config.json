@@ -1,0 +1,19 @@
+{
+  "lead_time_end_hour": 48,
+  "lead_time_start_hour": 1,
+  "schema_version": 1,
+  "show_mae": true,
+  "show_nws": true,
+  "show_spread": true,
+  "show_twc": true,
+  "show_within_1f": false,
+  "show_within_2f": false,
+  "show_within_3f": true,
+  "show_within_4f": false,
+  "show_within_5f": false,
+  "show_within_6f": false,
+  "spread_mode": "signed",
+  "station": "KMIA",
+  "table_density": "standard",
+  "temperature_unit": "F"
+}
