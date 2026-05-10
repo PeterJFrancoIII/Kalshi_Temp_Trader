@@ -41,8 +41,8 @@ The system must eventually prove all of the following before any live deployment
 3. Timestamped and freshness-checked weather data.
 4. KMIA observation ingestion available to model and dashboard.
 5. Probabilistic forecast output, not only deterministic highs.
-6. Correct Kalshi settlement-bin conversion.
-7. User target bins: `<=79`, `80-81`, `82-83`, `84-85`, `86-87`, `>=88`.
+6. Correct dynamic Kalshi contract-bin conversion: discover the actual contracts/bins Kalshi lists for each event date, then map the forecast distribution into those discovered ranges.
+7. No globally fixed trading-bin assumption: examples like `<=79`, `80-81`, `82-83`, `84-85`, `86-87`, `>=88` are fixtures/examples only. If Kalshi lists `91-92`, `93-94`, `>=95`, etc., the program must detect and use those actual tradable bins.
 8. Calibration metrics and reliability validation before live trading.
 9. Correct KXHIGHMIA contract mapping.
 10. Fee/slippage-aware breakeven and edge calculation.
@@ -62,8 +62,8 @@ Any of these blocks live trading:
 - Missing timestamps or freshness checks.
 - Missing stale-data no-trade gate.
 - Deterministic-only forecast.
-- Missing calibrated bin probabilities.
-- Current-bin / target-bin mismatch unresolved.
+- Missing calibrated temperature distribution or contract probabilities.
+- Any active workflow depending on one hardcoded global trading-bin list instead of Kalshi-discovered event contracts.
 - Incorrect Kalshi contract mapping.
 - Missing fee/slippage-adjusted breakeven.
 - Missing hard-coded risk gates.
@@ -73,6 +73,21 @@ Any of these blocks live trading:
 - No order reconciliation.
 - No audit logging.
 - Any real-money trading path before explicit real-trading gate approval.
+
+## Architecture Correction — Dynamic Kalshi Bins
+
+Kalshi determines the tradable bins/contracts for each event date. The bot must not assume one permanent bin set.
+
+Correct workflow:
+
+1. Discover the active Kalshi event for the target date.
+2. Pull the actual contracts Kalshi offers for that event/date.
+3. Parse each contract into a structured range object such as `ContractBin` / `MarketRange`.
+4. Generate a KMIA high-temperature forecast distribution.
+5. Integrate or sum the distribution over each discovered contract range.
+6. Use those dynamically discovered bins in paper trading, dashboard display, backtesting, risk, and future execution workflows.
+
+Static bins may remain only as tests, examples, or historical-artifact metadata. They must not be the active trading architecture.
 
 ## Shared Evidence Standard
 
@@ -147,12 +162,13 @@ READY FOR LOCAL SANDBOX / PAPER-RESEARCH REVIEW; not live-ready.
 - Existing governance states real-money trading is disabled and market access is read-only.
 - Current architecture should be treated as research/paper infrastructure until specialist audits prove otherwise.
 - Agent 2 must run before Agent 3 because weather/settlement correctness is foundational.
+- Architecture correction: active trading/paper workflows must use Kalshi-discovered event contracts, not a fixed global bin set.
 
 #### Evidence
 - `.agent/MACHINE_INDEX.yaml` — `status: RESEARCH_MVP`, `real_money_trading: false`, `market_access: read-only`, `allowed_station: KMIA`.
 - `.agent/MASTER_DESCRIPTOR.md` — describes MVP Research & Paper-Trading phase and read-only safety layer.
 - `.agent/rules/10-safety.yaml` — forbids real-money trading, order execution functions, API secrets/private keys, and automatic execution.
-- `backend/src/shared/types.py` — defines KMIA-specific schemas and current bins.
+- `backend/src/shared/types.py` — defines KMIA-specific schemas and current bins that must be refactored away from active fixed-bin trading assumptions.
 - `backend/src/forecasting/rules_model.py` — rules-based forecast and impossible-bin zeroing.
 - `backend/src/ingestion/kmia_live_fetcher.py` — NWS observation/obhistory fetch functions.
 - `backend/src/ingestion/climia_parser.py` — CLI/CLIMIA parser.
@@ -161,19 +177,21 @@ READY FOR LOCAL SANDBOX / PAPER-RESEARCH REVIEW; not live-ready.
 #### Blockers
 - No live trading allowed under current safety rules.
 - Specialist audits still required for weather data, forecasting, backtesting, market mapping, risk, and DevOps.
-- Current bins differ from requested future bins.
+- Active workflows must not assume one fixed global set of Kalshi bins; bins must be discovered from each event's listed contracts.
 
 #### Required Fixes
 - Complete Agent 2 weather-data audit.
-- Complete Agent 3 model/bin/calibration audit.
+- Complete Agent 3 distribution/bin-conversion audit under the dynamic Kalshi bin architecture.
 - Complete remaining specialist audits before final deployment decision.
 
 #### Acceptance Tests
 - Each agent produces structured report with exact file/function evidence.
 - Final Gemini 3.1 Pro roll-up reconciles all findings into one readiness decision.
+- Tests prove arbitrary Kalshi-listed bins such as `91-92`, `93-94`, `>=95`, and `<=89` can be parsed and mapped from the forecast distribution.
 
 #### Handoff Notes
 - Agent 2 should focus on KMIA live observations, CLIMIA settlement, timestamp/freshness, NWS forecast pipeline, snapshot schema flow, and the Streamlit NWS live table bug.
+- Agent 3 and Agent 5 must treat bins as dynamic market-discovered contract ranges, not a permanent preset list.
 
 ## Agent 2 — Weather Data Agent
 
