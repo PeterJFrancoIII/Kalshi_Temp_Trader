@@ -114,8 +114,8 @@ def main():
             subtitle = m.get("subtitle", "")
             text = (f"{title} {subtitle} {m_ticker} {m_series}").lower()
             
-            # Score based on preferred terms
-            if all(pt.lower() in text for pt in preferred_terms):
+            # Relaxed condition: require "miami" and ("temperature" or "temp") and "high"
+            if "miami" in text and ("temperature" in text or "temp" in text) and "high" in text:
                 auto_selected.append(m)
         
         # Combine (deduplicate by ticker)
@@ -125,6 +125,24 @@ def main():
             
         final_selected = list(all_selected_map.values())
         
+        # Empty snapshot protection
+        preserved_snapshot = False
+        latest_path = OUTPUT_DIR / "latest_kalshi_market_snapshot.json"
+        
+        if not final_selected:
+            print("Warning: No active markets found in current fetch.")
+            if latest_path.exists():
+                try:
+                    with open(latest_path, 'r') as f:
+                        prev_snapshot = json.load(f)
+                    prev_markets = prev_snapshot.get("selected_temperature_markets", [])
+                    if prev_markets:
+                        print(f"Preserving previous valid snapshot with {len(prev_markets)} markets.")
+                        final_selected = prev_markets
+                        preserved_snapshot = True
+                except Exception as e:
+                    print(f"Error reading previous snapshot: {e}")
+        
         # Fetch Orderbooks for selected markets
         orderbooks = {}
         orderbook_status = "OK"
@@ -132,9 +150,13 @@ def main():
         
         if not final_selected:
             orderbook_status = "EMPTY"
-            orderbook_warnings.append("No active KXHIGHMIA markets available for orderbook fetch")
+            orderbook_warnings.append("No active markets available for orderbook fetch")
         else:
-            print(f"Fetching orderbooks for {len(final_selected)} markets...")
+            if preserved_snapshot:
+                orderbook_warnings.append("Orderbooks are based on preserved previous market snapshot.")
+                print("Fetching orderbooks for preserved markets...")
+            else:
+                print(f"Fetching orderbooks for {len(final_selected)} markets...")
             for m in final_selected:
                 ticker = m.get("ticker")
                 try:
@@ -172,20 +194,24 @@ def main():
         
         next_action = "None. System is healthy."
         warnings = []
-        if not final_selected:
-            warnings.append("No matching Miami/KMIA temperature market found.")
-            next_action = "Auto-discovery found no Miami/KMIA temperature market. Add a known ticker or series to backend/config/kalshi_market_discovery.json."
         
-        if missing_known_tickers:
-            warnings.append(f"Missing known market tickers: {missing_known_tickers}")
-        if missing_known_series:
-            warnings.append(f"Missing known series tickers: {missing_known_series}")
-            
-        if final_selected and (known_markets or known_series):
+        if not final_selected:
+            warnings.append("No currently active Miami high-temperature markets were discovered from Kalshi.")
+            next_action = "Auto-discovery found no Miami/KMIA temperature market. Add a known ticker or series to backend/config/kalshi_market_discovery.json."
+            status = "EMPTY"
+        else:
+            if preserved_snapshot:
+                warnings.append("No active markets found in current fetch. Preserved previous valid snapshot.")
+                status = "STALE"
+            else:
+                status = "OK"
+                
+        if final_selected and (known_markets or known_series) and not preserved_snapshot:
             next_action = "Known ticker tracking is active."
 
         snapshot = {
             "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
+            "status": status,
             "mode": "read_only_public_market_data",
             "base_url": client.base_url,
             "search_terms_used": search_terms,
@@ -210,8 +236,36 @@ def main():
             }
         }
         
-        saved_path = client.save_market_snapshot(snapshot, OUTPUT_DIR)
-        print(f"\nSnapshot saved to: {saved_path}")
+        if preserved_snapshot:
+            # Write diagnostic artifact instead of overwriting latest
+            failed_snapshot = {
+                "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
+                "status": "FAILED_EMPTY",
+                "mode": "read_only_public_market_data",
+                "base_url": client.base_url,
+                "warnings": ["No active markets found in current fetch. Preserved previous valid snapshot."],
+                "total_raw_markets_seen": raw_count,
+                "candidate_markets_count": len(candidates),
+                "selected_temperature_markets": [],
+                "markets_found": 0
+            }
+            
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
+            filename = f"failed_kalshi_market_snapshot_{timestamp}.json"
+            filepath = OUTPUT_DIR / filename
+            
+            try:
+                with open(filepath, 'w') as f:
+                    json.dump(failed_snapshot, f, indent=2)
+                print(f"Diagnostic artifact saved to: {filepath}")
+            except Exception as e:
+                print(f"Error writing diagnostic artifact: {e}")
+                
+            print("Preserved previous valid snapshot. Not overwriting latest.")
+        else:
+            saved_path = client.save_market_snapshot(snapshot, OUTPUT_DIR)
+            print(f"\nSnapshot saved to: {saved_path}")
+            
         print("Success.")
         
     except Exception as e:

@@ -36,6 +36,7 @@ if _MISSING:
     sys.exit(1)
 
 from test_paper_signal_generator import TestPaperSignalGenerator
+from test_update_kalshi_snapshots import TestUpdateKalshiSnapshots
 from test_artifact_paths import TestArtifactPaths
 from test_calibration_metrics import (
     test_temp_to_bin_logic,
@@ -425,6 +426,7 @@ tests = [
     test_build_observed_match_returns_forecast_error_rows,
     lambda: run_unittest_class(TestKalshiPublicClient),
     lambda: run_unittest_class(TestPaperSignalGenerator),
+    lambda: run_unittest_class(TestUpdateKalshiSnapshots),
     lambda: run_unittest_class(TestArtifactPaths)
 ]
 
