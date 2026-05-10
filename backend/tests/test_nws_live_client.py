@@ -156,13 +156,20 @@ def test_stale_data_detection():
                     snap = build_live_nws_snapshot()
                     assert snap["stale_data"] is True
 
-def test_missing_fields_no_crash():
-    with patch("requests.get") as mock_get:
-        mock_get.return_value.json.return_value = {}
-        mock_get.return_value.status_code = 200
-        snap = build_live_nws_snapshot()
-        assert snap["station"] == "KMIA"
-        assert snap["current_temp_f"] is None
+def test_missing_fields_no_crash(monkeypatch):
+    monkeypatch.setattr(nws_live_client, "fetch_kmia_point_metadata", lambda: {})
+    monkeypatch.setattr(
+        nws_live_client,
+        "fetch_recent_kmia_observations",
+        lambda limit=100: [{"properties": {"timestamp": datetime.now(timezone.utc).isoformat()}}],
+    )
+    monkeypatch.setattr(nws_live_client, "fetch_kmia_obhistory_html", lambda: None)
+
+    snap = build_live_nws_snapshot()
+
+    assert snap["station"] == "KMIA"
+    assert snap["current_temp_f"] is None
+    assert snap["recent_observations_count"] == 1
 
 
 class DummyObservation:
