@@ -28,9 +28,9 @@ DEFAULT_TWC_NWS_COMPARISON_CONFIG: dict[str, Any] = {
     "show_twc": True,
     "show_nws": True,
     "show_spread": True,
-    "spread_mode": "signed",  # signed or absolute
+    "spread_mode": "signed",
     "temperature_unit": "F",
-    "table_density": "standard",  # compact or standard
+    "table_density": "standard",
     "show_mae": True,
     "show_within_1f": False,
     "show_within_2f": False,
@@ -42,8 +42,30 @@ DEFAULT_TWC_NWS_COMPARISON_CONFIG: dict[str, Any] = {
 
 _NUMERIC_COLUMN_ALIASES = {
     "lead_hour": ["lead_hour", "hour", "lead_time", "lead_time_hour", "forecast_hour"],
-    "twc_temp_f": ["twc_temp_f", "twc_forecast_f", "twc_temperature_f", "twc", "weather_company_f"],
-    "nws_temp_f": ["nws_temp_f", "nws_forecast_f", "nws_temperature_f", "nws", "nbm_temp_f"],
+    "twc_temp_f": [
+        "twc_temp_f",
+        "twc_forecast_f",
+        "twc_temperature_f",
+        "twc",
+        "weather_company_f",
+        "temperature_f",
+        "temp_f",
+        "forecast_f",
+        "temperature",
+        "temp",
+    ],
+    "nws_temp_f": [
+        "nws_temp_f",
+        "nws_forecast_f",
+        "nws_temperature_f",
+        "nws",
+        "nbm_temp_f",
+        "temperature_f",
+        "temp_f",
+        "forecast_f",
+        "temperature",
+        "temp",
+    ],
     "twc_mae_f": ["twc_mae_f", "twc_mae", "weather_company_mae_f"],
     "nws_mae_f": ["nws_mae_f", "nws_mae", "nbm_mae_f"],
 }
@@ -71,8 +93,24 @@ _COMPARISON_PAYLOAD_KEYS = (
     "comparison_rows",
 )
 
-_TWC_PAYLOAD_KEYS = ("twc", "twc_forecast", "weather_company", "weather_company_forecast")
-_NWS_PAYLOAD_KEYS = ("nws", "nws_forecast", "nbm", "nbm_forecast")
+# Prefer extracted forecast rows before full provider snapshots. Full snapshots often
+# contain metadata, not row-level forecast values.
+_TWC_PAYLOAD_KEYS = ("twc_forecast", "weather_company_forecast", "twc", "weather_company")
+_NWS_PAYLOAD_KEYS = ("nws_forecast", "nbm_forecast", "nws", "nbm")
+
+_FORECAST_ROW_KEYS = (
+    "hourly_forecast",
+    "forecast_hourly",
+    "hourly",
+    "hourly_forecasts",
+    "forecast_rows",
+    "forecasts",
+    "rows",
+    "data",
+    "lead_hours",
+)
+
+_NESTED_FORECAST_KEYS = ("forecast", "api_inputs", "derived_features", "raw", "response")
 
 
 def _deep_merge(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
@@ -192,16 +230,36 @@ def render_twc_nws_comparison_settings(
 
 
 def _as_rows(payload: Any) -> list[dict[str, Any]]:
+    """Extract row dictionaries from comparison payloads or provider snapshots."""
     if isinstance(payload, pd.DataFrame):
         return payload.to_dict("records")
     if isinstance(payload, list):
         return [row for row in payload if isinstance(row, dict)]
     if isinstance(payload, dict):
-        for key in ("rows", "data", "forecasts", "hourly", "lead_hours"):
+        for key in _FORECAST_ROW_KEYS:
             rows = payload.get(key)
             if isinstance(rows, list):
                 return [row for row in rows if isinstance(row, dict)]
-        return [payload]
+        for key in _NESTED_FORECAST_KEYS:
+            nested = payload.get(key)
+            if isinstance(nested, dict):
+                rows = _as_rows(nested)
+                if rows:
+                    return rows
+        # Only treat a dict as a single row if it actually resembles a row.
+        rowish_keys = set(payload).intersection(
+            {
+                "lead_hour",
+                "hour",
+                "forecast_hour",
+                "temperature_f",
+                "temp_f",
+                "forecast_f",
+                "twc_temp_f",
+                "nws_temp_f",
+            }
+        )
+        return [payload] if rowish_keys else []
     return []
 
 
@@ -223,6 +281,13 @@ def _coerce_float(value: Any) -> float | None:
         return None
 
 
+def _first_present(row: dict[str, Any], keys: Iterable[str]) -> Any:
+    for key in keys:
+        if key in row:
+            return row.get(key)
+    return None
+
+
 def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
     for canonical, aliases in _NUMERIC_COLUMN_ALIASES.items():
@@ -230,6 +295,11 @@ def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
             if alias in row:
                 normalized[canonical] = _coerce_float(row.get(alias))
                 break
+
+    # Preserve useful time labels for debugging/display extension.
+    time_value = _first_present(row, ["time", "time_utc", "valid_time", "valid_time_utc", "timestamp", "startTime"])
+    if time_value is not None:
+        normalized["time"] = time_value
 
     for threshold in [1, 2, 3, 4, 5, 6]:
         for canonical_template, alias_templates in _ACCURACY_ALIAS_TEMPLATES.items():
@@ -246,32 +316,44 @@ def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _row_lead_hour(row: dict[str, Any], fallback_idx: int) -> int:
+    value = _first_present(row, ["lead_hour", "hour", "lead_time", "lead_time_hour", "forecast_hour"])
+    parsed = _coerce_float(value)
+    if parsed is None:
+        return fallback_idx
+    return int(parsed)
+
+
 def _merge_provider_rows(twc_payload: Any, nws_payload: Any) -> list[dict[str, Any]]:
     twc_rows = [_normalize_row(row) for row in _as_rows(twc_payload)]
     nws_rows = [_normalize_row(row) for row in _as_rows(nws_payload)]
 
     merged: dict[int, dict[str, Any]] = {}
-    for row in twc_rows:
-        lead_hour = int(row.get("lead_hour") or len(merged) + 1)
+    for idx, row in enumerate(twc_rows, start=1):
+        lead_hour = _row_lead_hour(row, idx)
         merged.setdefault(lead_hour, {"lead_hour": lead_hour})
         for key, value in row.items():
             if key == "lead_hour":
                 continue
             if key.startswith("twc_"):
                 merged[lead_hour][key] = value
-            elif key in ("temp_f", "forecast_f", "temperature_f"):
+            elif key in ("temp_f", "forecast_f", "temperature_f", "temperature", "temp"):
                 merged[lead_hour]["twc_temp_f"] = value
+            elif key == "time":
+                merged[lead_hour]["time"] = value
 
-    for row in nws_rows:
-        lead_hour = int(row.get("lead_hour") or len(merged) + 1)
+    for idx, row in enumerate(nws_rows, start=1):
+        lead_hour = _row_lead_hour(row, idx)
         merged.setdefault(lead_hour, {"lead_hour": lead_hour})
         for key, value in row.items():
             if key == "lead_hour":
                 continue
             if key.startswith("nws_"):
                 merged[lead_hour][key] = value
-            elif key in ("temp_f", "forecast_f", "temperature_f"):
+            elif key in ("temp_f", "forecast_f", "temperature_f", "temperature", "temp"):
                 merged[lead_hour]["nws_temp_f"] = value
+            elif key == "time" and "time" not in merged[lead_hour]:
+                merged[lead_hour]["time"] = value
 
     return [merged[key] for key in sorted(merged)]
 
@@ -308,6 +390,8 @@ def build_twc_nws_comparison_dataframe(source_data: Any, config: dict[str, Any])
         df.insert(0, "lead_hour", range(1, len(df) + 1))
 
     df["lead_hour"] = pd.to_numeric(df["lead_hour"], errors="coerce")
+    if df["lead_hour"].isna().any():
+        df["lead_hour"] = df["lead_hour"].fillna(pd.Series(range(1, len(df) + 1), index=df.index))
     df = df.dropna(subset=["lead_hour"])
     df["lead_hour"] = df["lead_hour"].astype(int)
 
@@ -326,6 +410,8 @@ def build_twc_nws_comparison_dataframe(source_data: Any, config: dict[str, Any])
         df["twc_minus_nws_spread_f"] = spread
 
     columns = ["lead_hour"]
+    if "time" in df.columns:
+        columns.append("time")
     if config.get("show_twc") and "twc_temp_f" in df.columns:
         columns.append("twc_temp_f")
     if config.get("show_nws") and "nws_temp_f" in df.columns:
@@ -359,17 +445,23 @@ def render_twc_nws_comparison(source_data: Any, config: dict[str, Any] | None = 
 
     df = build_twc_nws_comparison_dataframe(source_data, config)
     if df.empty:
+        st.error("No TWC vs NWS comparison rows found yet.")
         st.info(
-            "No TWC vs NWS comparison rows found yet. Expected one of: "
-            "twc_nws_comparison, twc_vs_nws_comparison, forecast_comparison, "
-            "provider_comparison, or separate twc/nws forecast payloads."
+            "Expected one of: twc_nws_comparison, twc_vs_nws_comparison, "
+            "forecast_comparison, provider_comparison, comparison_rows, or "
+            "separate twc_forecast/nws_forecast rows."
         )
+        if isinstance(source_data, dict):
+            with st.expander("Debug: available comparison source keys"):
+                st.write(sorted(source_data.keys()))
+                st.json(source_data.get("source_files", {}))
         with st.expander("Current TWC vs NWS view config"):
             st.json(config)
         return
 
     column_labels = {
         "lead_hour": "Lead Hour",
+        "time": "Valid Time",
         "twc_temp_f": "TWC Temp F",
         "nws_temp_f": "NWS Temp F",
         "twc_minus_nws_spread_f": "TWC - NWS Spread F",
