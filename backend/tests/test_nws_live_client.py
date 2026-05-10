@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone, timedelta
 from dateutil import tz
+from weather import nws_live_client
 from weather.nws_live_client import (
     c_to_f, 
     pa_to_mb,
@@ -113,8 +114,14 @@ def test_build_live_nws_snapshot_enhanced(mock_et_now, mock_get):
     m2 = MagicMock()
     m2.json.return_value = MOCK_RECENT_OBS
     m2.status_code = 200
+    m3 = MagicMock()
+    m3.json.return_value = {"properties": {"periods": []}}
+    m3.status_code = 200
+    m4 = MagicMock()
+    m4.json.return_value = {"properties": {"periods": []}}
+    m4.status_code = 200
     
-    mock_get.side_effect = [m1, m2, MagicMock(), MagicMock()] # Point, Obs, Forecast, Hourly
+    mock_get.side_effect = [m1, m2, m3, m4] # Point, Obs, Forecast, Hourly
 
     snap = build_live_nws_snapshot()
     
@@ -125,7 +132,9 @@ def test_build_live_nws_snapshot_enhanced(mock_et_now, mock_get):
     assert row["wind_speed_mph"] == 11.2
     assert row["wind_gust_mph"] == 22.4
     assert row["clouds_x100ft"] == "FEW025 SCT045"
+    assert row["source"] == "api.weather.gov"
     
+    assert snap["observation_source"] == "api.weather.gov"
     assert snap["wind_direction_compass"] == "E"
     assert snap["clouds_x100ft"] == "FEW025 SCT045"
 
@@ -154,3 +163,58 @@ def test_missing_fields_no_crash():
         snap = build_live_nws_snapshot()
         assert snap["station"] == "KMIA"
         assert snap["current_temp_f"] is None
+
+
+class DummyObservation:
+    def __init__(self, timestamp, temperature_f, dewpoint_f=None):
+        self.timestamp = timestamp
+        self.temperature_f = temperature_f
+        self.dewpoint_f = dewpoint_f
+        self.humidity = 55.0
+        self.wind_direction = 90.0
+        self.wind_speed_mph = 8.0
+        self.wind_gust_mph = None
+        self.pressure_in = 29.92
+        self.precipitation_in = 0.0
+        self.weather_condition = "Fair"
+        self.sky_condition = "CLR"
+        self.raw_metar = "KMIA TEST"
+
+
+def test_build_live_snapshot_uses_obhistory_fallback(monkeypatch):
+    now_utc = datetime.now(timezone.utc)
+    obs_time = now_utc - timedelta(minutes=20)
+
+    monkeypatch.setattr(nws_live_client, "fetch_kmia_point_metadata", lambda: {})
+    monkeypatch.setattr(nws_live_client, "fetch_recent_kmia_observations", lambda limit=100: [])
+    monkeypatch.setattr(nws_live_client, "fetch_kmia_obhistory_html", lambda: "<html>fallback</html>")
+    monkeypatch.setattr(
+        nws_live_client,
+        "parse_obhistory",
+        lambda html, reference_datetime=None: ([DummyObservation(obs_time, 84.0, 73.0)], []),
+    )
+
+    snapshot = nws_live_client.build_live_nws_snapshot()
+
+    assert snapshot["station"] == "KMIA"
+    assert snapshot["endpoint_status"] == "PARTIAL"
+    assert snapshot["observation_source"] == "weather.gov_obhistory"
+    assert snapshot["recent_observations_count"] == 1
+    assert snapshot["current_temp_f"] == 84.0
+    assert snapshot["observed_max_so_far_f"] == 84.0
+    assert snapshot["stale_data"] is False
+    assert snapshot["recent_observations_table"][0]["source"] == "weather.gov_obhistory"
+
+
+def test_build_live_snapshot_errors_when_api_and_fallback_empty(monkeypatch):
+    monkeypatch.setattr(nws_live_client, "fetch_kmia_point_metadata", lambda: {})
+    monkeypatch.setattr(nws_live_client, "fetch_recent_kmia_observations", lambda limit=100: [])
+    monkeypatch.setattr(nws_live_client, "fetch_kmia_obhistory_html", lambda: None)
+
+    snapshot = nws_live_client.build_live_nws_snapshot()
+
+    assert snapshot["endpoint_status"] == "ERROR"
+    assert snapshot["recent_observations_table"] == []
+    assert snapshot["recent_observations_count"] == 0
+    assert snapshot["stale_data"] is True
+    assert any("No live observation rows" in warning for warning in snapshot["warnings"])
