@@ -56,6 +56,15 @@ def load_json(path):
             return json.load(f)
     return None
 
+def format_probability(value, show_plus=False):
+    if value is None:
+        return "N/A"
+    try:
+        prefix = "+" if show_plus and float(value) > 0 else ""
+        return f"{prefix}{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "N/A"
+
 def normalize_signal_df(df):
     """Normalize aliases for signal dataframes."""
     if "forecast_bin" not in df.columns and "bin" in df.columns:
@@ -356,9 +365,9 @@ def render_command_center(app_state, p_data, mkts):
     elif best_sig:
         st.info(f"**{best_sig.get('market_ticker', 'N/A')}** | Action: {best_sig.get('paper_action', 'N/A')}")
         sc1, sc2, sc3, sc4 = st.columns(4)
-        sc1.metric("Model Prob", f"{best_sig.get('model_probability', 0)*100:.1f}%")
-        sc2.metric("Market Prob", f"{best_sig.get('market_probability', 0)*100:.1f}%")
-        sc3.metric("Edge", f"{best_sig.get('edge', 0)*100:+.1f}%")
+        sc1.metric("Model Prob", format_probability(best_sig.get('model_probability')))
+        sc2.metric("Market Prob", format_probability(best_sig.get('market_probability')))
+        sc3.metric("Edge", format_probability(best_sig.get('edge'), show_plus=True))
         sc4.metric("Confidence", best_sig.get("confidence", "N/A").upper())
         
         with st.expander("Signal Details", expanded=True):
@@ -541,11 +550,11 @@ def render_active_forecasts(p_data):
         best_sig = p_data.get("best_signal")
         if best_sig:
             st.subheader("🏆 Best Signal")
-            st.info(f"**{best_sig.get('market_ticker', 'N/A')}** | Edge: {best_sig.get('edge', 0)*100:+.1f}% | Action: {best_sig.get('paper_action', 'N/A')}")
+            st.info(f"**{best_sig.get('market_ticker', 'N/A')}** | Edge: {format_probability(best_sig.get('edge'), show_plus=True)} | Action: {best_sig.get('paper_action', 'N/A')}")
             bs_c1, bs_c2, bs_c3, bs_c4 = st.columns(4)
-            bs_c1.metric("Model Prob", f"{best_sig.get('model_probability', 0)*100:.1f}%")
-            bs_c2.metric("Market Prob", f"{best_sig.get('market_probability', 0)*100:.1f}%")
-            bs_c3.metric("Edge", f"{best_sig.get('edge', 0)*100:+.1f}%")
+            bs_c1.metric("Model Prob", format_probability(best_sig.get('model_probability')))
+            bs_c2.metric("Market Prob", format_probability(best_sig.get('market_probability')))
+            bs_c3.metric("Edge", format_probability(best_sig.get('edge'), show_plus=True))
             bs_c4.metric("Confidence", best_sig.get("confidence", "N/A").upper())
 
         st.divider()

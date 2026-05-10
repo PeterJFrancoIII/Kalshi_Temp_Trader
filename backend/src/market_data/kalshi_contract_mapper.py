@@ -109,6 +109,23 @@ def bin_string_to_range(bin_str: str) -> tuple[int, int]:
         
     return low, high
 
+def map_distribution_to_bins(integer_dist: Dict[int, float], target_bins: List[str]) -> Dict[str, float]:
+    """
+    Maps an integer temperature distribution to a set of target bins.
+    """
+    mapped = {}
+    for bin_str in target_bins:
+        try:
+            lower, upper = bin_string_to_range(bin_str)
+            prob = 0.0
+            for temp, p in integer_dist.items():
+                if lower <= temp <= upper:
+                    prob += p
+            mapped[bin_str] = prob
+        except ValueError:
+            mapped[bin_str] = 0.0
+    return mapped
+
 def mapping_to_bin_string(mapping: Dict[str, Any]) -> Optional[str]:
     """
     Converts a contract mapping dict back into a bin string like "91-92", ">=95", "<=89".

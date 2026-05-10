@@ -213,3 +213,13 @@ def test_is_signal_stale_or_mismatched():
     p_data = {}
     mkts = {"selected_temperature_markets": []}
     assert is_signal_stale_or_mismatched(p_data, mkts) is False
+
+def test_format_probability():
+    from src.web_console import format_probability
+    
+    assert format_probability(None) == "N/A"
+    assert format_probability(0.5) == "50.0%"
+    assert format_probability(0.5, show_plus=True) == "+50.0%"
+    assert format_probability(-0.5, show_plus=True) == "-50.0%"
+    assert format_probability(0.0, show_plus=True) == "0.0%"
+    assert format_probability("abc") == "N/A"

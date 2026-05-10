@@ -297,7 +297,7 @@ def generate_paper_signal(
             prob = model_bins.get(bin_str)
             if prob is None and integer_dist:
                 # Fallback: map from integer distribution
-                from forecasting.rules_model_v2 import map_distribution_to_bins
+                from market_data.kalshi_contract_mapper import map_distribution_to_bins
                 mapped = map_distribution_to_bins(integer_dist, [bin_str])
                 prob = mapped.get(bin_str)
                 
