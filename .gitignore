@@ -38,3 +38,12 @@ backend/tests/temp/
 backend/tests/test_reports/
 backend/tests/test_history.jsonl
 backend/venv/
+
+# Secret / key material
+*.pem
+*.key
+*.pub
+Bot
+Bot.pub
+private_key.pem
+*.Read.Only.txt
