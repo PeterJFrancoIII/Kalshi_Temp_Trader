@@ -20,6 +20,10 @@ build/
 .DS_Store
 Thumbs.db
 
+# Logs
+*.log
+scheduler.log
+
 # Env
 .env
 .env.local
@@ -27,6 +31,7 @@ Thumbs.db
 deploy_secrets.json
 
 # KMIA Generated Data
+backend/data/raw/
 backend/data/processed/
 backend/data/test_reports/
 backend/tests/temp/
