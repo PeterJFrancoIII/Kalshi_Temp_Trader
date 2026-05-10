@@ -250,6 +250,7 @@ from test_nws_live_client import (
 )
 
 from test_kalshi_contract_mapper import TestKalshiContractMapper
+from test_kalshi_public_client import TestKalshiPublicClient
 from test_paper_signal_enhanced import TestPaperSignalEnhanced
 from test_weather_providers_page import (
     test_normalize_time_utc_for_merge,
@@ -420,7 +421,8 @@ tests = [
     test_normalize_nws_forecast_returns_nws_forecast_dataframe,
     test_normalize_twc_forecast_returns_twc_forecast_dataframe,
     test_build_matched_table_returns_nearest_forecasts,
-    test_build_observed_match_returns_forecast_error_rows
+    test_build_observed_match_returns_forecast_error_rows,
+    lambda: run_unittest_class(TestKalshiPublicClient)
 ]
 
 

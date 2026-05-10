@@ -3,10 +3,33 @@ import sys
 import json
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Dict, Any
 from market_data.kalshi_public_client import KalshiPublicClient
 
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
+
+def normalize_orderbook(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize Kalshi orderbook response."""
+    warnings = []
+    orderbook_data = raw.get("orderbook", raw)
+    
+    yes_bids = orderbook_data.get("yes", [])
+    no_bids = orderbook_data.get("no", [])
+    
+    # Ensure they are lists
+    if not isinstance(yes_bids, list):
+        warnings.append("yes_bids is not a list")
+        yes_bids = []
+    if not isinstance(no_bids, list):
+        warnings.append("no_bids is not a list")
+        no_bids = []
+        
+    return {
+        "yes_bids": yes_bids,
+        "no_bids": no_bids,
+        "warnings": warnings
+    }
 
 def main():
     print("--- Kalshi Public Market Data Updater ---")
@@ -100,6 +123,48 @@ def main():
             all_selected_map[m.get("ticker")] = m
             
         final_selected = list(all_selected_map.values())
+        
+        # Fetch Orderbooks for selected markets
+        orderbooks = {}
+        orderbook_status = "OK"
+        orderbook_warnings = []
+        
+        if not final_selected:
+            orderbook_status = "EMPTY"
+            orderbook_warnings.append("No active KXHIGHMIA markets available for orderbook fetch")
+        else:
+            print(f"Fetching orderbooks for {len(final_selected)} markets...")
+            for m in final_selected:
+                ticker = m.get("ticker")
+                try:
+                    raw_ob = client.get_orderbook(ticker)
+                    normalized_ob = normalize_orderbook(raw_ob)
+                    orderbooks[ticker] = normalized_ob
+                except Exception as e:
+                    print(f"  Warning: Could not fetch orderbook for {ticker}: {e}")
+                    orderbooks[ticker] = {
+                        "yes_bids": [],
+                        "no_bids": [],
+                        "warnings": [str(e)]
+                    }
+                    orderbook_warnings.append(f"Failed to fetch orderbook for {ticker}")
+                    
+        # Write Orderbook Artifact
+        orderbook_artifact = {
+            "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
+            "source": "kalshi",
+            "status": orderbook_status,
+            "warnings": orderbook_warnings,
+            "orderbooks": orderbooks
+        }
+        
+        ob_filepath = OUTPUT_DIR / "latest_kalshi_orderbooks.json"
+        try:
+            with open(ob_filepath, 'w') as f:
+                json.dump(orderbook_artifact, f, indent=2)
+            print(f"Orderbooks saved to: {ob_filepath}")
+        except Exception as e:
+            print(f"Error writing orderbooks artifact: {e}")
         
         print(f"Candidate markets: {len(candidates)}")
         print(f"Selected markets: {len(final_selected)} ({len(auto_selected)} auto, {len(manual_matches)} manual)")

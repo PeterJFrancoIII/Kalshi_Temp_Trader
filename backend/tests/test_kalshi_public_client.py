@@ -83,5 +83,60 @@ class TestKalshiPublicClient(unittest.TestCase):
         self.assertFalse(hasattr(client, "cancel_order"))
 
 
+    @patch("requests.get")
+    def test_get_orderbook_calls_correct_path(self, mock_get):
+        from market_data.kalshi_public_client import KalshiPublicClient
+        
+        mock_get.return_value.json.return_value = {"orderbook": {"yes": [], "no": []}}
+        mock_get.return_value.raise_for_status.return_value = None
+        
+        client = KalshiPublicClient()
+        client.get_orderbook("TEST-TICKER")
+        
+        args, kwargs = mock_get.call_args
+        url = args[0]
+        self.assertIn("/markets/TEST-TICKER/orderbook", url)
+
+    def test_normalize_orderbook_handles_normal_response(self):
+        from market_data.update_kalshi_snapshots import normalize_orderbook
+        
+        raw = {
+            "orderbook": {
+                "yes": [[10, 5], [9, 2]],
+                "no": [[90, 1]]
+            }
+        }
+        normalized = normalize_orderbook(raw)
+        
+        self.assertEqual(normalized["yes_bids"], [[10, 5], [9, 2]])
+        self.assertEqual(normalized["no_bids"], [[90, 1]])
+        self.assertEqual(normalized["warnings"], [])
+
+    def test_normalize_orderbook_handles_empty_response(self):
+        from market_data.update_kalshi_snapshots import normalize_orderbook
+        
+        raw = {}
+        normalized = normalize_orderbook(raw)
+        
+        self.assertEqual(normalized["yes_bids"], [])
+        self.assertEqual(normalized["no_bids"], [])
+        self.assertEqual(normalized["warnings"], [])
+
+    def test_normalize_orderbook_handles_malformed_response(self):
+        from market_data.update_kalshi_snapshots import normalize_orderbook
+        
+        raw = {
+            "orderbook": {
+                "yes": "not a list",
+                "no": None
+            }
+        }
+        normalized = normalize_orderbook(raw)
+        
+        self.assertEqual(normalized["yes_bids"], [])
+        self.assertEqual(normalized["no_bids"], [])
+        self.assertIn("yes_bids is not a list", normalized["warnings"])
+
+
 if __name__ == "__main__":
     unittest.main()
