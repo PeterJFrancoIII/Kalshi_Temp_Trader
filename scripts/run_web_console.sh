@@ -34,6 +34,7 @@ export PYTHONPATH="${PYTHONPATH:-}:$PROJECT_ROOT/backend/src"
 
 echo "Starting Streamlit console at $STREAMLIT_ADDRESS:$STREAMLIT_PORT..."
 echo "Mode: DRY-RUN / PAPER EVALUATION ONLY"
+export HOME="$PROJECT_ROOT"
 
 # Launch Streamlit with stability flags
 python3 -m streamlit run backend/src/web_console.py \

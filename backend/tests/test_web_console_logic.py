@@ -1,4 +1,4 @@
-import pytest
+# import pytest
 from pathlib import Path
 from src.web_console import load_latest_forecast_summary
 
@@ -62,3 +62,39 @@ def test_load_latest_forecast_summary_malformed():
     assert summary["best_single_number"] == "Unknown"
     assert summary["top_probability_bin"] == "Unknown"
     assert "malformed.md" in summary["source_file"]
+
+def test_extract_best_signal():
+    from src.web_console import extract_best_signal
+    
+    # Test with best_signal present
+    p_data = {"best_signal": {"market_ticker": "T1"}}
+    assert extract_best_signal(p_data)["market_ticker"] == "T1"
+    
+    # Test with signals fallback
+    p_data = {"signals": [{"market_ticker": "T2"}]}
+    assert extract_best_signal(p_data)["market_ticker"] == "T2"
+    
+    # Test with no signals
+    p_data = {}
+    assert extract_best_signal(p_data) is None
+    
+    # Test with invalid input
+    assert extract_best_signal(None) is None
+
+def test_aggregate_warnings():
+    from src.web_console import aggregate_warnings
+    
+    p_data = {"warnings": ["W1"]}
+    mkts = {"warnings": ["W2"]}
+    n_data = {"warnings": ["W3"]}
+    status_data = {"warnings": ["W4"]}
+    
+    all_w = aggregate_warnings(p_data, mkts, n_data, status_data)
+    assert len(all_w) == 4
+    assert "W1" in all_w
+    assert "W2" in all_w
+    assert "W3" in all_w
+    assert "W4" in all_w
+    
+    # Test with missing warnings
+    assert len(aggregate_warnings({}, {}, {}, {})) == 0

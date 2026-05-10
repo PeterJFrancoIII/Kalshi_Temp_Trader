@@ -161,58 +161,149 @@ def extract_nws_observation_rows(n_data):
             return node
     return []
 
+def extract_best_signal(p_data: dict) -> Optional[dict]:
+    if not isinstance(p_data, dict):
+        return None
+    best_sig = p_data.get("best_signal")
+    if not best_sig and p_data.get("signals"):
+        best_sig = p_data["signals"][0]
+    return best_sig
+
+def aggregate_warnings(p_data: dict, mkts: dict, n_data: dict, status_data: dict) -> list[str]:
+    all_warnings = []
+    if p_data and isinstance(p_data, dict) and p_data.get("warnings"):
+        all_warnings.extend(p_data["warnings"])
+    if mkts and isinstance(mkts, dict) and mkts.get("warnings"):
+        all_warnings.extend(mkts["warnings"])
+    if n_data and isinstance(n_data, dict) and n_data.get("warnings"):
+        all_warnings.extend(n_data["warnings"])
+    if status_data and isinstance(status_data, dict) and status_data.get("warnings"):
+        all_warnings.extend(status_data["warnings"])
+    return all_warnings
+
+
 # --- RENDERING HELPERS ---
 
-def render_operator_home(app_state):
-    st.header("🏠 Operator Home")
+def render_command_center(app_state, p_data, mkts):
+    st.header("🏠 Command Center")
     
+    # 2. Top-level mode/status cards
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        if app_state["system_status"] == "GREEN":
-            st.success(f"### SYSTEM STATUS: {app_state['system_status']}")
-        elif app_state["system_status"] == "YELLOW":
-            st.warning(f"### SYSTEM STATUS: {app_state['system_status']}")
-        else:
-            st.error(f"### SYSTEM STATUS: {app_state['system_status']}")
-
+        st.metric("Bot Mode", "DRY-RUN / PAPER")
     with col2:
-        st.metric("TODAY'S FORECAST", f"{app_state['forecast_val']}°F")
-        st.write(f"**Top Bin:** {app_state['top_bin']}")
-
+        st.metric("Live Trading", "DISABLED")
     with col3:
-        st.metric("WEATHER INGESTION", app_state["weather_live"])
-        if app_state["w_path"]:
-            st.caption(f"Source: {app_state['w_path'].name}")
-        
-        st.metric("NWS LIVE DATA", app_state["nws_live"])
-        if app_state["latest_nws_path"]:
-            st.caption(f"Source: {app_state['latest_nws_path'].name}")
-            if app_state["n_data"]:
-                st.write(f"**Live Temp:** {app_state['n_data'].get('current_temp_f', 'N/A')}°F")
-
+        st.metric("Station", "KMIA")
     with col4:
-        st.metric("KALSHI MARKET", app_state["kalshi_status"])
-        st.write(f"**Last Updated:** {app_state['kalshi_last_upd']}")
+        target_date = "N/A"
+        if p_data and "trade_date" in p_data:
+            target_date = p_data["trade_date"]
+        st.metric("Target Date", target_date)
 
-    # Paper Loop Status
     st.divider()
-    st.subheader("🔄 Paper Loop Status")
-    
-    pl_col1, pl_col2, pl_col3, pl_col4 = st.columns(4)
-    with pl_col1:
-        st.metric("Paper Loop", app_state["paper_loop_status"])
-        st.write(f"**Best Signal:** `{app_state.get('latest_signal_ticker', 'N/A')} ({app_state['latest_signal_action']})`")
-    with pl_col2:
-        st.metric("Open Paper Trades", app_state["open_paper_trades"])
-        st.write(f"**Pending Settlements:** {app_state['pending_settlements']}")
-    with pl_col3:
-        st.metric("Settled Trades", app_state["settled_trades"])
-        st.write(f"**Simulated PnL:** ${app_state['sim_pnl']:.2f}")
-    with pl_col4:
-        st.metric("Next Action", "Pending" if app_state["pending_settlements"] > 0 else "Ready")
-        st.info(app_state["next_action"])
 
-    st.info("🚨 **NO REAL TRADING EXECUTION**")
+    # 3. Weather status cards
+    st.subheader("🌦️ Weather Status (NWS KMIA)")
+    n_data = app_state.get("n_data", {})
+    if n_data:
+        wc1, wc2, wc3, wc4 = st.columns(4)
+        wc1.metric("Current Temp", f"{n_data.get('current_temp_f', 'N/A')}°F")
+        wc2.metric("Observed Max Today", f"{n_data.get('observed_max_so_far_f', 'N/A')}°F")
+        wc3.metric("Latest Obs Time", n_data.get("latest_observation_time", "N/A"))
+        wc4.metric("Source", n_data.get("observation_source", "N/A"))
+        
+        if n_data.get("stale_data"):
+            st.warning("⚠️ Weather data is stale!")
+    else:
+        st.warning("No live NWS snapshot found.")
+
+    st.divider()
+
+    # 4. Kalshi market status card
+    st.subheader("⚖️ Kalshi Market Status")
+    if mkts:
+        kc1, kc2, kc3 = st.columns(3)
+        mtime = "N/A"
+        if app_state.get("latest_kalshi_json") and app_state["latest_kalshi_json"].exists():
+            mtime = datetime.fromtimestamp(app_state["latest_kalshi_json"].stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+        kc1.metric("Snapshot Time", mtime)
+        kc2.metric("Total Markets", mkts.get("total_markets_returned", 0))
+        kc3.metric("Active KXHIGHMIA", len(mkts.get("selected_temperature_markets", [])))
+        
+        if not mkts.get("selected_temperature_markets"):
+            st.warning("⚠️ No active Miami temperature markets found.")
+    else:
+        st.warning("No Kalshi market snapshot found.")
+
+    st.divider()
+
+    # 5. Best Signal Panel
+    st.subheader("🏆 Best Signal")
+    best_sig = extract_best_signal(p_data)
+        
+    if best_sig:
+        st.info(f"**{best_sig.get('market_ticker', 'N/A')}** | Action: {best_sig.get('paper_action', 'N/A')}")
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        sc1.metric("Model Prob", f"{best_sig.get('model_probability', 0)*100:.1f}%")
+        sc2.metric("Market Prob", f"{best_sig.get('market_probability', 0)*100:.1f}%")
+        sc3.metric("Edge", f"{best_sig.get('edge', 0)*100:+.1f}%")
+        sc4.metric("Confidence", best_sig.get("confidence", "N/A").upper())
+        
+        with st.expander("Signal Details", expanded=True):
+            st.write(f"**Contract:** {best_sig.get('market_title', 'N/A')}")
+            st.write(f"**Status:** {best_sig.get('status', 'N/A')}")
+            st.write(f"**Expected Value:** {best_sig.get('expected_value', 'N/A')}")
+            st.write(f"**Yes Bid:** {best_sig.get('yes_bid', 'N/A')} | **Yes Ask:** {best_sig.get('yes_ask', 'N/A')}")
+            st.write(f"**Last Price:** {best_sig.get('last_price', 'N/A')}")
+            if best_sig.get("warnings"):
+                st.warning(" | ".join(best_sig["warnings"]))
+    else:
+        st.error("### NO SIGNAL")
+        if p_data.get("warnings"):
+            st.warning(" | ".join(p_data["warnings"]))
+
+    st.divider()
+
+    # 6. Warnings / no-trade reasons section
+    st.subheader("⚠️ Operator Attention")
+    status_data = load_json(app_state.get("latest_status_json"))
+    all_warnings = aggregate_warnings(p_data, mkts, n_data, status_data)
+        
+    if all_warnings:
+        for w in all_warnings:
+            st.warning(w)
+    else:
+        st.success("No critical warnings detected.")
+
+    st.divider()
+
+    # 8. Action Commands
+    st.subheader("⌨️ Action Commands")
+    st.write("Run these commands in the terminal to update data or generate signals:")
+    st.code("bash scripts/update_nws_live_data.sh", language="bash")
+    st.code("bash scripts/update_kalshi_market_data.sh", language="bash")
+    st.code("bash scripts/generate_paper_signal.sh", language="bash")
+    st.code("bash scripts/run_kmia_daily_workflow.sh", language="bash")
+    
+    st.divider()
+    st.subheader("🤖 Decisions")
+    st.button("Record Decision", disabled=True, help="Coming Soon")
+
+    st.divider()
+
+    # 7. Raw Data Expanders
+    st.subheader("🔍 Raw / Debug Views")
+    with st.expander("Raw Paper Signal JSON"):
+        st.json(p_data)
+    with st.expander("Raw Kalshi Snapshot JSON"):
+        st.json(mkts)
+    with st.expander("Raw Weather Snapshot JSON"):
+        st.json(n_data)
+    with st.expander("Latest Status JSON"):
+        if app_state.get("latest_status_json"):
+            st.json(load_json(app_state["latest_status_json"]))
+
 
 
 def render_active_forecasts(p_data):
@@ -601,6 +692,7 @@ if __name__ == "__main__":
             app_state["nws_live"] = "⚠️ STALE"
 
     # Kalshi status
+    mkts = {}
     if latest_kalshi_json.exists():
         app_state["kalshi_last_upd"] = datetime.fromtimestamp(latest_kalshi_json.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
         mkts = load_json(latest_kalshi_json)
@@ -683,7 +775,7 @@ if __name__ == "__main__":
 
     # --- MAIN TABS ---
     tabs = st.tabs([
-        "Operator Home", 
+        "Command Center", 
         "Active Kalshi Forecasts", 
         "Paper Trading", 
         "Weather / NWS", 
@@ -692,7 +784,7 @@ if __name__ == "__main__":
     ])
     
     with tabs[0]:
-        render_operator_home(app_state)
+        render_command_center(app_state, p_data, mkts)
         
     with tabs[1]:
         render_active_forecasts(p_data)
