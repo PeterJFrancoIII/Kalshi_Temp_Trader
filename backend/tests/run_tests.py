@@ -252,7 +252,13 @@ from test_paper_signal_enhanced import TestPaperSignalEnhanced
 from test_weather_providers_page import (
     test_normalize_time_utc_for_merge,
     test_build_matched_table_with_mixed_resolutions,
-    test_build_matched_table_empty_input
+    test_build_matched_table_empty_input,
+    test_extract_nws_observed_rows_finds_recent_observations_table,
+    test_extract_nws_forecast_rows_finds_hourly_forecast,
+    test_normalize_nws_forecast_returns_nws_forecast_dataframe,
+    test_normalize_twc_forecast_returns_twc_forecast_dataframe,
+    test_build_matched_table_returns_nearest_forecasts,
+    test_build_observed_match_returns_forecast_error_rows
 )
 
 
@@ -404,7 +410,13 @@ tests = [
     lambda: run_unittest_class(TestPaperSignalEnhanced),
     test_normalize_time_utc_for_merge,
     test_build_matched_table_with_mixed_resolutions,
-    test_build_matched_table_empty_input
+    test_build_matched_table_empty_input,
+    test_extract_nws_observed_rows_finds_recent_observations_table,
+    test_extract_nws_forecast_rows_finds_hourly_forecast,
+    test_normalize_nws_forecast_returns_nws_forecast_dataframe,
+    test_normalize_twc_forecast_returns_twc_forecast_dataframe,
+    test_build_matched_table_returns_nearest_forecasts,
+    test_build_observed_match_returns_forecast_error_rows
 ]
 
 

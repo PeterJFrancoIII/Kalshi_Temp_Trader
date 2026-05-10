@@ -69,10 +69,10 @@ def test_build_matched_table_returns_nearest_forecasts():
             "type": ["Forecast"],
         }
     )
-    matched = page.build_matched_table(nws_df, twc_df)
+    matched = page.build_matched_table(nws_df, twc_df, 20, "nearest")
     assert len(matched) == 1
-    assert matched.iloc[0]["nws_temperature_f"] == 83
-    assert matched.iloc[0]["twc_temperature_f"] == 84
+    assert matched.iloc[0]["NWS Forecast °F"] == 83
+    assert matched.iloc[0]["TWC Forecast °F"] == 84
 
 
 def test_build_observed_match_returns_forecast_error_rows():
@@ -95,11 +95,11 @@ def test_build_observed_match_returns_forecast_error_rows():
             "type": ["Observed"],
         }
     )
-    matched = page.build_observed_match(forecast_df, observed_df, "NWS")
+    matched = page.build_observed_match(forecast_df, observed_df, 20, "nearest")
     assert len(matched) == 1
-    assert matched.iloc[0]["forecast_temperature_f"] == 83
-    assert matched.iloc[0]["observed_temperature_f"] == 85
-    assert matched.iloc[0]["temperature_error_f"] == -2
+    assert matched.iloc[0]["NWS Observed °F"] == 83
+    assert matched.iloc[0]["TWC Observed °F"] == 85
+    assert matched.iloc[0]["Observed Temp Spread"] == 2
 
 
 def test_normalize_time_utc_for_merge():
@@ -144,11 +144,11 @@ def test_build_matched_table_with_mixed_resolutions():
         }
     )
 
-    matched = page.build_matched_table(nws_df, twc_df)
+    matched = page.build_matched_table(nws_df, twc_df, 20, "nearest")
 
     assert len(matched) == 1
-    assert matched.iloc[0]["nws_temperature_f"] == 83
-    assert matched.iloc[0]["twc_temperature_f"] == 84
+    assert matched.iloc[0]["NWS Forecast °F"] == 83
+    assert matched.iloc[0]["TWC Forecast °F"] == 84
 
 
 def test_build_matched_table_empty_input():
@@ -162,8 +162,8 @@ def test_build_matched_table_empty_input():
         }
     )
 
-    matched = page.build_matched_table(nws_df, twc_df)
+    matched = page.build_matched_table(nws_df, twc_df, 20, "nearest")
 
     assert matched.empty
-    assert "nws_time_utc" in matched.columns
-    assert "twc_time_utc" in matched.columns
+    assert "NWS Forecast °F" in matched.columns
+    assert "TWC Forecast °F" in matched.columns
