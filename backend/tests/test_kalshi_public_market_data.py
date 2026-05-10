@@ -7,8 +7,8 @@ from market_data.kalshi_public_client import KalshiPublicClient
 
 def test_kalshi_client_no_auth_references():
     """
-    Verify that the KalshiPublicClient does not contain logic for authentication,
-    API keys, or private secrets.
+    Verify that the KalshiPublicClient does not contain logic for live trading
+    or order execution, while allowing approved read-only auth references.
     """
     # The test runs from the backend/ directory, so src/ is the correct relative path.
     client_file = "src/market_data/kalshi_public_client.py"
@@ -18,9 +18,15 @@ def test_kalshi_client_no_auth_references():
     # We allow "unauthenticated" but forbid "auth" otherwise
     content_clean = content.replace("unauthenticated", "READ_ONLY_MODE")
     
-    forbidden = ["api_key", "secret_key", "private_key", "auth_", "token", "sign", "password"]
-    for term in forbidden:
-        assert term not in content_clean, f"Potentially authenticated term '{term}' found in public client."
+    # Allowed for read-only auth: "api_key", "auth_"
+    # Still forbidden in client: "private_key", "secret_key", "token", "password"
+    forbidden = ["secret_key", "private_key", "token", "password"]
+    
+    # Dangerous execution terms
+    dangerous = ["submit_order", "create_order", "place_order", "cancel_order", "api_secret", "sign_order"]
+    
+    for term in forbidden + dangerous:
+        assert term not in content_clean, f"Forbidden term '{term}' found in public client."
 
 def test_kalshi_client_mocked_discovery():
     """

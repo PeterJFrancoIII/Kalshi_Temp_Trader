@@ -33,3 +33,12 @@ backend/tests/temp/
 backend/tests/test_reports/
 backend/tests/test_history.jsonl
 backend/venv/
+
+# Keys
+*.pem
+*.key
+*.pub
+private_key.pem
+Bot
+Bot.pub
+*.Read.Only.txt

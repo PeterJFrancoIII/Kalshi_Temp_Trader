@@ -10,18 +10,32 @@ from datetime import datetime, timezone
 
 class KalshiPublicClient:
     """
-    Read-only unauthenticated client for Kalshi public market data.
+    Client for Kalshi public market data (supports read-only authentication).
     """
     
-    KALSHI_PUBLIC_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
+    DEFAULT_BASE_URL = "https://external-api.kalshi.com/trade-api/v2"
 
-    def __init__(self, base_url: str = KALSHI_PUBLIC_BASE_URL):
-        self.base_url = base_url
+    def __init__(self, base_url: Optional[str] = None, use_auth: bool = False):
+        if base_url:
+            self.base_url = base_url
+        else:
+            self.base_url = os.environ.get("KALSHI_API_BASE_URL", self.DEFAULT_BASE_URL)
+
+        self.use_auth = use_auth or os.environ.get("KALSHI_USE_AUTH", "false").lower() == "true"
+        if self.use_auth:
+            from market_data.kalshi_auth import get_required_env
+            get_required_env("KALSHI_API_KEY_ID")
 
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Internal helper for unauthenticated GET requests."""
+        """Internal helper for GET requests."""
         url = f"{self.base_url}{path}"
-        response = requests.get(url, params=params, headers={"Accept": "application/json"})
+        headers = {"Accept": "application/json"}
+
+        if self.use_auth:
+            from market_data.kalshi_auth import create_kalshi_auth_headers
+            headers.update(create_kalshi_auth_headers("GET", path))
+
+        response = requests.get(url, params=params, headers=headers)
         response.raise_for_status()
         return response.json()
 

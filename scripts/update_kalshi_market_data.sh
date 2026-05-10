@@ -23,5 +23,15 @@ fi
 source "$VENV_PATH/bin/activate"
 export PYTHONPATH="${PYTHONPATH:-}:$PROJECT_ROOT/backend/src"
 
+# Check required env vars for authenticated fetch
+if [ -z "${KALSHI_API_KEY_ID:-}" ] || [ -z "${KALSHI_READ_ONLY_RSA_KEY_PATH:-}" ]; then
+    echo "Warning: Kalshi read-only auth env vars are missing. Set KALSHI_API_KEY_ID and KALSHI_READ_ONLY_RSA_KEY_PATH."
+    echo "Proceeding with unauthenticated fetch."
+    export KALSHI_USE_AUTH="false"
+else
+    echo "Enabling Kalshi authenticated read-only mode."
+    export KALSHI_USE_AUTH="true"
+fi
+
 # Run updater
 python3 -m market_data.update_kalshi_snapshots
