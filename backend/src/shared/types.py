@@ -5,17 +5,13 @@ from datetime import date, datetime
 
 REQUIRED_BINS = ["<=78", "79-80", "81-82", "83-84", "85-86", ">=87"]
 
+
 class TemperatureBins(BaseModel):
     bins: Dict[str, float]
 
     @field_validator("bins")
     @classmethod
     def validate_bins(cls, v: Dict[str, float]) -> Dict[str, float]:
-        # Check that required bins exist
-        for b in REQUIRED_BINS:
-            if b not in v:
-                raise ValueError(f"Missing required bin: {b}")
-        
         # Check that probabilities are between 0 and 1
         for b, prob in v.items():
             if not (0.0 <= prob <= 1.0):
@@ -51,6 +47,21 @@ class DailyPrediction(BaseModel):
     confidence: Literal["low", "medium", "high"]
     main_drivers: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    
+    # Lookahead safety timestamps
+    prediction_timestamp: Optional[datetime] = None
+    source_weather_timestamp: Optional[datetime] = None
+    market_snapshot_timestamp: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_lookahead(self) -> "DailyPrediction":
+        if self.source_weather_timestamp and self.prediction_timestamp:
+            if self.source_weather_timestamp > self.prediction_timestamp:
+                raise ValueError("Source weather timestamp cannot be after prediction timestamp")
+        if self.market_snapshot_timestamp and self.prediction_timestamp:
+            if self.market_snapshot_timestamp > self.prediction_timestamp:
+                raise ValueError("Market snapshot timestamp cannot be after prediction timestamp")
+        return self
 
     @field_validator("station")
     @classmethod
@@ -126,3 +137,38 @@ class HistoricalWeatherRecord(BaseModel):
     source: str
     raw_source_id: Optional[str] = None
     quality_flags: List[str] = Field(default_factory=list)
+
+
+class ContractBin(BaseModel):
+    ticker: str
+    event_ticker: Optional[str] = None
+    label: str
+    condition_type: Literal["above", "below", "between", "unknown"]
+    lower_f: Optional[int] = None
+    upper_f: Optional[int] = None
+    lower_inclusive: bool = True
+    upper_inclusive: bool = True
+    source: str = "kalshi"
+    raw_title: Optional[str] = None
+    raw_subtitle: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
+
+    def contains(self, temp_f: int) -> bool:
+        """Checks if a given temperature falls within this contract's range."""
+        if self.lower_f is not None:
+            if self.lower_inclusive:
+                if temp_f < self.lower_f:
+                    return False
+            else:
+                if temp_f <= self.lower_f:
+                    return False
+                    
+        if self.upper_f is not None:
+            if self.upper_inclusive:
+                if temp_f > self.upper_f:
+                    return False
+            else:
+                if temp_f >= self.upper_f:
+                    return False
+                    
+        return True

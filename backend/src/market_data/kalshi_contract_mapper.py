@@ -50,22 +50,25 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
             res["threshold_f"] = float(range_match.group(1))
             res["range_high_f"] = float(range_match.group(2))
         
-        # Above: ">91", "91 or above", "above 91"
-        elif re.search(r"(\d+(?:\.\d+)?)\s*or\s*above", text) or re.search(r"(?:above\s+|>\s*)(\d+(?:\.\d+)?)", text):
-            match = re.search(r"(\d+(?:\.\d+)?)\s*or\s*above", text) or re.search(r"(?:above\s+|>\s*)(\d+(?:\.\d+)?)", text)
+        # Above: ">91", "91 or above", "above 91", ">=95"
+        elif re.search(r"(\d+(?:\.\d+)?)\s*or\s*above", text) or re.search(r"(?:above\s+|>=|>|>\s*)(\d+(?:\.\d+)?)", text):
+            match = re.search(r"(\d+(?:\.\d+)?)\s*or\s*above", text) or re.search(r"(?:above\s+|>=|>|>\s*)(\d+(?:\.\d+)?)", text)
             res["condition_type"] = "above"
-            res["threshold_f"] = float(match.group(1))
-            # Handle ">" vs ">=" (Kalshi "greater" usually means ">", but text might say "above")
-            if ">" in text and ">=" not in text and "above" not in text:
-                # If strictly greater than 91, it's effectively >= 92 for integers
-                # But for consistency, we'll keep the float threshold
-                pass
+            val = float(match.group(1))
+            if ">=" in text:
+                res["threshold_f"] = val - 1.0 # >=95 means >94
+            else:
+                res["threshold_f"] = val
                 
-        # Below: "<84", "84 or below", "below 84"
-        elif re.search(r"(\d+(?:\.\d+)?)\s*or\s*below", text) or re.search(r"(?:below\s+|<\s*)(\d+(?:\.\d+)?)", text):
-            match = re.search(r"(\d+(?:\.\d+)?)\s*or\s*below", text) or re.search(r"(?:below\s+|<\s*)(\d+(?:\.\d+)?)", text)
+        # Below: "<84", "84 or below", "below 84", "<=89"
+        elif re.search(r"(\d+(?:\.\d+)?)\s*or\s*below", text) or re.search(r"(?:below\s+|<=|<|<\s*)(\d+(?:\.\d+)?)", text):
+            match = re.search(r"(\d+(?:\.\d+)?)\s*or\s*below", text) or re.search(r"(?:below\s+|<=|<|<\s*)(\d+(?:\.\d+)?)", text)
             res["condition_type"] = "below"
-            res["threshold_f"] = float(match.group(1))
+            val = float(match.group(1))
+            if "<=" in text:
+                res["threshold_f"] = val + 1.0 # <=89 means <90
+            else:
+                res["threshold_f"] = val
 
     # 3. Ticker fallback: B86.5
     if res["condition_type"] == "unknown" and "-B" in ticker:
@@ -78,6 +81,89 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
         res["warnings"].append(f"Could not determine condition for ticker {ticker}")
         
     return res
+
+def bin_string_to_range(bin_str: str) -> tuple[int, int]:
+    """
+    Converts a bin string like "91-92", ">=95", "<=89" into a tuple of (low, high) integers.
+    """
+    if bin_str.startswith("<="):
+        high = int(bin_str[2:])
+        low = -999
+    elif bin_str.startswith(">="):
+        low = int(bin_str[2:])
+        high = 999
+    elif bin_str.startswith("<"):
+        high = int(bin_str[1:]) - 1
+        low = -999
+    elif bin_str.startswith(">"):
+        low = int(bin_str[1:]) + 1
+        high = 999
+    elif "-" in bin_str:
+        parts = bin_str.split("-")
+        low = int(parts[0])
+        high = int(parts[1])
+    else:
+        # Single number
+        low = int(bin_str)
+        high = int(bin_str)
+        
+    return low, high
+
+def mapping_to_bin_string(mapping: Dict[str, Any]) -> Optional[str]:
+    """
+    Converts a contract mapping dict back into a bin string like "91-92", ">=95", "<=89".
+    """
+    cond = mapping.get("condition_type")
+    thresh = mapping.get("threshold_f")
+    high = mapping.get("range_high_f")
+    
+    if thresh is None:
+        return None
+        
+    import math
+    
+    if cond == "between" and high is not None:
+        return f"{int(thresh)}-{int(high)}"
+    elif cond == "above":
+        # Use > for integer thresholds to match user request
+        if thresh == float(int(thresh)):
+            return f">{int(thresh)}"
+        return f">={math.floor(thresh) + 1}"
+    elif cond == "below":
+        # Use < for integer thresholds to match user request
+        if thresh == float(int(thresh)):
+            return f"<{int(thresh)}"
+        return f"<={math.ceil(thresh) - 1}"
+        
+    return None
+
+def market_to_contract_bin(market: Dict[str, Any]) -> Any:
+    """
+    Converts a Kalshi market object into a ContractBin Pydantic model.
+    """
+    from shared.types import ContractBin
+    
+    mapping = extract_contract_thresholds(market)
+    label = mapping_to_bin_string(mapping) or "unknown"
+    
+    low, high = -999, 999
+    if label != "unknown":
+        low, high = bin_string_to_range(label)
+        
+    return ContractBin(
+        ticker=market.get("ticker", ""),
+        event_ticker=market.get("event_ticker"),
+        label=label,
+        condition_type=mapping.get("condition_type", "unknown"),
+        lower_f=low if low != -999 else None,
+        upper_f=high if high != 999 else None,
+        lower_inclusive=True,
+        upper_inclusive=True,
+        source="kalshi",
+        raw_title=market.get("title"),
+        raw_subtitle=market.get("subtitle"),
+        warnings=mapping.get("warnings", [])
+    )
 
 def parse_kalshi_markets(snapshot_path: Path) -> List[Dict[str, Any]]:
     """
@@ -111,9 +197,11 @@ def parse_kalshi_markets(snapshot_path: Path) -> List[Dict[str, Any]]:
             continue
             
         mapping = extract_contract_thresholds(m)
+        contract_bin = market_to_contract_bin(m)
         
         # Enrich market object
         m["contract_mapping"] = mapping
+        m["contract_bin"] = contract_bin.model_dump()
         kmia_markets.append(m)
         
     return kmia_markets
