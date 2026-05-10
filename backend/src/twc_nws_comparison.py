@@ -149,7 +149,7 @@ def render_twc_nws_comparison_settings(
             updated["show_within_3f"] = st.checkbox(
                 "Show +/-3F accuracy",
                 value=bool(updated["show_within_3f"]),
-                key="twc_nws_show_within_3f",
+                key="twc_nws_show_within_3f_summary",
             )
         with col_c:
             updated["show_spread"] = st.checkbox("Show spread", value=bool(updated["show_spread"]), key="twc_nws_show_spread")
@@ -176,7 +176,7 @@ def render_twc_nws_comparison_settings(
                 updated[flag] = st.checkbox(
                     f"+/-{threshold}F",
                     value=bool(updated[flag]),
-                    key=f"twc_nws_{flag}",
+                    key=f"twc_nws_{flag}_{threshold}_{idx}",
                 )
 
         updated["lead_time_start_hour"] = int(range_start)
@@ -381,8 +381,8 @@ def render_twc_nws_comparison(source_data: Any, config: dict[str, Any] | None = 
         column_labels[f"nws_within_{threshold}f_pct"] = f"NWS +/-{threshold}F %"
 
     display_df = df.rename(columns={k: v for k, v in column_labels.items() if k in df.columns})
-    height = 420 if config.get("table_density") == "compact" else None
-    st.dataframe(display_df, use_container_width=True, hide_index=True, height=height)
+    height = 420 if config.get("table_density") == "compact" else "content"
+    st.dataframe(display_df, width="stretch", hide_index=True, height=height)
 
     with st.expander("Current TWC vs NWS view config"):
         st.json(config)
