@@ -8,15 +8,6 @@ import os
 # Ensure src is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
-# Mock missing modules to allow imports without internet/dependencies
-sys.modules['requests'] = MagicMock()
-sys.modules['pydantic'] = MagicMock()
-sys.modules['beautifulsoup4'] = MagicMock()
-sys.modules['sqlalchemy'] = MagicMock()
-sys.modules['python-dateutil'] = MagicMock()
-sys.modules['dateutil'] = MagicMock()
-sys.modules['dateutil.parser'] = MagicMock()
-
 # Import main but we will patch things before calling it
 from market_data.update_kalshi_snapshots import main
 
@@ -75,6 +66,7 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
     def test_preservation_on_empty_fetch(self, mock_path, mock_client_class):
         """Test that failed/empty fetch preserves previous valid latest snapshot."""
         mock_client = MagicMock()
+        mock_client.base_url = "https://external-api.kalshi.com"
         mock_client_class.return_value = mock_client
         
         # Mock config

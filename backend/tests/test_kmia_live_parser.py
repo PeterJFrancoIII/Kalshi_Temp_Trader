@@ -1,6 +1,7 @@
 # import pytest
 from datetime import datetime, timezone, timedelta
 from dateutil.tz import gettz
+from unittest.mock import patch
 
 from ingestion.kmia_obhistory_parser import parse_wrh_timeseries, parse_obhistory, ParsedObservation
 from features.live_features import compute_live_features
@@ -123,32 +124,16 @@ def test_parse_obhistory_year_rollover():
     assert obs[0].timestamp.day == 31
     assert obs[0].timestamp.year == 2026
 
-def test_compute_live_features_max_so_far():
-    tz = gettz('US/Eastern')
-    # Use a fixed mid-day time to ensure test stability regardless of when it's run
-    ref_now = datetime(2026, 5, 6, 12, 0, 0, tzinfo=tz)
+@patch('features.live_features.datetime')
+def test_compute_live_features_max_so_far(mock_datetime):
+    # Mock datetime.now to return a fixed time (12:00 UTC)
+    fixed_now = datetime(2026, 5, 11, 12, 0, 0, tzinfo=timezone.utc)
+    mock_datetime.now.return_value = fixed_now
+    # Make sure datetime(...) calls work normally
+    mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
     
-    # 2 hours ago
-    t1 = ref_now - timedelta(hours=2)
-    # 1 hour ago
-    t2 = ref_now - timedelta(hours=1)
-    
-    obs = [
-        ParsedObservation(timestamp=t1, temperature_f=85.0),
-        ParsedObservation(timestamp=t2, temperature_f=82.0),
-    ]
-    
-    # We must ensure compute_live_features uses our reference 'now' if we want it to be deterministic,
-    # but the current implementation uses datetime.now(timezone.utc).
-    # For this test to pass with the current implementation, we just need to ensure
-    # that the observations are from 'today' in ET.
-    # Since the system clock is likely close to 'now', using a fixed recent date is better.
-    
-    # Update: compute_live_features uses datetime.now(timezone.utc) internally for stale checks.
-    # To be fully safe, we should use observations very close to the actual 'now'.
-    actual_now = datetime.now(timezone.utc)
-    t1 = actual_now - timedelta(minutes=60)
-    t2 = actual_now - timedelta(minutes=30)
+    t1 = fixed_now - timedelta(minutes=60)
+    t2 = fixed_now - timedelta(minutes=30)
     
     obs = [
         ParsedObservation(timestamp=t1, temperature_f=85.0),
