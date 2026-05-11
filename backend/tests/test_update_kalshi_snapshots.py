@@ -8,18 +8,32 @@ import os
 # Ensure src is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
-# Import main but we will patch things before calling it
-from market_data.update_kalshi_snapshots import main
+mock_client_class = MagicMock()
+
+mocks = {
+    'requests': MagicMock(),
+    'pydantic': MagicMock(),
+    'beautifulsoup4': MagicMock(),
+    'sqlalchemy': MagicMock(),
+    'python-dateutil': MagicMock(),
+    'dateutil': MagicMock(),
+    'dateutil.parser': MagicMock(),
+    'market_data.kalshi_public_client': MagicMock(KalshiPublicClient=mock_client_class)
+}
+
+with patch.dict('sys.modules', mocks):
+    # Import main but we will patch things before calling it
+    from market_data.update_kalshi_snapshots import main
 
 class TestUpdateKalshiSnapshots(unittest.TestCase):
 
-    @patch('market_data.update_kalshi_snapshots.KalshiPublicClient')
     @patch('market_data.update_kalshi_snapshots.Path')
     @patch('builtins.open', new_callable=mock_open)
-    def test_relaxed_filtering(self, mock_file, mock_path, mock_client_class):
+    def test_relaxed_filtering(self, mock_file, mock_path):
         """Test that relaxed Miami high-temperature filtering does not require literal KMIA."""
         # Setup mocks
         mock_client = MagicMock()
+        mock_client_class.reset_mock()
         mock_client_class.return_value = mock_client
         
         # Mock config loading
@@ -45,8 +59,6 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
             "total_raw_markets_seen": 1
         }
         mock_client.get_orderbook.return_value = {"yes_bids": [], "no_bids": []}
-        
-        # Mock save_market_snapshot to avoid writing files
         mock_client.save_market_snapshot.return_value = "mock_path"
         
         # Run main
@@ -61,12 +73,11 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
         self.assertEqual(len(snapshot["selected_temperature_markets"]), 1)
         self.assertEqual(snapshot["selected_temperature_markets"][0]["ticker"], "MOCK-1")
 
-    @patch('market_data.update_kalshi_snapshots.KalshiPublicClient')
     @patch('market_data.update_kalshi_snapshots.Path')
-    def test_preservation_on_empty_fetch(self, mock_path, mock_client_class):
+    def test_preservation_on_empty_fetch(self, mock_path):
         """Test that failed/empty fetch preserves previous valid latest snapshot."""
         mock_client = MagicMock()
-        mock_client.base_url = "https://external-api.kalshi.com"
+        mock_client_class.reset_mock()
         mock_client_class.return_value = mock_client
         
         # Mock config
@@ -78,8 +89,6 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
         mock_path_latest.exists.return_value = True
         
         # Mock open for reading previous snapshot
-        # This is tricky because we need to return different things for different paths
-        # We'll mock Path objects to return specific mocks
         def path_side_effect(path_str):
             if "kalshi_market_discovery.json" in str(path_str):
                 return mock_path_config
@@ -95,8 +104,6 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
             "endpoint_attempts": [],
             "total_raw_markets_seen": 0
         }
-        mock_client.get_market.return_value = None
-        mock_client.get_markets_for_series.return_value = []
         
         # Mock open to return a valid snapshot when reading latest
         m_open = mock_open(read_data=json.dumps({
@@ -115,12 +122,12 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
         # Verify that it did NOT overwrite latest (did not call save_market_snapshot)
         mock_client.save_market_snapshot.assert_not_called()
 
-    @patch('market_data.update_kalshi_snapshots.KalshiPublicClient')
     @patch('market_data.update_kalshi_snapshots.Path')
     @patch('builtins.open', new_callable=mock_open)
-    def test_empty_fetch_no_previous(self, mock_file, mock_path, mock_client_class):
+    def test_empty_fetch_no_previous(self, mock_file, mock_path):
         """Test that empty fetch with no previous valid snapshot writes status: EMPTY."""
         mock_client = MagicMock()
+        mock_client_class.reset_mock()
         mock_client_class.return_value = mock_client
         
         # Mock config loading
@@ -137,8 +144,6 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
             "endpoint_attempts": [],
             "total_raw_markets_seen": 0
         }
-        mock_client.get_market.return_value = None
-        mock_client.get_markets_for_series.return_value = []
         
         mock_client.save_market_snapshot.return_value = "mock_path"
         
@@ -153,13 +158,12 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
         self.assertEqual(snapshot["status"], "EMPTY")
         self.assertEqual(len(snapshot["selected_temperature_markets"]), 0)
 
-    @patch('market_data.update_kalshi_snapshots.KalshiPublicClient')
     @patch('market_data.update_kalshi_snapshots.Path')
-    def test_orderbook_fallback(self, mock_path, mock_client_class):
+    def test_orderbook_fallback(self, mock_path):
         """Test that empty orderbook + market snapshot prices produces fallback fields."""
         mock_client = MagicMock()
+        mock_client_class.reset_mock()
         mock_client_class.return_value = mock_client
-        
         # Mock paths
         mock_path_inst = MagicMock()
         mock_path_inst.exists.return_value = False
@@ -186,9 +190,6 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
             "endpoint_attempts": [],
             "total_raw_markets_seen": 1
         }
-        mock_client.get_market.return_value = None
-        mock_client.get_markets_for_series.return_value = []
-        
         # Mock get_orderbook to fail (forcing empty orderbook)
         mock_client.get_orderbook.side_effect = Exception("API Error")
         

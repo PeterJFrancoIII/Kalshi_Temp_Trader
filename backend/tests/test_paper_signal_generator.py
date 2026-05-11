@@ -3,7 +3,40 @@ import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import unittest
-from paper_trading.signal_generator import generate_paper_signal, parse_forecast_bins_from_md
+import sys
+import os
+from unittest.mock import MagicMock
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+
+class MockBaseModel:
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+    def dict(self):
+        return self.__dict__
+    def model_dump(self):
+        return self.__dict__
+    def get(self, key, default=None):
+        return getattr(self, key, default)
+
+pydantic_mock = MagicMock()
+pydantic_mock.BaseModel = MockBaseModel
+pydantic_mock.Field = MagicMock()
+pydantic_mock.field_validator = MagicMock()
+pydantic_mock.model_validator = MagicMock()
+
+mocks = {
+    'requests': MagicMock(),
+    'pydantic': pydantic_mock,
+    'beautifulsoup4': MagicMock(),
+    'sqlalchemy': MagicMock(),
+    'python-dateutil': MagicMock(),
+    'dateutil': MagicMock(),
+    'dateutil.parser': MagicMock()
+}
+
+with patch.dict('sys.modules', mocks):
+    from paper_trading.signal_generator import generate_paper_signal, parse_forecast_bins_from_md
 
 # NO REAL TRADING EXECUTION
 
@@ -216,10 +249,55 @@ class TestPaperSignalGenerator(unittest.TestCase):
             with open(report_path, "r") as f:
                 report = json.load(f)
                 
-            self.assertEqual(len(report["signals"]), 1)
-            self.assertEqual(report["signals"][0]["paper_action"], "NO SIGNAL")
-            self.assertTrue(report["signals"][0]["stale"])
+            self.assertEqual(len(report["signals"]), 0)
+            self.assertEqual(report["status"], "NO_SIGNAL")
             self.assertIsNone(report["best_signal"])
+            self.assertTrue(any("Preserved Kalshi snapshot is stale" in w for w in report["warnings"]))
+        finally:
+            sg.REPORTS_DIR = original_reports
+            sg.SNAPSHOT_FILE = original_snapshot
+
+    def test_generate_signal_matching_date(self):
+        """Verify that matching forecast date accepts current market."""
+        temp_dir = Path(__file__).resolve().parent / "temp"
+        temp_dir.mkdir(exist_ok=True)
+        
+        # 1. Create Mock Forecast (Targeting 2026-05-07)
+        md_path = temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.md"
+        md_path.write_text("## Probability Bins\n| 85-86 | 50.0% |")
+        
+        # 2. Create Mock Snapshot with matching ticker (2026-05-07)
+        snapshot_path = temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_data = {
+            "selected_temperature_markets": [
+                {
+                    "ticker": "KXHIGHMIA-26MAY07-B86.5",
+                    "title": "Above 86.5",
+                    "subtitle": "86.5 or above",
+                    "yes_ask_dollars": "0.10",
+                    "status": "open",
+                    "strike_type": "greater",
+                    "floor_strike": 86.5
+                }
+            ]
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot_data, f)
+            
+        import paper_trading.signal_generator as sg
+        original_reports = sg.REPORTS_DIR
+        original_snapshot = sg.SNAPSHOT_FILE
+        sg.REPORTS_DIR = temp_dir
+        sg.SNAPSHOT_FILE = snapshot_path
+        
+        try:
+            report_path = sg.generate_paper_signal()
+            with open(report_path, "r") as f:
+                report = json.load(f)
+                
+            self.assertEqual(len(report["signals"]), 1)
+            self.assertEqual(report["status"], "OK")
+            self.assertFalse(report["signals"][0]["stale"])
         finally:
             sg.REPORTS_DIR = original_reports
             sg.SNAPSHOT_FILE = original_snapshot

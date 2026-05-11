@@ -386,6 +386,19 @@ def generate_paper_signal(
             "stale": is_stale
         })
 
+    # Check if all signals are stale
+    all_stale = True
+    if signals:
+        for s in signals:
+            if not s.get("stale"):
+                all_stale = False
+                break
+                
+    if signals and all_stale:
+        signals = []
+        status = "NO_SIGNAL"
+        global_warnings.append("Preserved Kalshi snapshot is stale or event-date mismatched; no actionable signal generated.")
+
     signals.sort(key=lambda x: x["edge"] if x["edge"] is not None else -999.0, reverse=True)
     
     # If best signal has edge -999 or is None, it means all are stale or no edge!
