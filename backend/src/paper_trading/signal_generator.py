@@ -295,12 +295,15 @@ def generate_paper_signal(
         prob = None
         
         if bin_str:
-            prob = model_bins.get(bin_str)
-            if prob is None and integer_dist:
-                # Fallback: map from integer distribution
-                from market_data.kalshi_contract_mapper import map_distribution_to_bins
-                mapped = map_distribution_to_bins(integer_dist, [bin_str])
-                prob = mapped.get(bin_str)
+            if is_stale:
+                prob = 0.0
+            else:
+                prob = model_bins.get(bin_str)
+                if prob is None and integer_dist:
+                    # Fallback: map from integer distribution
+                    from market_data.kalshi_contract_mapper import map_distribution_to_bins
+                    mapped = map_distribution_to_bins(integer_dist, [bin_str])
+                    prob = mapped.get(bin_str)
                 
             if prob is None:
                 global_warnings.append(f"{ticker}: Probability for bin {bin_str} not found in forecast.")
