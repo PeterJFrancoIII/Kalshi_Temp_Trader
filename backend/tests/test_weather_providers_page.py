@@ -167,3 +167,71 @@ def test_build_matched_table_empty_input():
     assert matched.empty
     assert "NWS Forecast °F" in matched.columns
     assert "TWC Forecast °F" in matched.columns
+
+
+def test_normalize_twc_observed_handles_current_conditions():
+    page = load_page_module()
+    twc_data = {
+        "current_conditions": {
+            "temperature_f": 83,
+            "observation_time_utc": 1778203044
+        }
+    }
+    df = page.normalize_twc_observed(twc_data)
+    assert not df.empty
+    assert df.iloc[0]["provider"] == "TWC"
+    assert df.iloc[0]["type"] == "Observed"
+    assert df.iloc[0]["temperature_f"] == 83
+
+
+def test_normalize_twc_observed_handles_list_style():
+    page = load_page_module()
+    twc_data = {
+        "observations": [
+            {"temperature_f": 83, "timestamp_utc": "2026-05-08T01:17:24Z"},
+            {"temperature_f": 84, "timestamp_utc": "2026-05-08T02:17:24Z"}
+        ]
+    }
+    df = page.normalize_twc_observed(twc_data)
+    assert not df.empty
+    assert len(df) == 2
+    assert df.iloc[0]["provider"] == "TWC"
+    assert df.iloc[0]["temperature_f"] == 83
+
+
+def test_build_observed_match_returns_no_rows_when_no_overlap():
+    page = load_page_module()
+    nws_df = pd.DataFrame({
+        "time_utc": pd.to_datetime(["2026-05-11T12:00:00Z"], utc=True),
+        "temperature_f": [83],
+        "provider": ["NWS"],
+        "type": ["Observed"]
+    })
+    twc_df = pd.DataFrame({
+        "time_utc": pd.to_datetime(["2026-05-08T12:00:00Z"], utc=True),
+        "temperature_f": [84],
+        "provider": ["TWC"],
+        "type": ["Observed"]
+    })
+    matched = page.build_observed_match(nws_df, twc_df, 20, "nearest")
+    assert matched.empty
+
+
+def test_build_observed_empty_reason_stale_data():
+    page = load_page_module()
+    nws_df = pd.DataFrame({
+        "time_utc": pd.to_datetime(["2026-05-11T12:00:00Z"], utc=True),
+        "temperature_f": [83],
+        "provider": ["NWS"],
+        "type": ["Observed"]
+    })
+    twc_df = pd.DataFrame({
+        "time_utc": pd.to_datetime(["2026-05-08T12:00:00Z"], utc=True),
+        "temperature_f": [84],
+        "provider": ["TWC"],
+        "type": ["Observed"]
+    })
+    reason = page.build_observed_empty_reason(nws_df, twc_df, 20)
+    assert "NWS and TWC observed/current-condition rows are both present" in reason
+    assert "Latest NWS observation:" in reason
+    assert "Latest TWC observation:" in reason
