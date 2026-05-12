@@ -29,6 +29,8 @@ def build_unavailable_snapshot(api_status: str, warnings: str) -> Dict[str, Any]
         "latitude": LATITUDE,
         "longitude": LONGITUDE,
         "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": None,
+        "observation_time_utc": None,
         "provider": "TWC",
         "api_status": api_status,
         "request_parameters": {
@@ -86,11 +88,15 @@ def parse_twc_response(raw_data: Dict[str, Any]) -> Dict[str, Any]:
     # Placeholder for actual parsing logic.
     # Should extract percentiles or probability fields based on actual TWC schema.
     # Since we don't have the real schema, we extract what is available or return None.
+    # TWC probabilistic often has validTimeUtc for each period or for the whole payload.
+    # For now, we use fetched_at as best estimate if not provided.
     return {
         "station": STATION,
         "latitude": LATITUDE,
         "longitude": LONGITUDE,
         "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": None, # Should be extracted from raw_data if available
+        "observation_time_utc": None,
         "provider": "TWC",
         "api_status": "success",
         "request_parameters": {

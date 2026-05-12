@@ -155,7 +155,7 @@ def _load_trades_from_ledger(ledger_path: Path) -> List[Dict[str, Any]]:
 
 def _update_json_ledger_pnl(
     ledger_path: Path,
-    settlements_by_key: Dict[Tuple[str, str], float],
+    settlements_by_key: Dict[Tuple[str, str], Dict[str, Any]],
 ) -> None:
     """
     Writes realized PnL and ``status="settled"`` back into a JSON-object-format
@@ -178,7 +178,9 @@ def _update_json_ledger_pnl(
         for trade in data["trades"]:
             key = (trade.get("market_ticker"), trade.get("target_date"))
             if key in settlements_by_key:
-                trade["pnl"] = settlements_by_key[key]
+                val = settlements_by_key[key]
+                trade["pnl"] = val["pnl"]
+                trade["settled_at_utc"] = val["settled_at_utc"]
                 trade["status"] = "settled"
                 changed = True
 
@@ -249,8 +251,8 @@ def settle_paper_trades(
 
     new_settlements: List[Dict[str, Any]] = []
     pending_count = 0
-    # F1: track (ticker, target_date) -> realized_pnl for JSON ledger writeback
-    settlements_by_key: Dict[Tuple[str, str], float] = {}
+    # F1: track (ticker, target_date) -> {pnl, settled_at_utc} for JSON ledger writeback
+    settlements_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
     # F4: load trades from either JSON object or JSONL format
     all_trades = _load_trades_from_ledger(ledger)
@@ -298,12 +300,26 @@ def settle_paper_trades(
                 continue
 
             correction = get_correction_for_date(trade_date)
-            actual_max = correction.get("corrected_official_max_temp_f")
-            if actual_max is None:
-                actual_max = history.get(trade_date)
+            corrected_max = correction.get("corrected_official_max_temp_f")
+            history_max = history.get(trade_date)
+
+            # Rule: If correction exists, it is the authority. 
+            # But if it differs from history by >= 1°F, flag for review.
+            actual_max = corrected_max if corrected_max is not None else history_max
 
             if actual_max is not None:
                 actual_max = int(actual_max)
+                
+                # DSM/CLI Mismatch check
+                mismatch = False
+                if corrected_max is not None and history_max is not None:
+                    if abs(int(corrected_max) - int(history_max)) >= 1:
+                        logger.warning(
+                            f"DSM/CLI Mismatch on {trade_date}: "
+                            f"History={history_max}, Correction={corrected_max}. "
+                            f"Marking as NEEDS_MANUAL_REVIEW."
+                        )
+                        mismatch = True
                 forecast_bin = trade.get("forecast_bin", "")
 
                 # F3: use _temp_satisfies_bin_label so dynamic bin labels (>=95, <=89,
@@ -322,7 +338,7 @@ def settle_paper_trades(
                 pnl = 1.00 - entry_price if is_won else -entry_price
 
                 result_str = "WON" if is_won else "LOST"
-                if correction.get("settlement_status") == "needs_manual_review":
+                if mismatch or correction.get("settlement_status") == "needs_manual_review":
                     result_str = "NEEDS_MANUAL_REVIEW"
 
                 actual_bin = temp_to_bin(actual_max)
@@ -349,7 +365,10 @@ def settle_paper_trades(
                 }
                 new_settlements.append(settlement)
                 # F1: record for JSON ledger PnL writeback
-                settlements_by_key[(ticker, trade_date)] = round(pnl, 4)
+                settlements_by_key[(ticker, trade_date)] = {
+                    "pnl": round(pnl, 4),
+                    "settled_at_utc": settlement["settled_at_utc"]
+                }
                 logger.info(
                     f"Settled {ticker} on {trade_date}: "
                     f"{settlement['result']} (High: {actual_max})"

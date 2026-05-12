@@ -122,6 +122,9 @@ class TWCKMIAClient:
             "station": "KMIA",
             "geocode": self.geocode,
             "fetched_at_utc": utc_now(),
+            "generated_at_utc": None,
+            "observation_time_utc": None,
+            "latest_observation_time": None,
             "api_units": UNITS,
             "language": LANGUAGE,
             "endpoints": {},
@@ -137,7 +140,37 @@ class TWCKMIAClient:
 
 def normalize_current(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(data, dict):
-        return {}
+        return {
+            "temperature_f": None,
+            "dewpoint_f": None,
+            "relative_humidity_pct": None,
+            "wind_speed_mph": None,
+            "wind_direction_degrees": None,
+            "wind_direction_cardinal": None,
+            "cloud_cover_pct": None,
+            "cloud_cover_phrase": None,
+            "pressure_altimeter_in": None,
+            "pressure_mean_sea_level_mb": None,
+            "precip_1h_in": None,
+            "phrase": None,
+            "observation_time_utc": None,
+            "latest_observation_time": None,
+        }
+    # TWC validTimeUtc is often an epoch integer. Convert to ISO UTC string.
+    raw_time = pick(data, "validTimeUtc", "observationTimeUtc")
+    obs_time_iso = None
+    if isinstance(raw_time, (int, float)):
+        obs_time_iso = datetime.fromtimestamp(raw_time, tz=timezone.utc).isoformat()
+    elif isinstance(raw_time, str):
+        # Already string, ensure aware if possible (TWC strings usually aren't, but we'll assume UTC if missing)
+        try:
+            dt = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            obs_time_iso = dt.astimezone(timezone.utc).isoformat()
+        except Exception:
+            obs_time_iso = raw_time
+
     return {
         "temperature_f": pick(data, "temperature", "temp", "temperatureMaxSince7Am", "temperatureFeelsLike"),
         "dewpoint_f": pick(data, "temperatureDewPoint", "dewPoint", "dewpt"),
@@ -153,7 +186,8 @@ def normalize_current(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "phrase": pick(data, "wxPhraseLong", "phrase", "narrative", "cloudCoverPhrase"),
         # expireTimeGmt / expirationTimeUtc are cache-expiry fields, NOT observation times —
         # they must not appear here, as they would silently corrupt freshness checks.
-        "observation_time_utc": pick(data, "validTimeUtc", "observationTimeUtc"),
+        "observation_time_utc": obs_time_iso,
+        "latest_observation_time": obs_time_iso,
     }
 
 
@@ -277,6 +311,9 @@ def normalize_bundle(raw: Dict[str, Any]) -> Dict[str, Any]:
         "station": "KMIA",
         "geocode": raw.get("geocode", KMIA_GEOCODE),
         "fetched_at_utc": raw.get("fetched_at_utc", utc_now()),
+        "generated_at_utc": current.get("observation_time_utc"), # TWC observation time is our generation time
+        "observation_time_utc": current.get("observation_time_utc"),
+        "latest_observation_time": current.get("observation_time_utc"),
         "api_units": raw.get("api_units", UNITS),
         "language": raw.get("language", LANGUAGE),
         "endpoint_status": endpoint_status,

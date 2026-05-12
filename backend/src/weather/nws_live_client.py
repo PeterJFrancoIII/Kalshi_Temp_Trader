@@ -206,6 +206,8 @@ def fetch_recent_kmia_observations(limit: int = 100) -> List[Dict[str, Any]]:
 def build_live_nws_snapshot() -> Dict[str, Any]:
     snapshot = {
         "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": None,
+        "observation_time_utc": None,
         "station": "KMIA",
         "source": "api.weather.gov",
         "timeseries_source_url": "https://www.weather.gov/wrh/timeseries?site=kmia",
@@ -213,6 +215,11 @@ def build_live_nws_snapshot() -> Dict[str, Any]:
         "api_daily_forecast_url": None,
         "api_hourly_forecast_url": None,
         "latest_observation_time": None,
+        "settlement_authority_status": "PRELIMINARY", # Live API is not settlement truth
+        "metar_parse_status": "PENDING",
+        "station_status": "OK",
+        "kmia1m_status": "UNAVAILABLE", # Fast signal placeholder
+        "qc_flags": {},
         "current_temp_f": None,
         "dewpoint_f": None,
         "wind_speed_mph": None,
@@ -297,11 +304,16 @@ def build_live_nws_snapshot() -> Dict[str, Any]:
         snapshot["wind_direction_degrees"] = latest["wind_direction_degrees"]
         snapshot["wind_direction_compass"] = latest["wind_direction_compass"]
         snapshot["clouds_x100ft"] = latest["clouds_x100ft"]
+        snapshot["metar_parse_status"] = "OK"
         try:
-            obs_time = datetime.fromisoformat(latest["timestamp_utc"].replace("Z", "+00:00"))
+            # and set explicit observation_time_utc
+            obs_time = datetime.fromisoformat(latest["timestamp_utc"].replace("Z", "+00:00")).astimezone(timezone.utc)
+            snapshot["observation_time_utc"] = obs_time.isoformat()
+            snapshot["generated_at_utc"] = obs_time.isoformat() # API /observations/latest is our best generated_at estimate
             snapshot["stale_data"] = (datetime.now(timezone.utc) - obs_time) > timedelta(minutes=90)
         except Exception:
             snapshot["warnings"].append("Failed to parse latest observation timestamp.")
+            snapshot["metar_parse_status"] = "TIMESTAMP_PARSE_ERROR"
 
     if forecast_url:
         f_data = fetch_kmia_forecast(forecast_url)

@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
@@ -57,12 +58,53 @@ def check_forecast_confidence(forecast_data: Dict[str, Any]) -> RiskDecision:
         return RiskDecision(False, "Blocked due to low forecast confidence or stale NWS data.")
     return RiskDecision(True)
 
-def check_near_boundary_settlement(model_prob: float, raw_edge: float) -> RiskDecision:
-    """Gate 4: Near-Boundary Settlement Risk."""
-    # E.g. if probability is 51% and price is 49%, edge is small but we might be precariously close
-    # to a boundary. For this heuristic, if raw_edge < 0.10 and model_prob is near 0.5 (0.4-0.6), block.
-    if 0.40 <= model_prob <= 0.60 and raw_edge < 0.10:
-        return RiskDecision(False, "Blocked due to near-boundary settlement risk (model prob near 50% and edge is low).")
+def check_settlement_boundary_risk(
+    model_prob: float, 
+    raw_edge: float, 
+    best_high_f: Optional[float], 
+    bin_label: str
+) -> RiskDecision:
+    """
+    Gate 4: Settlement and Boundary Risk.
+    
+    Mitigates:
+    1. 0.5°F–1.0°F rounding/CLI boundary risk.
+    2. ~3°F forecast-risk buffer when uncertainty is material (model_prob near 0.5).
+    """
+    # 1. Material Uncertainty Buffer (3°F)
+    # If the probability is near 50%, we are at maximum uncertainty. 
+    # In this state, we require the predicted high to be at least 3.0°F away from 
+    # the nearest boundary if edge is not extremely high.
+    if 0.40 <= model_prob <= 0.60:
+        if best_high_f is not None:
+            boundaries = [float(n) for n in re.findall(r"(\d+\.?\d*)", bin_label)]
+            for b in boundaries:
+                if abs(best_high_f - b) < 3.0 and raw_edge < 0.20:
+                    return RiskDecision(
+                        False, 
+                        f"Blocked: Material uncertainty (prob {model_prob:.2f}) requires "
+                        f"3°F boundary buffer. Forecast {best_high_f}°F is too close to {b}°F."
+                    )
+        elif raw_edge < 0.15:
+            return RiskDecision(False, "Blocked: Material uncertainty and low edge (<0.15).")
+
+    # 2. Hard Rounding/CLI Buffer (1.0°F)
+    # Even if probability is high, if we are within 1°F of a boundary, 
+    # a small CLI rounding error or sensor calibration shift could flip the outcome.
+    if best_high_f is not None:
+        boundaries = [float(n) for n in re.findall(r"(\d+\.?\d*)", bin_label)]
+        for b in boundaries:
+            if abs(best_high_f - b) <= 1.0 and raw_edge < 0.15:
+                return RiskDecision(
+                    False, 
+                    f"Blocked: Critical boundary risk. Forecast {best_high_f}°F is within "
+                    f"1.0°F of boundary {b}°F. Requires >0.15 edge."
+                )
+
+    # 3. Legacy small-edge check
+    if raw_edge < 0.02:
+        return RiskDecision(False, f"Blocked: Raw edge ({raw_edge:.4f}) too small for boundary safety.")
+
     return RiskDecision(True)
 
 def check_liquidity_and_spread(yes_ask: Optional[float], yes_bid: Optional[float]) -> RiskDecision:
@@ -99,6 +141,8 @@ def check_fee_adjusted_edge(edge: float, min_edge: float = 0.05) -> RiskDecision
 
 def check_daily_loss_limit(ledger_summary: Dict[str, float]) -> RiskDecision:
     """Gate 7: Daily Loss Limit."""
+    if "daily_pnl" not in ledger_summary:
+        return RiskDecision(False, "Gate 7 Fail-Closed: Missing daily PnL data.")
     daily_pnl = ledger_summary.get("daily_pnl", 0.0)
     if daily_pnl < -50.0:  # Simulate a $50 paper loss limit
         return RiskDecision(False, f"Daily loss limit exceeded: ${daily_pnl:.2f}")
@@ -106,6 +150,8 @@ def check_daily_loss_limit(ledger_summary: Dict[str, float]) -> RiskDecision:
 
 def check_weekly_drawdown_limit(ledger_summary: Dict[str, float]) -> RiskDecision:
     """Gate 8: Weekly Drawdown Limit."""
+    if "weekly_pnl" not in ledger_summary:
+        return RiskDecision(False, "Gate 8 Fail-Closed: Missing weekly PnL data.")
     weekly_pnl = ledger_summary.get("weekly_pnl", 0.0)
     if weekly_pnl < -150.0: # Simulate a $150 paper drawdown limit
         return RiskDecision(False, f"Weekly drawdown limit exceeded: ${weekly_pnl:.2f}")
@@ -113,10 +159,49 @@ def check_weekly_drawdown_limit(ledger_summary: Dict[str, float]) -> RiskDecisio
 
 def check_market_concentration(ledger_summary: Dict[str, Any], date_str: str) -> RiskDecision:
     """Gate 9: Market Concentration Limit."""
-    active_trades = ledger_summary.get("active_trades_by_date", {})
+    active_trades = ledger_summary.get("active_trades_by_date")
+    if active_trades is None:
+        return RiskDecision(False, "Gate 9 Fail-Closed: Missing active trades data.")
     count = active_trades.get(date_str, 0)
     if count >= 3:
         return RiskDecision(False, f"Market concentration limit exceeded (>=3 active trades for {date_str}).")
+    return RiskDecision(True)
+
+def check_forecast_integrity(
+    forecast_data: Dict[str, Any], 
+    contract_bins: Optional[List[Any]] = None
+) -> RiskDecision:
+    """Gate 11: Forecast Integrity (Sum and Bins)."""
+    probs = forecast_data.get("probability_bins", {})
+    if not probs:
+        return RiskDecision(False, "Missing probability bins.")
+    
+    total = sum(probs.values())
+    if not (0.99 <= total <= 1.01):
+        return RiskDecision(False, f"Forecast integrity failure: probabilities sum to {total:.4f} (expected ~1.0).")
+    
+    # If contract_bins are provided, ensure the probability_bins keys match the labels
+    if contract_bins:
+        contract_labels = set()
+        for cb in contract_bins:
+            if isinstance(cb, dict):
+                label = cb.get("label") or cb.get("contract_bin", {}).get("label")
+            else:
+                label = getattr(cb, "label", None)
+            
+            if label:
+                contract_labels.add(str(label))
+                
+        # Check that we have probabilities for all active contracts
+        missing = [lbl for lbl in contract_labels if lbl not in probs]
+        if missing:
+            return RiskDecision(False, f"Missing probabilities for discovered contracts: {', '.join(missing)}")
+        
+        # Check that we don't have extra probabilities not in contracts (warn only)
+        extra = [lbl for lbl in probs if lbl not in contract_labels]
+        if extra:
+            logger.warning(f"Extra probabilities found not mapping to active contracts: {', '.join(extra)}")
+            
     return RiskDecision(True)
 
 def evaluate_risk_gates(
@@ -129,7 +214,10 @@ def evaluate_risk_gates(
     edge: float,
     raw_edge: float,
     ledger_summary: Dict[str, Any],
-    target_date_str: str
+    target_date_str: str,
+    best_high_f: Optional[float] = None,
+    bin_label: str = "",
+    contract_bins: Optional[List[Any]] = None
 ) -> RiskDecision:
     """
     Evaluates all 10 risk gates in sequence.
@@ -153,7 +241,7 @@ def evaluate_risk_gates(
     if not res.passed: return res
     
     # Gate 4
-    res = check_near_boundary_settlement(model_prob, raw_edge)
+    res = check_settlement_boundary_risk(model_prob, raw_edge, best_high_f, bin_label)
     if not res.passed: return res
     
     # Gate 5
@@ -174,6 +262,10 @@ def evaluate_risk_gates(
     
     # Gate 9
     res = check_market_concentration(ledger_summary, target_date_str)
+    if not res.passed: return res
+
+    # Gate 11
+    res = check_forecast_integrity(forecast_data, contract_bins)
     if not res.passed: return res
     
     return RiskDecision(True, "All risk gates passed.")

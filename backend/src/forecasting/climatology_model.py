@@ -1,7 +1,7 @@
 import json
 import os
 from typing import List, Dict, Any, Optional
-from features.climatology_features import prior_bin_distribution_for_date
+from features.climatology_features import prior_bin_distribution_for_date, prior_integer_distribution_for_date
 
 from shared.types import REQUIRED_BINS
 
@@ -66,3 +66,24 @@ def climatology_prior_for_date(
         "probability_bins": final_dist,
         "warnings": warnings
     }
+
+
+def climatology_prior_integer_for_date(
+    records: List[Dict[str, Any]], 
+    target_date: str, 
+    window_days: int = 7, 
+    years_back: int = 30
+) -> Dict[int, float]:
+    """
+    Computes historical integer distribution for a target date.
+    Returns a Dict[int, float].
+    """
+    if not records:
+        return {}
+        
+    return prior_integer_distribution_for_date(
+        records=records,
+        target_date=target_date,
+        window_days=window_days,
+        years_back=years_back
+    )

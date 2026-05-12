@@ -23,6 +23,7 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
         "ticker": ticker,
         "event_ticker": market.get("event_ticker"),
         "condition_type": "unknown",
+        "contract_range": None,
         "lower_inclusive": None,
         "upper_inclusive": None,
         "threshold_f": None,
@@ -38,16 +39,19 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
         res["condition_type"] = "above"
         res["threshold_f"] = float(market["floor_strike"])
         res["lower_inclusive"] = False # Kalshi "greater" usually means strict >
+        res["contract_range"] = f">{res['threshold_f']}"
     elif strike_type == "less" and market.get("cap_strike") is not None:
         res["condition_type"] = "below"
         res["threshold_f"] = float(market["cap_strike"])
         res["upper_inclusive"] = False # Kalshi "less" usually means strict <
+        res["contract_range"] = f"<{res['threshold_f']}"
     elif strike_type == "between" and market.get("floor_strike") is not None and market.get("cap_strike") is not None:
         res["condition_type"] = "between"
         res["threshold_f"] = float(market["floor_strike"])
         res["range_high_f"] = float(market["cap_strike"])
         res["lower_inclusive"] = True
         res["upper_inclusive"] = True
+        res["contract_range"] = f"{res['threshold_f']}-{res['range_high_f']}"
     
     # 2. Regex fallback if structured fields failed or for validation
     if res["condition_type"] == "unknown":
@@ -61,6 +65,7 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
             res["range_high_f"] = float(range_match.group(2))
             res["lower_inclusive"] = True
             res["upper_inclusive"] = True
+            res["contract_range"] = f"{res['threshold_f']}-{res['range_high_f']}"
         
         # Above: ">91", "91 or above", "above 91", ">=95"
         elif re.search(r"(\d+(?:\.\d+)?)\s*or\s*above", text) or re.search(r"(?:above\s+|>=|>|>\s*)(\d+(?:\.\d+)?)", text):
@@ -70,8 +75,10 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
             res["threshold_f"] = val
             if "or above" in text or ">=" in text:
                 res["lower_inclusive"] = True
+                res["contract_range"] = f">={val}"
             else:
                 res["lower_inclusive"] = False
+                res["contract_range"] = f">{val}"
                 
         # Below: "<84", "84 or below", "below 84", "<=89"
         elif re.search(r"(\d+(?:\.\d+)?)\s*or\s*below", text) or re.search(r"(?:below\s+|<=|<|<\s*)(\d+(?:\.\d+)?)", text):
@@ -81,8 +88,10 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
             res["threshold_f"] = val
             if "or below" in text or "<=" in text:
                 res["upper_inclusive"] = True
+                res["contract_range"] = f"<={val}"
             else:
                 res["upper_inclusive"] = False
+                res["contract_range"] = f"<{val}"
 
     # 3. Ticker fallback: B86.5
     if res["condition_type"] == "unknown" and "-B" in ticker:
@@ -91,6 +100,7 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
             res["condition_type"] = "above"
             res["threshold_f"] = float(ticker_match.group(1))
             res["lower_inclusive"] = False # Ticker B usually denotes boundary, assumed strict >
+            res["contract_range"] = f">{res['threshold_f']}"
 
     if res["condition_type"] == "unknown":
         res["parse_warnings"].append(f"Could not determine condition for ticker {ticker}")
@@ -208,15 +218,16 @@ def market_to_contract_bin(market: Dict[str, Any]) -> Any:
         ticker=market.get("ticker", ""),
         event_ticker=market.get("event_ticker"),
         label=label,
+        contract_range=mapping.get("contract_range"),
         condition_type=mapping.get("condition_type", "unknown"),
         lower_f=low if low != -999 else None,
         upper_f=high if high != 999 else None,
-        lower_inclusive=True,
-        upper_inclusive=True,
+        lower_inclusive=mapping.get("lower_inclusive") if mapping.get("lower_inclusive") is not None else True,
+        upper_inclusive=mapping.get("upper_inclusive") if mapping.get("upper_inclusive") is not None else True,
         source="kalshi",
         raw_title=market.get("title"),
         raw_subtitle=market.get("subtitle"),
-        warnings=mapping.get("warnings", [])
+        warnings=mapping.get("parse_warnings", [])
     )
 
 def parse_kalshi_markets(snapshot_path: Path) -> List[Dict[str, Any]]:

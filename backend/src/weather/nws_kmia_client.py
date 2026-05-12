@@ -40,6 +40,8 @@ class NWSKMIAClient:
         """
         status = {
             "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
+            "generated_at_utc": None,
+            "observation_time_utc": None,
             "station": self.station,
             "source": "NWS/public",
             "current_temp_f": None,
@@ -49,6 +51,11 @@ class NWSKMIAClient:
             "stale_data": True,
             "history_record_count": 0,
             "climatology_active": False,
+            "settlement_authority_status": "PRELIMINARY", # NWS live is not settlement truth
+            "metar_parse_status": "PENDING",
+            "station_status": "OK",
+            "kmia1m_status": "UNAVAILABLE", # 1-minute signal placeholder
+            "qc_flags": {},
             "warnings": [],
             "safety": {
                 "no_real_trading": True
@@ -60,6 +67,7 @@ class NWSKMIAClient:
         observations = []
         if raw_json:
             observations = parse_wrh_timeseries(raw_json)
+            status["metar_parse_status"] = "OK" if observations else "EMPTY"
         
         # 2. Fallback to HTML ObHistory if JSON fails or is empty
         if not observations:
@@ -67,31 +75,40 @@ class NWSKMIAClient:
             if raw_html:
                 observations, parse_warns = parse_obhistory(raw_html)
                 status["warnings"].extend(parse_warns)
+                status["metar_parse_status"] = "OK_HTML_FALLBACK" if observations else "FAILED"
 
         if observations:
             latest = observations[-1]
             status["current_temp_f"] = latest.temperature_f
             status["latest_observation_time"] = latest.timestamp.isoformat()
 
-            # Staleness: convert to UTC via astimezone (safe for both naive and tz-aware timestamps).
-            latest_utc = latest.timestamp.astimezone(timezone.utc) if latest.timestamp.tzinfo else latest.timestamp.replace(tzinfo=timezone.utc)
+            # Staleness: ensure UTC via astimezone
+            if latest.timestamp.tzinfo:
+                latest_utc = latest.timestamp.astimezone(timezone.utc)
+            else:
+                # If naive, assume UTC label (typical for NWS wrh/obhistory if not already handled by parser)
+                latest_utc = latest.timestamp.replace(tzinfo=timezone.utc)
+            
+            status["observation_time_utc"] = latest_utc.isoformat()
+            status["generated_at_utc"] = latest_utc.isoformat() # Best estimate for live
+            
             time_diff = datetime.now(timezone.utc) - latest_utc
             status["stale_data"] = time_diff > timedelta(hours=1)
 
-            # Observed daily max: compare dates in ET so observations at 00:00–04:00 UTC
-            # (still the previous local day) are not incorrectly counted for "today".
+            # Observed daily max: compare dates in ET (LST Day Boundary)
             try:
                 from dateutil import tz as _tz
                 _ET = _tz.gettz("America/New_York")
                 today_et = datetime.now(_ET).date()
-                today_obs = [
-                    o for o in observations
-                    if o.temperature_f is not None
-                    and (
-                        o.timestamp.astimezone(_ET) if o.timestamp.tzinfo
-                        else o.timestamp.replace(tzinfo=timezone.utc).astimezone(_ET)
-                    ).date() == today_et
-                ]
+                today_obs = []
+                for o in observations:
+                    if o.temperature_f is None:
+                        continue
+                    # Convert to ET for day-boundary check
+                    o_et = o.timestamp.astimezone(_ET) if o.timestamp.tzinfo else o.timestamp.replace(tzinfo=timezone.utc).astimezone(_ET)
+                    if o_et.date() == today_et:
+                        today_obs.append(o)
+                
             except Exception:
                 # Fallback: use system local date if dateutil unavailable
                 today_et = datetime.now().date()
@@ -101,6 +118,8 @@ class NWSKMIAClient:
                 status["observed_max_so_far_f"] = max(o.temperature_f for o in today_obs)
         else:
             status["warnings"].append("No observations found via JSON or HTML.")
+            status["metar_parse_status"] = "MISSING"
+
 
         # 3. Fetch NWS Forecast High
         forecast_data = fetch_nws_forecast()

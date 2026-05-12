@@ -5,43 +5,19 @@ from datetime import datetime
 try:
     from dateutil import tz
 except ImportError:
-    import datetime.timezone as tz
+    from datetime import timezone as tz
 
 logger = logging.getLogger(__name__)
 
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
 
-def normalize_probability_mass(probs: Dict[int, float]) -> Dict[int, float]:
-    """Normalizes probability mass to sum to 1.0."""
-    total = sum(probs.values())
-    if total <= 0:
-        return probs
-    return {temp: round(prob / total, 4) for temp, prob in probs.items()}
-
-def build_cdf(probs: Dict[int, float]) -> Dict[int, float]:
-    """Builds a cumulative distribution function from a probability mass function."""
-    cdf = {}
-    sorted_temps = sorted(probs.keys())
-    cum_prob = 0.0
-    for temp in sorted_temps:
-        cum_prob += probs[temp]
-        cdf[temp] = round(cum_prob, 4)
-    return cdf
-
-def compute_percentile(cdf: Dict[int, float], percentile: float) -> Optional[int]:
-    """Computes the temperature at which the CDF reaches or exceeds the percentile."""
-    for temp in sorted(cdf.keys()):
-        if cdf[temp] >= percentile:
-            return temp
-    return None
-
-def shift_distribution(probs: Dict[int, float], shift_amount: int) -> Dict[int, float]:
-    """Shifts the entire distribution by a discrete integer amount."""
-    shifted = {}
-    for temp, prob in probs.items():
-        shifted[temp + shift_amount] = prob
-    return shifted
+from forecasting.distribution_utils import (
+    normalize_probability_mass,
+    build_cdf,
+    compute_percentile,
+    shift_distribution,
+)
 
 def correct_distribution(
     distribution: Dict[str, Any],

@@ -14,8 +14,9 @@ fi
 
 export PYTHONPATH="$ROOT_DIR/backend/src"
 
-START_DATE=${1:-$(date -d "7 days ago" +%Y-%m-%d)}
+START_DATE=${1:-$(date -v-7d +%Y-%m-%d 2>/dev/null || date -d "7 days ago" +%Y-%m-%d)}
 END_DATE=${2:-$(date +%Y-%m-%d)}
+
 
 echo "Running Kalshi Temp Trader Backtest..."
 echo "Start Date: $START_DATE"

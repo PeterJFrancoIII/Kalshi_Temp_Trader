@@ -116,6 +116,73 @@ def prior_bin_distribution_for_date(
 
     return bin_distribution(relevant_records)
 
+
+def integer_distribution(records: List[Dict[str, Any]]) -> Dict[int, float]:
+    """
+    Computes the probability distribution across integer temperatures for the given records.
+    """
+    from forecasting.distribution_utils import build_integer_distribution_from_samples
+    
+    temps = []
+    for r in records:
+        tmax = r.get("tmax_f")
+        if tmax is not None:
+            temps.append(int(round(tmax)))
+            
+    return build_integer_distribution_from_samples(temps)
+
+
+def prior_integer_distribution_for_date(
+    records: List[Dict[str, Any]], 
+    target_date: str, 
+    window_days: int = 0, 
+    years_back: Optional[int] = None
+) -> Dict[int, float]:
+    """
+    Computes historical integer distribution for a target date with an optional seasonal window.
+    """
+    target = date.fromisoformat(target_date)
+    relevant_records = []
+    
+    base_year = 2000
+    try:
+        target_ref = date(base_year, target.month, target.day)
+    except ValueError:
+        target_ref = date(base_year, 2, 28)
+
+    for r in records:
+        r_date = date.fromisoformat(r["date"])
+        if r_date.year == target.year and r_date >= target:
+            continue
+            
+        try:
+            r_ref = date(base_year, r_date.month, r_date.day)
+        except ValueError:
+            r_ref = date(base_year, 2, 28)
+            
+        diff = abs((target_ref - r_ref).days)
+        if diff > 182:
+            diff = 366 - diff
+            
+        if diff <= window_days:
+            relevant_records.append(r)
+
+    if years_back:
+        relevant_records.sort(key=lambda x: x["date"], reverse=True)
+        seen_years = set()
+        filtered = []
+        for r in relevant_records:
+            yr = date.fromisoformat(r["date"]).year
+            if yr not in seen_years:
+                if len(seen_years) >= years_back:
+                    break
+                seen_years.add(yr)
+            filtered.append(r)
+        relevant_records = filtered
+
+    return integer_distribution(relevant_records)
+
+
 def rolling_high_average(
     records: List[Dict[str, Any]], 
     end_date: str, 

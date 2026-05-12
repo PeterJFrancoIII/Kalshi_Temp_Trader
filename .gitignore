@@ -45,3 +45,8 @@ private_key.pem
 Bot
 Bot.pub
 *.Read.Only.txt
+test_output.log
+data/
+.streamlit/
+backend/data/
+.tmp.driveupload/

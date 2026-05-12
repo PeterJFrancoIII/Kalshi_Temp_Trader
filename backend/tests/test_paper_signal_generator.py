@@ -67,12 +67,13 @@ class TestPaperSignalGenerator(unittest.TestCase):
         temp_dir.mkdir(exist_ok=True)
         
         # 1. Create Mock Forecast
-        md_path = temp_dir / "kmia_forecast_mock_rules_v2_climatology.md"
+        md_path = temp_dir / "kmia_forecast_2026-05-07_mock_rules_v2_climatology_120000.md"
         md_content = """
 # Forecast
 ## Probability Bins
 | >=87 | 40.0% |
 | 85-86 | 30.0% |
+| <=84 | 30.0% |
 """
         md_path.write_text(md_content)
         
@@ -203,7 +204,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
         temp_dir.mkdir(exist_ok=True)
         
         # 1. Create Mock Forecast
-        md_path = temp_dir / "kmia_forecast_mock_rules_v2_climatology.md"
+        md_path = temp_dir / "kmia_forecast_2026-05-07_mock_rules_v2_climatology_120000.md"
         md_path.write_text("## Probability Bins\n| 85-86 | 50.0% |")
         
         # 2. Create Mock Snapshot (Empty)

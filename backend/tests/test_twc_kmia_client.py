@@ -11,8 +11,7 @@ from weather.twc_kmia_client import (
 
 
 def test_normalize_current_handles_missing_input():
-    assert normalize_current(None) == {}
-    assert normalize_current({}) == {
+    expected = {
         "temperature_f": None,
         "dewpoint_f": None,
         "relative_humidity_pct": None,
@@ -26,7 +25,10 @@ def test_normalize_current_handles_missing_input():
         "precip_1h_in": None,
         "phrase": None,
         "observation_time_utc": None,
+        "latest_observation_time": None,
     }
+    assert normalize_current(None) == expected
+    assert normalize_current({}) == expected
 
 
 def test_normalize_current_maps_common_twc_fields():
@@ -51,7 +53,7 @@ def test_normalize_current_maps_common_twc_fields():
     assert row["wind_direction_cardinal"] == "ESE"
     assert row["cloud_cover_pct"] == 40
     assert row["phrase"] == "Partly Cloudy"
-    assert row["observation_time_utc"] == 1778323200
+    assert row["observation_time_utc"] == "2026-05-09T10:40:00+00:00"
 
 
 def test_normalize_daily_handles_list_payload():
@@ -161,10 +163,10 @@ def test_normalize_current_does_not_use_expire_time_as_observation():
 def test_normalize_current_observation_time_from_valid_fields():
     """validTimeUtc and observationTimeUtc are the only accepted observation-time sources."""
     row_valid_time = normalize_current({"validTimeUtc": 1778323200})
-    assert row_valid_time["observation_time_utc"] == 1778323200
+    assert row_valid_time["observation_time_utc"] == "2026-05-09T10:40:00+00:00"
 
     row_obs_time = normalize_current({"observationTimeUtc": "2026-05-06T12:00:00Z"})
-    assert row_obs_time["observation_time_utc"] == "2026-05-06T12:00:00Z"
+    assert row_obs_time["observation_time_utc"] == "2026-05-06T12:00:00+00:00"
 
     # If neither valid field is present, result must be None (not an expiry field)
     row_neither = normalize_current({"temperature": 84, "expireTimeGmt": 9999999999})

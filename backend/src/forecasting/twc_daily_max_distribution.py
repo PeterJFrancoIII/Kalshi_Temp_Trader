@@ -28,39 +28,12 @@ def load_latest_twc_snapshot(path: str = DEFAULT_SNAPSHOT_PATH) -> Dict[str, Any
             "warnings": [f"Error reading snapshot: {str(e)}"]
         }
 
-def build_cdf(probs: Dict[int, float]) -> Dict[int, float]:
-    """Builds a cumulative distribution function from a probability mass function."""
-    cdf = {}
-    sorted_temps = sorted(probs.keys())
-    cum_prob = 0.0
-    for temp in sorted_temps:
-        cum_prob += probs[temp]
-        cdf[temp] = round(cum_prob, 4)
-    return cdf
-
-def normalize_probability_mass(probs: Dict[int, float]) -> Dict[int, float]:
-    """Normalizes probability mass to sum to 1.0."""
-    total = sum(probs.values())
-    if total == 0:
-        return probs
-    return {temp: round(prob / total, 4) for temp, prob in probs.items()}
-
-def validate_distribution(probs: Dict[int, float]) -> List[str]:
-    """Validates the distribution and returns warnings if any."""
-    warnings = []
-    total = sum(probs.values())
-    if not (0.99 <= total <= 1.01):
-        warnings.append(f"Probability mass sum is {total}, not near 1.0")
-    if any(p < 0 for p in probs.values()):
-        warnings.append("Negative probabilities found")
-    return warnings
-
-def compute_percentile(cdf: Dict[int, float], percentile: float) -> Optional[int]:
-    """Computes the temperature at which the CDF reaches or exceeds the percentile."""
-    for temp in sorted(cdf.keys()):
-        if cdf[temp] >= percentile:
-            return temp
-    return None
+from forecasting.distribution_utils import (
+    normalize_probability_mass,
+    build_cdf,
+    compute_percentile,
+    validate_distribution,
+)
 
 def convert_hourly_to_daily_max(snapshot_data: Dict[str, Any]) -> Dict[str, Any]:
     """

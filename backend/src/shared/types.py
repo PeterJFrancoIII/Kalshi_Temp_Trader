@@ -143,6 +143,7 @@ class ContractBin(BaseModel):
     ticker: str
     event_ticker: Optional[str] = None
     label: str
+    contract_range: Optional[str] = None
     condition_type: Literal["above", "below", "between", "unknown"]
     lower_f: Optional[int] = None
     upper_f: Optional[int] = None

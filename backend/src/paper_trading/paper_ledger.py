@@ -42,18 +42,25 @@ class PaperLedger:
         
         for trade in self.ledger_data.get("trades", []):
             try:
+                # Use settled_at_utc if available for PnL windowing, otherwise fallback to trade timestamp
+                settle_ts_str = trade.get("settled_at_utc")
+                pnl_ts = datetime.fromisoformat(settle_ts_str.replace("Z", "+00:00")) if settle_ts_str else None
                 trade_ts = datetime.fromisoformat(trade.get("timestamp_utc", "").replace("Z", "+00:00"))
+                
+                # Window comparison timestamp
+                window_ts = pnl_ts if pnl_ts else trade_ts
+                
                 trade_date = trade.get("target_date")
                 pnl = trade.get("pnl", 0.0)
                 status = trade.get("status", "closed")
                 
-                # Time deltas
-                if (now - trade_ts).total_seconds() <= 24 * 3600:
+                # Time deltas (24h and 7d)
+                if (now - window_ts).total_seconds() <= 24 * 3600:
                     daily_pnl += pnl
-                if (now - trade_ts).total_seconds() <= 7 * 24 * 3600:
+                if (now - window_ts).total_seconds() <= 7 * 24 * 3600:
                     weekly_pnl += pnl
                     
-                # Active trades
+                # Active trades (open only)
                 if status == "open" and trade_date:
                     active_trades_by_date[trade_date] = active_trades_by_date.get(trade_date, 0) + 1
             except Exception as e:

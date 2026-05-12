@@ -7,35 +7,16 @@ from typing import Dict, Any, List, Optional
 
 from shared.artifact_paths import FORECAST_DISTRIBUTIONS_DIR
 
-# Import helpers from bias corrector if available
-try:
-    from forecasting.kmia_observation_bias_corrector import (
-        normalize_probability_mass,
-        build_cdf,
-        compute_percentile
-    )
-except ImportError:
-    # Fallback implementations if import fails
-    def normalize_probability_mass(probs: Dict[int, float]) -> Dict[int, float]:
-        total = sum(probs.values())
-        if total <= 0:
-            return probs
-        return {temp: round(prob / total, 4) for temp, prob in probs.items()}
-
-    def build_cdf(probs: Dict[int, float]) -> Dict[int, float]:
-        cdf = {}
-        sorted_temps = sorted(probs.keys())
-        cum_prob = 0.0
-        for temp in sorted_temps:
-            cum_prob += probs[temp]
-            cdf[temp] = round(cum_prob, 4)
-        return cdf
-
-    def compute_percentile(cdf: Dict[int, float], percentile: float) -> Optional[int]:
-        for temp in sorted(cdf.keys()):
-            if cdf[temp] >= percentile:
-                return temp
-        return None
+from forecasting.distribution_utils import (
+    normalize_probability_mass,
+    build_cdf,
+    compute_percentile,
+    blend_integer_distributions,
+)
+from forecasting.calibration_config import (
+    BLENDER_TWC_WEIGHT,
+    BLENDER_NBM_WEIGHT
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,24 +42,6 @@ def validate_distribution(probs: Dict[int, float]) -> bool:
         return False
     return True
 
-def blend_integer_distributions(
-    dist1: Dict[int, float], 
-    dist2: Dict[int, float], 
-    weight1: float, 
-    weight2: float
-) -> Dict[int, float]:
-    """Blends two integer distributions using specified weights."""
-    blended = {}
-    
-    # Get all unique keys
-    all_keys = set(dist1.keys()).union(set(dist2.keys()))
-    
-    for k in all_keys:
-        p1 = dist1.get(k, 0.0)
-        p2 = dist2.get(k, 0.0)
-        blended[k] = p1 * weight1 + p2 * weight2
-        
-    return normalize_probability_mass(blended)
 
 def apply_regime_adjustment(
     probs: Dict[int, float], 
@@ -161,9 +124,9 @@ def blend_distributions(
     if nbm_dist and validate_distribution(nbm_dist.get("integer_probs", {})):
         nbm_probs = {int(k): float(v) for k, v in nbm_dist["integer_probs"].items()}
         
-        # Scaffold weights: 70% TWC, 30% NBM
-        twc_weight = 0.7
-        nbm_weight = 0.3
+        # Using centralized weights
+        twc_weight = BLENDER_TWC_WEIGHT
+        nbm_weight = BLENDER_NBM_WEIGHT
         
         output["integer_probs"] = blend_integer_distributions(
             output["integer_probs"], nbm_probs, twc_weight, nbm_weight
@@ -172,7 +135,7 @@ def blend_distributions(
         output["source_components"].append("NBM")
         output["component_weights"][primary_name] = twc_weight
         output["component_weights"]["NBM"] = nbm_weight
-        output["blend_reasons"].append(f"Blended NBM with weight {nbm_weight} (scaffold assumption).")
+        output["blend_reasons"].append(f"Blended NBM with weight {nbm_weight} (empirical scaffold).")
         
     # 3. HRRR Regime Adjustments
     if hrrr_features:

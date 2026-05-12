@@ -84,6 +84,41 @@ def normalize_probability_mass(probs: Dict[int, float]) -> Dict[int, float]:
     return {t: round(p / total, 6) for t, p in probs.items()}
 
 
+def build_integer_distribution_from_samples(samples: List[int]) -> Dict[int, float]:
+    """
+    Builds a discrete probability distribution from a list of integer samples.
+
+    Args:
+        samples: List of integer Fahrenheit temperatures.
+
+    Returns:
+        Dict mapping integer temperature → probability mass.
+    """
+    if not samples:
+        return {}
+    counts: Dict[int, int] = {}
+    for s in samples:
+        counts[s] = counts.get(s, 0) + 1
+    total = len(samples)
+    return {t: round(c / total, 6) for t, c in counts.items()}
+
+
+def validate_distribution(probs: Dict[int, float]) -> List[str]:
+    """
+    Validates that a distribution sums to ~1.0 and has no negative values.
+    
+    Returns:
+        List of warning strings.
+    """
+    warnings = []
+    total = sum(probs.values())
+    if not (0.99 <= total <= 1.01):
+        warnings.append(f"Probability mass sum is {total}, not near 1.0")
+    if any(p < 0 for p in probs.values()):
+        warnings.append("Negative probabilities found")
+    return warnings
+
+
 def zero_impossible_temps(
     probs: Dict[int, float],
     observed_min_f: int,
@@ -96,6 +131,30 @@ def zero_impossible_temps(
     """
     zeroed = {t: (0.0 if t < observed_min_f else p) for t, p in probs.items()}
     return normalize_probability_mass(zeroed)
+
+
+def blend_integer_distributions(
+    dist1: Dict[int, float], 
+    dist2: Dict[int, float], 
+    weight1: float, 
+    weight2: float
+) -> Dict[int, float]:
+    """
+    Blends two integer distributions using specified weights.
+    
+    The result is normalized.
+    """
+    blended = {}
+    
+    # Get all unique keys
+    all_keys = set(dist1.keys()).union(set(dist2.keys()))
+    
+    for k in all_keys:
+        p1 = dist1.get(k, 0.0)
+        p2 = dist2.get(k, 0.0)
+        blended[k] = p1 * weight1 + p2 * weight2
+        
+    return normalize_probability_mass(blended)
 
 
 def shift_distribution(probs: Dict[int, float], shift_f: int) -> Dict[int, float]:

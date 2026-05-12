@@ -46,6 +46,8 @@ def get_latest_file(directory: Path, pattern: str) -> Optional[Path]:
     candidates = []
     for f in files:
         ts = extract_embedded_timestamp(f)
+        if ts is None:
+            ts = parse_timestamp_from_filename(f.name)
         if ts is not None:
             candidates.append((ts, f))
 
@@ -53,12 +55,12 @@ def get_latest_file(directory: Path, pattern: str) -> Optional[Path]:
         candidates.sort(reverse=True)
         return candidates[0][1]
 
-    # Fallback to mtime only when no embedded timestamps exist (non-JSON files, etc.)
-    logger.warning(
-        f"get_latest_file({pattern}): no embedded timestamps found; "
-        f"falling back to filesystem mtime."
+    # Strict Lookahead Enforcement: Fallback to mtime is forbidden.
+    logger.error(
+        f"get_latest_file({pattern}): no embedded timestamps found. "
+        f"Strict lookahead safety prohibits fallback to filesystem mtime."
     )
-    return max(files, key=os.path.getmtime)
+    raise ValueError(f"No valid embedded timestamps found for {pattern}. Filesystem mtime is forbidden.")
 
 def parse_timestamp_from_filename(filename: str) -> Optional[datetime]:
     """Parses timestamp from filename like kmia_forecast_2026-05-03_rules_v2_climatology_203650.md"""
@@ -362,21 +364,24 @@ def generate_paper_signal(
                 prob = 0.0
             else:
                 prob = model_bins.get(bin_str)
-                if prob is None and integer_dist:
-                    # Fallback: map from integer distribution
-                    from market_data.kalshi_contract_mapper import map_distribution_to_bins
-                    mapped = map_distribution_to_bins(integer_dist, [bin_str])
-                    prob = mapped.get(bin_str)
                 
-            if prob is None:
+            if prob is None and integer_dist and not is_stale:
+                # Fallback: map from integer distribution using rich mapping (inclusive/exclusive flags)
+                from forecasting.contract_probability_mapper import map_distribution_to_contracts
+                results = map_distribution_to_contracts(integer_dist, [mapping])
+                prob = results.get(ticker, {}).get("probability")
+
+            if prob is None and not is_stale:
                 global_warnings.append(f"{ticker}: Probability for bin {bin_str} not found in forecast.")
                 # Requirement 5: Generate Dashboard-Compatible Signal Rows even if mapping fails
                 signals.append({
                     "market_ticker": ticker,
+                    "event_ticker": m.get("event_ticker"),
                     "market_title": m.get("title"),
                     "status": m.get("status"),
                     "condition_type": mapping.get("condition_type"),
                     "threshold_f": mapping.get("threshold_f"),
+                    "contract_range": mapping.get("contract_range"),
                     "model_probability": None,
                     "market_probability": round(executable_price, 4) if executable_price else None,
                     "raw_edge": None,
@@ -426,7 +431,10 @@ def generate_paper_signal(
             edge=edge,
             raw_edge=raw_edge,
             ledger_summary=ledger_summary,
-            target_date_str=ticker_date if ticker_date else "unknown"
+            target_date_str=ticker_date if ticker_date else "unknown",
+            best_high_f=forecast_data_obj.get("best_single_number_f"),
+            bin_label=bin_str,
+            contract_bins=markets
         )
         
         # Action logic
@@ -450,17 +458,19 @@ def generate_paper_signal(
         
         signals.append({
             "market_ticker": ticker,
+            "event_ticker": m.get("event_ticker"),
             "market_title": m.get("title"),
             "status": m.get("status"),
             "condition_type": mapping.get("condition_type"),
             "threshold_f": mapping.get("threshold_f"),
             "range_high_f": mapping.get("range_high_f"),
+            "contract_range": mapping.get("contract_range"),
             # F3: forecast_bin_label is the actual Kalshi contract range string used
             # for probability lookup (e.g. ">=87", "<=84", "91-92").  Coordinator and
             # other callers must store THIS field as forecast_bin in the ledger — NOT
             # condition_type ("above"/"below"/"between") which settlement cannot match.
             "forecast_bin_label": bin_str,
-            "model_probability": round(prob, 4),
+            "model_probability": round(prob, 4) if prob is not None else None,
             "market_probability": round(executable_price, 4),
             "raw_edge": round(raw_edge, 4),
             "edge": round(edge, 4),

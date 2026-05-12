@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, Dict, List, Any
 from forecasting.bin_converter import temp_to_bin
 from forecasting.rules_model import zero_impossible_bins, normalize_bins, validate_probability_bins
-from forecasting.climatology_model import climatology_prior_for_date
+from forecasting.climatology_model import climatology_prior_for_date, climatology_prior_integer_for_date
 from forecasting.distribution_utils import (
     build_integer_distribution,
     apply_weather_suppression_integer,
@@ -12,6 +12,12 @@ from forecasting.distribution_utils import (
     build_cdf,
     compute_percentile,
     integer_dist_to_fixed_bins,
+    blend_integer_distributions,
+)
+from forecasting.calibration_config import (
+    V2_CLIMATOLOGY_WEIGHT,
+    V2_FORECAST_WEIGHT,
+    V2_UNIFORM_WEIGHT
 )
 
 from shared.types import REQUIRED_BINS
@@ -139,13 +145,13 @@ def forecast_daily_high_bins_v2(
         warnings.append("forecast_high_f is missing. Using climatology as primary lead.")
         forecast_dist = climatology_dist.copy()
 
-    # 3. Blend (45% Climatology, 45% Forecast, 10% rules-based adjustment space)
+    # 3. Blend (using centralized weights)
     blended_bins = {}
     for b in REQUIRED_BINS:
         # Base blend
-        blended_bins[b] = (climatology_dist[b] * 0.45) + (forecast_dist[b] * 0.45)
-        # Small uniform prior for the remaining 10%
-        blended_bins[b] += (0.10 / len(REQUIRED_BINS))
+        blended_bins[b] = (climatology_dist[b] * V2_CLIMATOLOGY_WEIGHT) + (forecast_dist[b] * V2_FORECAST_WEIGHT)
+        # Small uniform prior for the remaining weight
+        blended_bins[b] += (V2_UNIFORM_WEIGHT / len(REQUIRED_BINS))
 
     # 4. Apply weather suppression
     recent_rain_flag = input_features.get("recent_rain_flag", False)
@@ -193,9 +199,28 @@ def forecast_daily_high_bins_v2(
     # full TWC/NBM blending pipeline.
     integer_dist: Dict[int, float] = {}
     int_cdf: Dict[int, float] = {}
+    
+    # Get climatology integer prior
+    clim_int_dist = climatology_prior_integer_for_date(history_records or [], target_date)
+    
     if forecast_high_f is not None:
         center = max(int(forecast_high_f), observed_max_so_far_f)
-        integer_dist = build_integer_distribution(center_f=center)
+        forecast_int_dist = build_integer_distribution(center_f=center)
+        
+        # Blend (using centralized weights)
+        if clim_int_dist:
+            # We need to make sure both distributions cover the same range for blending
+            integer_dist = blend_integer_distributions(
+                clim_int_dist, forecast_int_dist, V2_CLIMATOLOGY_WEIGHT, V2_FORECAST_WEIGHT
+            )
+            # Add uniform floor
+            uniform_prob = V2_UNIFORM_WEIGHT / 56 # Approx range 60-115
+            for t in range(60, 116):
+                integer_dist[t] = integer_dist.get(t, 0.0) + uniform_prob
+            integer_dist = normalize_probability_mass(integer_dist)
+        else:
+            integer_dist = forecast_int_dist
+
         integer_dist = apply_weather_suppression_integer(
             integer_dist,
             thunderstorm_flag=input_features.get("thunderstorm_flag", False),
