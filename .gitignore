@@ -50,3 +50,4 @@ data/
 .streamlit/
 backend/data/
 .tmp.driveupload/
+test_output*.txt

@@ -4,14 +4,16 @@ import glob
 from datetime import datetime
 from typing import Dict, List, Optional
 
-# Paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PROCESSED_DIR = os.path.join(BASE_DIR, 'data', 'processed')
-REPORTS_DIR = os.path.join(PROCESSED_DIR, 'reports')
-CALIBRATION_DIR = os.path.join(PROCESSED_DIR, 'aggregate_calibration')
-LOGS_DIR = os.path.join(PROCESSED_DIR, 'logs')
-STATUS_DIR = os.path.join(PROCESSED_DIR, 'status')
-PAPER_TRADING_PATH = os.path.join(BASE_DIR, 'data', 'paper_trades.jsonl')
+from shared.artifact_paths import (
+    REPORTS_DIR,
+    CALIBRATION_DIR,
+    LOGS_DIR,
+    STATUS_DIR,
+    PAPER_TRADING_DIR,
+    LATEST_PAPER_SIGNAL,
+    PAPER_LEDGER_FILE,
+    AGGREGATE_CALIBRATION_JSON
+)
 
 def get_latest_file(pattern: str) -> Optional[str]:
     files = glob.glob(pattern)
@@ -35,8 +37,9 @@ def get_daily_status():
             "status": "UNKNOWN"
         },
         "paper_trading": {
-            "available": os.path.exists(PAPER_TRADING_PATH),
-            "record_count": 0
+            "available": os.path.exists(PAPER_LEDGER_FILE),
+            "record_count": 0,
+            "latest_signal": os.path.basename(LATEST_PAPER_SIGNAL) if os.path.exists(LATEST_PAPER_SIGNAL) else None
         },
         "warnings": []
     }
@@ -61,9 +64,8 @@ def get_daily_status():
         status["comparison"] = os.path.basename(latest_comp)
         
     # 3. Aggregate Calibration
-    cal_path = os.path.join(CALIBRATION_DIR, 'aggregate_calibration.json')
-    if os.path.exists(cal_path):
-        with open(cal_path, 'r') as f:
+    if os.path.exists(AGGREGATE_CALIBRATION_JSON):
+        with open(AGGREGATE_CALIBRATION_JSON, 'r') as f:
             status["calibration"] = json.load(f)
             
     # 4. Workflow Log
@@ -82,8 +84,12 @@ def get_daily_status():
                 
     # 5. Paper Trading
     if status["paper_trading"]["available"]:
-        with open(PAPER_TRADING_PATH, 'r') as f:
-            status["paper_trading"]["record_count"] = sum(1 for _ in f)
+        try:
+            with open(PAPER_LEDGER_FILE, 'r') as f:
+                ledger_data = json.load(f)
+                status["paper_trading"]["record_count"] = len(ledger_data.get("trades", []))
+        except Exception:
+            status["paper_trading"]["record_count"] = 0
             
     # 6. Warnings
     if not latest_v1 and not latest_v2:

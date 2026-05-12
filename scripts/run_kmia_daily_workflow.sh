@@ -37,12 +37,16 @@ bash "$SCRIPT_DIR/run_daily_prediction.sh" --dry-run --compare-models
 echo "[3/4] Running settlement check..."
 bash "$SCRIPT_DIR/settle_yesterday.sh"
 
-# 4. Run aggregate calibration report
-echo "[4/5] Generating weekly/aggregate calibration report..."
+# 4. Run paper signal generator
+echo "[4/6] Generating paper trading signals..."
+bash "$SCRIPT_DIR/generate_paper_signal.sh"
+
+# 5. Run aggregate calibration report
+echo "[5/6] Generating weekly/aggregate calibration report..."
 bash "$SCRIPT_DIR/generate_weekly_calibration.sh"
 
-# 5. Generate Daily Status Report
-echo "[5/5] Generating Daily Status Report..."
+# 6. Generate Daily Status Report
+echo "[6/6] Generating Daily Status Report..."
 # Use venv if available
 if [ -x "$PROJECT_ROOT/.venv/bin/python3" ]; then
   PYTHON_BIN="$PROJECT_ROOT/.venv/bin/python3"

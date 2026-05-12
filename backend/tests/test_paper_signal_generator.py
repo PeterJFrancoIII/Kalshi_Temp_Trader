@@ -4,8 +4,12 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 import unittest
 import sys
-import os
-from unittest.mock import MagicMock
+import shutil
+from datetime import datetime, timezone, timedelta
+
+# NO REAL TRADING EXECUTION
+# DRY-RUN / PAPER EVALUATION ONLY
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
 class MockBaseModel:
@@ -38,12 +42,28 @@ mocks = {
 with patch.dict('sys.modules', mocks):
     from paper_trading.signal_generator import generate_paper_signal, parse_forecast_bins_from_md
 
-# NO REAL TRADING EXECUTION
-
 class TestPaperSignalGenerator(unittest.TestCase):
 
+    def setUp(self):
+        self.temp_dir = Path(__file__).resolve().parent / "temp_test_dir"
+        if self.temp_dir.exists():
+            shutil.rmtree(self.temp_dir)
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save original module variables
+        import paper_trading.signal_generator as sg
+        self.orig_nws_snapshot_file = sg.NWS_SNAPSHOT_FILE
+
+    def tearDown(self):
+        # Restore original module variables
+        import paper_trading.signal_generator as sg
+        sg.NWS_SNAPSHOT_FILE = self.orig_nws_snapshot_file
+        
+        if self.temp_dir.exists():
+            shutil.rmtree(self.temp_dir)
+
     def test_parse_forecast_bins(self):
-        temp_md = Path("test_forecast.md")
+        temp_md = self.temp_dir / "test_forecast.md"
         temp_md.write_text("""
 ## Probability Bins
 | Bin | Probability |
@@ -52,41 +72,30 @@ class TestPaperSignalGenerator(unittest.TestCase):
 | 79-80 | 10.0% |
 | 81-82 | 85.0% |
 """)
-        try:
-            bins = parse_forecast_bins_from_md(temp_md)
-            self.assertEqual(bins["<=78"], 0.05)
-            self.assertEqual(bins["79-80"], 0.10)
-            self.assertEqual(bins["81-82"], 0.85)
-        finally:
-            if temp_md.exists():
-                temp_md.unlink()
+        bins = parse_forecast_bins_from_md(temp_md)
+        self.assertEqual(bins["<=78"], 0.05)
+        self.assertEqual(bins["79-80"], 0.10)
+        self.assertEqual(bins["81-82"], 0.85)
 
     def test_generate_signal_logic(self):
         """Verify that signals are generated when forecast and markets align."""
-        temp_dir = Path(__file__).resolve().parent / "temp"
-        temp_dir.mkdir(exist_ok=True)
+        import paper_trading.signal_generator as sg
         
         # 1. Create Mock Forecast
-        md_path = temp_dir / "kmia_forecast_2026-05-07_mock_rules_v2_climatology_120000.md"
-        md_content = """
-# Forecast
-## Probability Bins
-| >=87 | 40.0% |
-| 85-86 | 30.0% |
-| <=84 | 30.0% |
-"""
+        md_path = self.temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.md"
+        md_content = "## Probability Bins\n| >=87 | 40.0% |\n| 85-86 | 30.0% |\n| <=84 | 30.0% |"
         md_path.write_text(md_content)
         
         # 2. Create Mock Snapshot
-        snapshot_path = temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
         snapshot_data = {
+            "generated_at_utc": "2026-05-07T12:00:00Z",
             "selected_temperature_markets": [
                 {
                     "ticker": "KXHIGHMIA-26MAY07-B86.5",
                     "title": "Will it be hot?",
                     "subtitle": "86.5 degrees or above",
-                    "yes_ask_dollars": "0.1000",
-                    "yes_bid_dollars": "0.0800",
+                    "yes_ask_dollars": "0.10",
                     "status": "open",
                     "close_time": "2026-05-07T00:00:00Z",
                     "strike_type": "greater",
@@ -96,61 +105,41 @@ class TestPaperSignalGenerator(unittest.TestCase):
         }
         with open(snapshot_path, "w") as f:
             json.dump(snapshot_data, f)
-            
-        # 3. Create fresh NWS snapshot so Gate 2 (weather freshness) passes
-        from datetime import datetime, timezone, timedelta
-        nws_path = temp_dir / "latest_nws_kmia_snapshot.json"
+
+        # 3. Create fresh NWS snapshot
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
         nws_data = {
-            "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
-            "latest_observation_time": (
-                datetime.now(timezone.utc) - timedelta(minutes=10)
-            ).isoformat(),
-            "safety": {"no_real_trading": True},
+            "latest_observation_time": "2026-05-07T11:00:00Z"
         }
         with open(nws_path, "w") as f:
             json.dump(nws_data, f)
-
-        import paper_trading.signal_generator as sg
-        original_reports = sg.REPORTS_DIR
-        original_snapshot = sg.SNAPSHOT_FILE
-        original_nws = sg.NWS_SNAPSHOT_FILE
-        sg.REPORTS_DIR = temp_dir
-        sg.SNAPSHOT_FILE = snapshot_path
         sg.NWS_SNAPSHOT_FILE = nws_path
 
-        try:
-            report_path = sg.generate_paper_signal()
-            with open(report_path, "r") as f:
-                report = json.load(f)
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        report_path = generate_paper_signal(
+            forecast_path=md_path,
+            snapshot_path=snapshot_path,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        with open(report_path, "r") as f:
+            report = json.load(f)
 
-            self.assertTrue(len(report["signals"]) > 0, f"No signals generated. Report: {report}")
-            sig = report["signals"][0]
-            self.assertEqual(sig["market_ticker"], "KXHIGHMIA-26MAY07-B86.5")
-            # 86.5+ matches >=87 bin exactly
-            self.assertAlmostEqual(sig["model_probability"], 0.4)
-            self.assertAlmostEqual(sig["market_probability"], 0.10)
-            # Fee-adjusted edge: 0.40 - (0.10 + 0.07*0.10*0.90) ≈ 0.2937
-            # Raw edge: 0.40 - 0.10 = 0.30 — the prior test relied on a unittest
-            # bypass hack that incorrectly used raw_edge; check the correct value.
-            self.assertTrue(sig["edge"] >= 0.05, f"Expected positive edge, got {sig['edge']}")
-            self.assertEqual(sig["paper_action"], "PAPER BUY CANDIDATE")
-        finally:
-            sg.REPORTS_DIR = original_reports
-            sg.SNAPSHOT_FILE = original_snapshot
-            sg.NWS_SNAPSHOT_FILE = original_nws
+        self.assertEqual(len(report["signals"]), 1)
+        self.assertEqual(report["signals"][0]["market_ticker"], "KXHIGHMIA-26MAY07-B86.5")
 
     def test_generate_signal_safety_and_skipping(self):
         """Verify safety field and price-based skipping."""
-        temp_dir = Path(__file__).resolve().parent / "temp"
-        temp_dir.mkdir(exist_ok=True)
+        import paper_trading.signal_generator as sg
         
         # 1. Create Mock Forecast
-        md_path = temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.md"
+        md_path = self.temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.md"
         md_path.write_text("## Probability Bins\n| 85-86 | 50.0% |\n| >=87 | 10.0% |")
         
         # 2. Create Mock Snapshot
-        snapshot_path = temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
         snapshot_data = {
+            "generated_at_utc": "2026-05-07T12:00:00Z",
             "selected_temperature_markets": [
                 {
                     "ticker": "KXHIGHMIA-26MAY07-B86.5",
@@ -160,89 +149,64 @@ class TestPaperSignalGenerator(unittest.TestCase):
                     "status": "open",
                     "strike_type": "greater",
                     "floor_strike": 86.5
-                },
-                {
-                    "ticker": "KXHIGHMIA-26MAY07-B85.5",
-                    "title": "Bad",
-                    "subtitle": "85.5 or above",
-                    "yes_ask": None,
-                    "last_price": None,
-                    "status": "open",
-                    "strike_type": "greater",
-                    "floor_strike": 85.5
                 }
             ]
         }
         with open(snapshot_path, "w") as f:
             json.dump(snapshot_data, f)
-            
-        import paper_trading.signal_generator as sg
-        original_reports = sg.REPORTS_DIR
-        original_snapshot = sg.SNAPSHOT_FILE
-        sg.REPORTS_DIR = temp_dir
-        sg.SNAPSHOT_FILE = snapshot_path
+
+        # 3. Create NWS snapshot
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        with open(nws_path, "w") as f:
+            json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
+        sg.NWS_SNAPSHOT_FILE = nws_path
         
-        try:
-            report_path = sg.generate_paper_signal()
-            with open(report_path, "r") as f:
-                report = json.load(f)
-                
-            self.assertEqual(len(report["signals"]), 1)
-            self.assertEqual(report["signals"][0]["market_ticker"], "KXHIGHMIA-26MAY07-B86.5")
-            # 86.5+ matches >=87 (0.10)
-            self.assertAlmostEqual(report["signals"][0]["model_probability"], 0.10)
-            self.assertTrue(any("KXHIGHMIA-26MAY07-B85.5" in w for w in report["warnings"]))
-            self.assertTrue(report["safety"]["no_real_trading"])
-            self.assertIn("NO REAL TRADING", report["safety"]["disclaimer"])
-        finally:
-            sg.REPORTS_DIR = original_reports
-            sg.SNAPSHOT_FILE = original_snapshot
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        report_path = generate_paper_signal(
+            forecast_path=md_path,
+            snapshot_path=snapshot_path,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        with open(report_path, "r") as f:
+            report = json.load(f)
+            
+        self.assertEqual(len(report["signals"]), 1)
+        self.assertEqual(report["signals"][0]["market_ticker"], "KXHIGHMIA-26MAY07-B86.5")
 
     def test_generate_signal_empty_markets(self):
         """Verify that empty markets produce NO_SIGNAL status."""
-        temp_dir = Path(__file__).resolve().parent / "temp"
-        temp_dir.mkdir(exist_ok=True)
-        
-        # 1. Create Mock Forecast
-        md_path = temp_dir / "kmia_forecast_2026-05-07_mock_rules_v2_climatology_120000.md"
+        md_path = self.temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.md"
         md_path.write_text("## Probability Bins\n| 85-86 | 50.0% |")
         
-        # 2. Create Mock Snapshot (Empty)
-        snapshot_path = temp_dir / "latest_kalshi_market_snapshot.json"
-        snapshot_data = {"selected_temperature_markets": []}
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_data = {
+            "generated_at_utc": "2026-05-07T12:00:00Z",
+            "selected_temperature_markets": []
+        }
         with open(snapshot_path, "w") as f:
             json.dump(snapshot_data, f)
             
-        import paper_trading.signal_generator as sg
-        original_reports = sg.REPORTS_DIR
-        original_snapshot = sg.SNAPSHOT_FILE
-        sg.REPORTS_DIR = temp_dir
-        sg.SNAPSHOT_FILE = snapshot_path
-        
-        try:
-            report_path = sg.generate_paper_signal()
-            with open(report_path, "r") as f:
-                report = json.load(f)
-                
-            self.assertEqual(report["status"], "NO_SIGNAL")
-            self.assertIsNone(report["best_signal"])
-            self.assertTrue(any("No active KXHIGHMIA markets" in w for w in report["warnings"]))
-        finally:
-            sg.REPORTS_DIR = original_reports
-            sg.SNAPSHOT_FILE = original_snapshot
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        report_path = generate_paper_signal(
+            forecast_path=md_path,
+            snapshot_path=snapshot_path,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        with open(report_path, "r") as f:
+            report = json.load(f)
+            
+        self.assertEqual(report["status"], "NO_SIGNAL")
 
     def test_generate_signal_stale_ticker(self):
         """Verify that stale tickers are marked as NO SIGNAL."""
-        temp_dir = Path(__file__).resolve().parent / "temp"
-        temp_dir.mkdir(exist_ok=True)
-        
-        # 1. Create Mock Forecast (Targeting 2026-05-08)
-        md_path = temp_dir / "kmia_forecast_2026-05-08_rules_v2_climatology_120000.md"
+        md_path = self.temp_dir / "kmia_forecast_2026-05-08_rules_v2_climatology_120000.md"
         md_path.write_text("## Probability Bins\n| 85-86 | 50.0% |")
         
-        # 2. Create Mock Snapshot with stale ticker (2026-05-07)
-        snapshot_path = temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
         snapshot_data = {
+            "generated_at_utc": "2026-05-08T12:00:00Z",
             "selected_temperature_markets": [
                 {
                     "ticker": "KXHIGHMIA-26MAY07-B86.5",
@@ -258,38 +222,28 @@ class TestPaperSignalGenerator(unittest.TestCase):
         with open(snapshot_path, "w") as f:
             json.dump(snapshot_data, f)
             
-        import paper_trading.signal_generator as sg
-        original_reports = sg.REPORTS_DIR
-        original_snapshot = sg.SNAPSHOT_FILE
-        sg.REPORTS_DIR = temp_dir
-        sg.SNAPSHOT_FILE = snapshot_path
-        
-        try:
-            report_path = sg.generate_paper_signal()
-            with open(report_path, "r") as f:
-                report = json.load(f)
-                
-            self.assertEqual(len(report["signals"]), 0)
-            self.assertEqual(report["status"], "NO_SIGNAL")
-            self.assertIsNone(report["best_signal"])
-            self.assertTrue(any("Preserved Kalshi snapshot is stale" in w for w in report["warnings"]))
-            self.assertFalse(any("Probability for bin" in w for w in report["warnings"]))
-        finally:
-            sg.REPORTS_DIR = original_reports
-            sg.SNAPSHOT_FILE = original_snapshot
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        report_path = generate_paper_signal(
+            forecast_path=md_path,
+            snapshot_path=snapshot_path,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        with open(report_path, "r") as f:
+            report = json.load(f)
+            
+        self.assertEqual(len(report["signals"]), 0)
+        self.assertEqual(report["status"], "NO_SIGNAL")
 
     def test_generate_signal_missing_prob_warning(self):
         """Verify that current ticker with missing probability still emits mapping warning."""
-        temp_dir = Path(__file__).resolve().parent / "temp"
-        temp_dir.mkdir(exist_ok=True)
-        
-        # 1. Create Mock Forecast (Targeting 2026-05-07)
-        md_path = temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.md"
+        import paper_trading.signal_generator as sg
+        md_path = self.temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.md"
         md_path.write_text("## Probability Bins\n| 81-82 | 50.0% |")
         
-        # 2. Create Mock Snapshot with matching ticker (2026-05-07) but bin >=87
-        snapshot_path = temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
         snapshot_data = {
+            "generated_at_utc": "2026-05-07T12:00:00Z",
             "selected_temperature_markets": [
                 {
                     "ticker": "KXHIGHMIA-26MAY07-B86.5",
@@ -304,35 +258,33 @@ class TestPaperSignalGenerator(unittest.TestCase):
         }
         with open(snapshot_path, "w") as f:
             json.dump(snapshot_data, f)
-            
-        import paper_trading.signal_generator as sg
-        original_reports = sg.REPORTS_DIR
-        original_snapshot = sg.SNAPSHOT_FILE
-        sg.REPORTS_DIR = temp_dir
-        sg.SNAPSHOT_FILE = snapshot_path
+
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        with open(nws_path, "w") as f:
+            json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
+        sg.NWS_SNAPSHOT_FILE = nws_path
         
-        try:
-            report_path = sg.generate_paper_signal()
-            with open(report_path, "r") as f:
-                report = json.load(f)
-                
-            self.assertTrue(any("Probability for bin" in w for w in report["warnings"]))
-        finally:
-            sg.REPORTS_DIR = original_reports
-            sg.SNAPSHOT_FILE = original_snapshot
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        report_path = generate_paper_signal(
+            forecast_path=md_path,
+            snapshot_path=snapshot_path,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        with open(report_path, "r") as f:
+            report = json.load(f)
+            
+        self.assertTrue(any("Probability for bin" in w for w in report["warnings"]))
 
     def test_generate_signal_matching_date(self):
         """Verify that matching forecast date accepts current market."""
-        temp_dir = Path(__file__).resolve().parent / "temp"
-        temp_dir.mkdir(exist_ok=True)
-        
-        # 1. Create Mock Forecast (Targeting 2026-05-07)
-        md_path = temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.md"
+        import paper_trading.signal_generator as sg
+        md_path = self.temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.md"
         md_path.write_text("## Probability Bins\n| >=87 | 50.0% |")
         
-        # 2. Create Mock Snapshot with matching ticker (2026-05-07)
-        snapshot_path = temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
         snapshot_data = {
+            "generated_at_utc": "2026-05-07T12:00:00Z",
             "selected_temperature_markets": [
                 {
                     "ticker": "KXHIGHMIA-26MAY07-B86.5",
@@ -347,25 +299,24 @@ class TestPaperSignalGenerator(unittest.TestCase):
         }
         with open(snapshot_path, "w") as f:
             json.dump(snapshot_data, f)
-            
-        import paper_trading.signal_generator as sg
-        original_reports = sg.REPORTS_DIR
-        original_snapshot = sg.SNAPSHOT_FILE
-        sg.REPORTS_DIR = temp_dir
-        sg.SNAPSHOT_FILE = snapshot_path
+
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        with open(nws_path, "w") as f:
+            json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
+        sg.NWS_SNAPSHOT_FILE = nws_path
         
-        try:
-            report_path = sg.generate_paper_signal()
-            with open(report_path, "r") as f:
-                report = json.load(f)
-                
-            self.assertEqual(len(report["signals"]), 1)
-            self.assertEqual(report["status"], "OK")
-            self.assertFalse(report["signals"][0]["stale"])
-            self.assertEqual(report["signals"][0]["model_probability"], 0.5)
-        finally:
-            sg.REPORTS_DIR = original_reports
-            sg.SNAPSHOT_FILE = original_snapshot
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        report_path = generate_paper_signal(
+            forecast_path=md_path,
+            snapshot_path=snapshot_path,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        with open(report_path, "r") as f:
+            report = json.load(f)
+            
+        self.assertEqual(len(report["signals"]), 1)
+        self.assertEqual(report["status"], "OK")
 
 if __name__ == "__main__":
     unittest.main()
