@@ -151,7 +151,9 @@ def normalize_current(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "pressure_mean_sea_level_mb": pick(data, "pressureMeanSeaLevel"),
         "precip_1h_in": pick(data, "precip1Hour"),
         "phrase": pick(data, "wxPhraseLong", "phrase", "narrative", "cloudCoverPhrase"),
-        "observation_time_utc": pick(data, "validTimeUtc", "observationTimeUtc", "expireTimeGmt", "expirationTimeUtc"),
+        # expireTimeGmt / expirationTimeUtc are cache-expiry fields, NOT observation times —
+        # they must not appear here, as they would silently corrupt freshness checks.
+        "observation_time_utc": pick(data, "validTimeUtc", "observationTimeUtc"),
     }
 
 

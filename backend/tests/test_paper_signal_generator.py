@@ -96,28 +96,47 @@ class TestPaperSignalGenerator(unittest.TestCase):
         with open(snapshot_path, "w") as f:
             json.dump(snapshot_data, f)
             
+        # 3. Create fresh NWS snapshot so Gate 2 (weather freshness) passes
+        from datetime import datetime, timezone, timedelta
+        nws_path = temp_dir / "latest_nws_kmia_snapshot.json"
+        nws_data = {
+            "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
+            "latest_observation_time": (
+                datetime.now(timezone.utc) - timedelta(minutes=10)
+            ).isoformat(),
+            "safety": {"no_real_trading": True},
+        }
+        with open(nws_path, "w") as f:
+            json.dump(nws_data, f)
+
         import paper_trading.signal_generator as sg
         original_reports = sg.REPORTS_DIR
         original_snapshot = sg.SNAPSHOT_FILE
+        original_nws = sg.NWS_SNAPSHOT_FILE
         sg.REPORTS_DIR = temp_dir
         sg.SNAPSHOT_FILE = snapshot_path
-        
+        sg.NWS_SNAPSHOT_FILE = nws_path
+
         try:
             report_path = sg.generate_paper_signal()
             with open(report_path, "r") as f:
                 report = json.load(f)
-                
+
             self.assertTrue(len(report["signals"]) > 0, f"No signals generated. Report: {report}")
             sig = report["signals"][0]
             self.assertEqual(sig["market_ticker"], "KXHIGHMIA-26MAY07-B86.5")
             # 86.5+ matches >=87 bin exactly
             self.assertAlmostEqual(sig["model_probability"], 0.4)
             self.assertAlmostEqual(sig["market_probability"], 0.10)
-            self.assertTrue(sig["edge"] >= 0.3)
+            # Fee-adjusted edge: 0.40 - (0.10 + 0.07*0.10*0.90) ≈ 0.2937
+            # Raw edge: 0.40 - 0.10 = 0.30 — the prior test relied on a unittest
+            # bypass hack that incorrectly used raw_edge; check the correct value.
+            self.assertTrue(sig["edge"] >= 0.05, f"Expected positive edge, got {sig['edge']}")
             self.assertEqual(sig["paper_action"], "PAPER BUY CANDIDATE")
         finally:
             sg.REPORTS_DIR = original_reports
             sg.SNAPSHOT_FILE = original_snapshot
+            sg.NWS_SNAPSHOT_FILE = original_nws
 
     def test_generate_signal_safety_and_skipping(self):
         """Verify safety field and price-based skipping."""

@@ -16,20 +16,48 @@ try:
 except ImportError:
     def get_market_open_time_et(date_str): return None
 
+
 from market_data.kalshi_contract_mapper import parse_kalshi_markets
-from shared.artifact_paths import LATEST_KALSHI_MARKET_SNAPSHOT, LATEST_PAPER_SIGNAL
+from shared.artifact_paths import (
+    LATEST_KALSHI_MARKET_SNAPSHOT,
+    LATEST_NWS_KMIA_SNAPSHOT,
+    LATEST_PAPER_SIGNAL,
+)
+from shared.timestamp_utils import extract_embedded_timestamp
+from trading.edge_engine import calculate_edge, calculate_expected_value, calculate_speed_to_roi
+from risk.risk_engine import evaluate_risk_gates
+from paper_trading.paper_ledger import PaperLedger
 
 # Resolve ROOT
 ROOT = Path(__file__).resolve().parents[3]
 REPORTS_DIR = ROOT / "backend" / "data" / "processed" / "reports"
 SNAPSHOT_FILE = LATEST_KALSHI_MARKET_SNAPSHOT
+NWS_SNAPSHOT_FILE = LATEST_NWS_KMIA_SNAPSHOT   # override in tests via sg.NWS_SNAPSHOT_FILE
 OUTPUT_DIR = ROOT / "backend" / "data" / "processed" / "paper_trading"
 
 
 def get_latest_file(directory: Path, pattern: str) -> Optional[Path]:
+    """Returns the most-recent matching file, preferring embedded JSON timestamps
+    over filesystem mtime to avoid silent lookahead from file copies or syncs."""
     files = list(directory.glob(pattern))
     if not files:
         return None
+
+    candidates = []
+    for f in files:
+        ts = extract_embedded_timestamp(f)
+        if ts is not None:
+            candidates.append((ts, f))
+
+    if candidates:
+        candidates.sort(reverse=True)
+        return candidates[0][1]
+
+    # Fallback to mtime only when no embedded timestamps exist (non-JSON files, etc.)
+    logger.warning(
+        f"get_latest_file({pattern}): no embedded timestamps found; "
+        f"falling back to filesystem mtime."
+    )
     return max(files, key=os.path.getmtime)
 
 def parse_timestamp_from_filename(filename: str) -> Optional[datetime]:
@@ -65,92 +93,67 @@ def parse_forecast_bins_from_md(md_path: Path) -> Dict[str, float]:
     bins = {}
     pattern = r"\|\s*([<>=]*\d+[-\d]*)\s*\|\s*(\d+\.?\d*)%\s*\|"
     matches = re.findall(pattern, content)
-    print(f"DEBUG MATCHES: {matches}")
     for bin_label, prob_str in matches:
         bins[bin_label] = float(prob_str) / 100.0
     
     return bins
 
-
-def calculate_speed_to_roi(ev: float, close_time_iso: Optional[str]) -> tuple:
-    """Calculates ROI speed score. (Expected Value / Time to Close)"""
-    if not close_time_iso:
-        return 0.0, None
-        
-    try:
-        close_dt = datetime.fromisoformat(close_time_iso.replace("Z", "+00:00"))
-        now_dt = datetime.now(timezone.utc)
-        diff = close_dt - now_dt
-        minutes = max(diff.total_seconds() / 60.0, 1.0) # Min 1 min
-        
-        # Simple score: ROI % per hour or similar. 
-        # Here: EV per 100 minutes.
-        score = (ev / minutes) * 1000.0 if ev > 0 else 0.0
-        return round(score, 2), round(minutes, 1)
-    except:
-        return 0.0, None
-
 def select_executable_price(ask: Optional[float], last: Optional[float]) -> Optional[float]:
     """Selects the price to use for execution (Ask for buying, or fallback to Last)."""
     return ask if ask is not None else last
 
-def calculate_fee_adjusted_breakeven(price: float) -> float:
-    """Calculates the fee-adjusted breakeven probability.
-    Formula: price + 0.07 * price * (1 - price)
-    """
-    fee = 0.07 * price * (1.0 - price)
-    return round(price + fee, 4)
 
-def calculate_slippage_adjusted_breakeven(price: float, slippage: float = 0.0) -> float:
-    """Calculates the slippage-adjusted breakeven probability."""
-    return round(price + slippage, 4)
+# ---------------------------------------------------------------------------
+# Legacy coarse fixed-bin contract probability estimator.
+# The main signal pipeline now uses map_distribution_to_bins() from
+# kalshi_contract_mapper (integer-level, dynamic bins).  This function is
+# retained for backward compatibility and tests that exercise the coarse
+# 6-bin approximation.
+# ---------------------------------------------------------------------------
 
-def calculate_edge(model_prob: float, breakeven_prob: float) -> float:
-    """Calculates the edge as model probability minus breakeven probability."""
-    return round(model_prob - breakeven_prob, 4)
-
-BIN_RANGES = {
-    "<=78": (None, 78),
-    "79-80": (79, 80),
-    "81-82": (81, 82),
-    "83-84": (83, 84),
-    "85-86": (85, 86),
-    ">=87": (87, None)
+_LEGACY_BIN_RANGES: Dict[str, tuple] = {
+    "<=78":  (None, 78),
+    "79-80": (79,   80),
+    "81-82": (81,   82),
+    "83-84": (83,   84),
+    "85-86": (85,   86),
+    ">=87":  (87,   None),
 }
+
 
 def estimate_contract_probability(mapping: Dict[str, Any], model_bins: Dict[str, float]) -> tuple:
     """
-    Estimates the probability of a contract condition based on model bins.
-    Returns (probability, warnings)
+    Estimates contract probability from fixed bins.
+
+    Legacy function retained for backward compatibility.  The active signal
+    pipeline uses map_distribution_to_bins() with integer-level distributions
+    instead, which correctly handles arbitrary Kalshi contract thresholds.
+
+    Returns (probability, warnings).
     """
     cond = mapping.get("condition_type")
     t = mapping.get("threshold_f")
     h = mapping.get("range_high_f")
-    
+
     if cond == "unknown" or t is None:
         return None, ["Unknown contract condition or missing threshold."]
-    
+
     total_prob = 0.0
     matched_any = False
     uncertain = False
-    
-    for bin_label, (b_low, b_high) in BIN_RANGES.items():
+
+    for bin_label, (b_low, b_high) in _LEGACY_BIN_RANGES.items():
         prob = model_bins.get(bin_label, 0.0)
-        
-        # Above T
+
         if cond == "above":
-            # If bin is strictly above T
             if b_low is not None and b_low > t:
                 total_prob += prob
                 matched_any = True
             elif b_high is not None and b_high <= t:
-                # Bin is strictly below T, ignore
                 pass
             else:
-                # T falls inside the bin
                 uncertain = True
-                
-        # Below T
+
         elif cond == "below":
             if b_high is not None and b_high < t:
                 total_prob += prob
@@ -159,8 +162,7 @@ def estimate_contract_probability(mapping: Dict[str, Any], model_bins: Dict[str,
                 pass
             else:
                 uncertain = True
-                
-        # Between T and H
+
         elif cond == "between":
             if b_low is not None and b_high is not None and b_low >= t and b_high <= h:
                 total_prob += prob
@@ -169,31 +171,58 @@ def estimate_contract_probability(mapping: Dict[str, Any], model_bins: Dict[str,
                 pass
             else:
                 uncertain = True
-                
+
     if uncertain:
-        # For KMIA, if T is an integer like 86, and bin is 85-86, then "above 86" means >= 87.
-        # Let's try a small refinement for integer boundaries.
-        if cond == "above" and t.is_integer():
-             # Re-check above T as >= T+1
-             pass # Already handled by b_low > t if b_low is T+1
         return None, [f"Contract boundary {t} cuts through model bins. Exact mapping uncertain."]
 
     if not matched_any and total_prob == 0:
-        # Check if condition is beyond range
         if cond == "above" and t >= 87:
-             return 0.0, ["Threshold above model's max bin boundary (87). Probability likely > 0 but unquantifiable."]
+            return 0.0, ["Threshold above model's max bin boundary (87)."]
         if cond == "below" and t <= 78:
-             return 0.0, ["Threshold below model's min bin boundary (78). Probability likely > 0 but unquantifiable."]
-             
+            return 0.0, ["Threshold below model's min bin boundary (78)."]
+
     return total_prob, []
+
+
+def _read_embedded_snapshot_timestamp(snapshot_path: Path) -> Optional[datetime]:
+    """
+    Reads the embedded timestamp from a Kalshi market snapshot JSON file.
+
+    Tries fields: fetched_at_utc, generated_at_utc, timestamp, created_at.
+    Returns a timezone-aware UTC datetime, or None if no valid field found.
+
+    Uses embedded timestamps rather than os.path.getmtime() to avoid silent
+    lookahead from file copies, Drive syncs, or Git checkouts.
+    """
+    try:
+        with open(snapshot_path, "r") as f:
+            data = json.load(f)
+        for field in ("fetched_at_utc", "generated_at_utc", "timestamp", "created_at"):
+            raw = data.get(field)
+            if not raw:
+                continue
+            try:
+                dt = datetime.fromisoformat(str(raw))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except (ValueError, TypeError):
+                continue
+    except Exception:
+        pass
+    return None
 
 def generate_paper_signal(
     forecast_path: Optional[Path] = None,
     snapshot_path: Optional[Path] = None,
-    prediction_timestamp: Optional[datetime] = None
+    prediction_timestamp: Optional[datetime] = None,
+    output_dir: Optional[Path] = None,
+    latest_path_override: Optional[Path] = None,
+    ledger_path_override: Optional[Path] = None
 ):
     """Generates a quantitative edge report comparing model vs market using active contracts."""
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_dir = output_dir if output_dir else OUTPUT_DIR
+    os.makedirs(out_dir, exist_ok=True)
     
     # 1. Load Forecast
     if forecast_path:
@@ -211,15 +240,17 @@ def generate_paper_signal(
             
     model_bins = {}
     integer_dist = {}
+    forecast_data_obj = {}
     if forecast_file:
         if forecast_file.suffix == ".md":
             model_bins = parse_forecast_bins_from_md(forecast_file)
+            forecast_data_obj = {"probability_bins": model_bins}
         else:
             with open(forecast_file, "r") as f:
-                forecast_data = json.load(f)
-                model_bins = forecast_data.get("probability_bins", {})
+                forecast_data_obj = json.load(f)
+                model_bins = forecast_data_obj.get("probability_bins", {})
                 # Load integer distribution if available (keys are strings in JSON, convert to int)
-                raw_int_dist = forecast_data.get("integer_distribution", {})
+                raw_int_dist = forecast_data_obj.get("integer_distribution", {})
                 integer_dist = {int(k): v for k, v in raw_int_dist.items()}
     
     # Extract forecast date
@@ -232,15 +263,47 @@ def generate_paper_signal(
     # 2. Load and Map Active Markets
     snapshot_to_use = snapshot_path if snapshot_path else SNAPSHOT_FILE
     
-    # Validation for snapshot
+    # Validation for snapshot — use embedded JSON timestamp, never filesystem mtime.
     if snapshot_path and prediction_timestamp:
-        file_ts = datetime.fromtimestamp(os.path.getmtime(snapshot_path), tz=timezone.utc)
-        if file_ts > prediction_timestamp:
-             raise ValueError(f"Snapshot file {snapshot_path.name} is from the future relative to prediction timestamp {prediction_timestamp}")
+        embedded_ts = _read_embedded_snapshot_timestamp(snapshot_path)
+        if embedded_ts is None:
+            logger.warning(
+                f"Snapshot {snapshot_path.name}: no embedded timestamp found; "
+                f"skipping future-check (mtime fallback forbidden)."
+            )
+        elif embedded_ts > prediction_timestamp:
+            raise ValueError(
+                f"Snapshot file {snapshot_path.name} has embedded timestamp "
+                f"{embedded_ts.isoformat()} which is after prediction_timestamp "
+                f"{prediction_timestamp.isoformat()}"
+            )
+
+    # F2: Load NWS snapshot to extract the real observation timestamp for Gate 2.
+    # If the observation time is missing or unavailable, Gate 2 fails closed (blocks).
+    # Passing datetime.now() here would permanently bypass Gate 2 — never do that.
+    # NWS_SNAPSHOT_FILE is a module-level variable so tests can inject a temp path.
+    latest_obs_time_iso: Optional[str] = None
+    try:
+        if NWS_SNAPSHOT_FILE.exists():
+            with open(NWS_SNAPSHOT_FILE, "r") as _f:
+                _nws_data = json.load(_f)
+            latest_obs_time_iso = _nws_data.get("latest_observation_time")
+            if latest_obs_time_iso is None:
+                logger.warning(
+                    "NWS snapshot loaded but 'latest_observation_time' field is missing. "
+                    "Gate 2 (weather freshness) will block."
+                )
+        else:
+            logger.warning(
+                f"NWS snapshot not found at {NWS_SNAPSHOT_FILE}. "
+                "Gate 2 (weather freshness) will block."
+            )
+    except Exception as _e:
+        logger.warning(f"Could not load NWS snapshot for Gate 2 check: {_e}. Gate 2 will block.")
 
     from market_data.kalshi_contract_mapper import parse_kalshi_markets, mapping_to_bin_string
     markets = parse_kalshi_markets(snapshot_to_use)
-    
+
     signals = []
     global_warnings = []
     status = "OK"
@@ -333,23 +396,38 @@ def generate_paper_signal(
         else:
             global_warnings.append(f"{ticker}: Could not convert contract mapping to bin string.")
             continue
-            
-        fee_adjusted_breakeven = calculate_fee_adjusted_breakeven(executable_price)
-        # Assuming 0 slippage for now
-        slippage_adjusted_breakeven = calculate_slippage_adjusted_breakeven(fee_adjusted_breakeven, slippage=0.0)
-        
-        edge = calculate_edge(prob, slippage_adjusted_breakeven)
-        raw_edge = prob - executable_price
-        
-        import sys
-        if 'unittest' in sys.modules and raw_edge >= 0.3 and edge < 0.3:
-            edge = raw_edge
-        
-        fee = 0.07 * executable_price * (1.0 - executable_price)
-        cost = executable_price + fee
-        ev = (prob * 1.0) - cost
-        
+        # Use Edge Engine for math
+        edge, raw_edge, final_breakeven = calculate_edge(prob, executable_price, slippage=0.0)
+        ev = calculate_expected_value(prob, final_breakeven)
         speed_score, mins_to_close = calculate_speed_to_roi(ev, m.get("close_time"))
+
+        # Evaluate Risk Gates
+        if ledger_path_override:
+            ledger = PaperLedger(ledger_path=ledger_path_override)
+        else:
+            ledger = PaperLedger()
+
+        ledger_summary = ledger.get_summary()
+
+        forecast_data_for_risk = dict(forecast_data_obj)
+        if global_warnings:
+            forecast_data_for_risk.setdefault("warnings", []).extend(global_warnings)
+
+        risk_decision = evaluate_risk_gates(
+            forecast_data=forecast_data_for_risk,
+            # F2: Pass the real NWS observation timestamp (loaded above before this loop).
+            # latest_obs_time_iso is None when the snapshot is missing or lacks the field,
+            # which causes Gate 2 to fail closed — that is the correct safe behavior.
+            latest_obs_time_iso=latest_obs_time_iso,
+            model_prob=prob,
+            executable_price=executable_price,
+            yes_ask=ask,
+            yes_bid=bid,
+            edge=edge,
+            raw_edge=raw_edge,
+            ledger_summary=ledger_summary,
+            target_date_str=ticker_date if ticker_date else "unknown"
+        )
         
         # Action logic
         action = "NO EDGE"
@@ -359,6 +437,10 @@ def generate_paper_signal(
             action = "NO SIGNAL"
             edge = -999.0
             ev = -999.0
+            risk_decision.passed = False
+            risk_decision.reason = "Stale ticker or missing forecast mapping."
+        elif not risk_decision.passed:
+            action = "BLOCKED BY RISK ENGINE"
         elif edge > 0.05:
             action = "PAPER BUY CANDIDATE"
             confidence = "medium"
@@ -372,16 +454,26 @@ def generate_paper_signal(
             "status": m.get("status"),
             "condition_type": mapping.get("condition_type"),
             "threshold_f": mapping.get("threshold_f"),
+            "range_high_f": mapping.get("range_high_f"),
+            # F3: forecast_bin_label is the actual Kalshi contract range string used
+            # for probability lookup (e.g. ">=87", "<=84", "91-92").  Coordinator and
+            # other callers must store THIS field as forecast_bin in the ledger — NOT
+            # condition_type ("above"/"below"/"between") which settlement cannot match.
+            "forecast_bin_label": bin_str,
             "model_probability": round(prob, 4),
             "market_probability": round(executable_price, 4),
             "raw_edge": round(raw_edge, 4),
             "edge": round(edge, 4),
-            "breakeven_probability": round(slippage_adjusted_breakeven, 4),
+            "breakeven_probability": round(final_breakeven, 4),
             "expected_value": round(ev, 4),
             "speed_to_roi_score": speed_score,
             "time_to_close_minutes": mins_to_close,
             "paper_action": action,
             "confidence": confidence,
+            "risk_decision": {
+                "passed": risk_decision.passed,
+                "reason": risk_decision.reason
+            },
             "yes_ask": ask,
             "yes_bid": bid,
             "last_price": last,
@@ -422,8 +514,8 @@ def generate_paper_signal(
     }
     
     ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    latest_path = LATEST_PAPER_SIGNAL
-    ts_path = OUTPUT_DIR / f"paper_signal_{ts}.json"
+    latest_path = latest_path_override if latest_path_override else LATEST_PAPER_SIGNAL
+    ts_path = out_dir / f"paper_signal_{ts}.json"
     
     with open(latest_path, "w") as f:
         json.dump(report, f, indent=2)

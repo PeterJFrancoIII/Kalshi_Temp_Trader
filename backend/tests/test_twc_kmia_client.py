@@ -136,3 +136,36 @@ def test_missing_api_key_returns_safe_metadata(monkeypatch):
     assert data is None
     assert meta["status"] == "MISSING_API_KEY"
     assert "TWC_API_KEY" in meta["warning"]
+
+
+def test_normalize_current_does_not_use_expire_time_as_observation():
+    """
+    Regression: expireTimeGmt / expirationTimeUtc are cache-expiry fields.
+    They must NOT appear in observation_time_utc — using them would produce
+    future-dated observation timestamps that silently bypass freshness gates.
+    """
+    row = normalize_current(
+        {
+            "temperature": 84,
+            "expireTimeGmt": 9999999999,
+            "expirationTimeUtc": "2099-01-01T00:00:00Z",
+        }
+    )
+    # observation_time_utc must be None when only expiry fields are present
+    assert row["observation_time_utc"] is None, (
+        f"observation_time_utc should be None but got {row['observation_time_utc']!r}. "
+        "expireTimeGmt / expirationTimeUtc must not be used as observation timestamps."
+    )
+
+
+def test_normalize_current_observation_time_from_valid_fields():
+    """validTimeUtc and observationTimeUtc are the only accepted observation-time sources."""
+    row_valid_time = normalize_current({"validTimeUtc": 1778323200})
+    assert row_valid_time["observation_time_utc"] == 1778323200
+
+    row_obs_time = normalize_current({"observationTimeUtc": "2026-05-06T12:00:00Z"})
+    assert row_obs_time["observation_time_utc"] == "2026-05-06T12:00:00Z"
+
+    # If neither valid field is present, result must be None (not an expiry field)
+    row_neither = normalize_current({"temperature": 84, "expireTimeGmt": 9999999999})
+    assert row_neither["observation_time_utc"] is None

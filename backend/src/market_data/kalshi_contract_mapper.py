@@ -20,28 +20,38 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
     strike_type = market.get("strike_type", "").lower()
     
     res = {
+        "ticker": ticker,
+        "event_ticker": market.get("event_ticker"),
         "condition_type": "unknown",
+        "lower_inclusive": None,
+        "upper_inclusive": None,
         "threshold_f": None,
         "range_high_f": None,
-        "raw_text": f"{title} {subtitle}".strip(),
-        "warnings": []
+        "yes_bid": market.get("yes_bid_dollars") or (market.get("yes_bid") / 100.0 if market.get("yes_bid") is not None else None),
+        "yes_ask": market.get("yes_ask_dollars") or (market.get("yes_ask") / 100.0 if market.get("yes_ask") is not None else None),
+        "close_time": market.get("close_time"),
+        "parse_warnings": []
     }
     
     # 1. Use structured fields if available
     if strike_type == "greater" and market.get("floor_strike") is not None:
         res["condition_type"] = "above"
         res["threshold_f"] = float(market["floor_strike"])
+        res["lower_inclusive"] = False # Kalshi "greater" usually means strict >
     elif strike_type == "less" and market.get("cap_strike") is not None:
         res["condition_type"] = "below"
         res["threshold_f"] = float(market["cap_strike"])
+        res["upper_inclusive"] = False # Kalshi "less" usually means strict <
     elif strike_type == "between" and market.get("floor_strike") is not None and market.get("cap_strike") is not None:
         res["condition_type"] = "between"
         res["threshold_f"] = float(market["floor_strike"])
         res["range_high_f"] = float(market["cap_strike"])
+        res["lower_inclusive"] = True
+        res["upper_inclusive"] = True
     
     # 2. Regex fallback if structured fields failed or for validation
     if res["condition_type"] == "unknown":
-        text = res["raw_text"].lower().replace("\u00b0", "deg")
+        text = f"{title} {subtitle}".strip().lower().replace("\u00b0", "deg")
         
         # Range/Between: "90-91", "90 to 91"
         range_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:to|-|and)\s*(\d+(?:\.\d+)?)", text)
@@ -49,63 +59,77 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
             res["condition_type"] = "between"
             res["threshold_f"] = float(range_match.group(1))
             res["range_high_f"] = float(range_match.group(2))
+            res["lower_inclusive"] = True
+            res["upper_inclusive"] = True
         
         # Above: ">91", "91 or above", "above 91", ">=95"
         elif re.search(r"(\d+(?:\.\d+)?)\s*or\s*above", text) or re.search(r"(?:above\s+|>=|>|>\s*)(\d+(?:\.\d+)?)", text):
             match = re.search(r"(\d+(?:\.\d+)?)\s*or\s*above", text) or re.search(r"(?:above\s+|>=|>|>\s*)(\d+(?:\.\d+)?)", text)
             res["condition_type"] = "above"
             val = float(match.group(1))
-            if ">=" in text:
-                res["threshold_f"] = val - 1.0 # >=95 means >94
+            res["threshold_f"] = val
+            if "or above" in text or ">=" in text:
+                res["lower_inclusive"] = True
             else:
-                res["threshold_f"] = val
+                res["lower_inclusive"] = False
                 
         # Below: "<84", "84 or below", "below 84", "<=89"
         elif re.search(r"(\d+(?:\.\d+)?)\s*or\s*below", text) or re.search(r"(?:below\s+|<=|<|<\s*)(\d+(?:\.\d+)?)", text):
             match = re.search(r"(\d+(?:\.\d+)?)\s*or\s*below", text) or re.search(r"(?:below\s+|<=|<|<\s*)(\d+(?:\.\d+)?)", text)
             res["condition_type"] = "below"
             val = float(match.group(1))
-            if "<=" in text:
-                res["threshold_f"] = val + 1.0 # <=89 means <90
+            res["threshold_f"] = val
+            if "or below" in text or "<=" in text:
+                res["upper_inclusive"] = True
             else:
-                res["threshold_f"] = val
+                res["upper_inclusive"] = False
 
     # 3. Ticker fallback: B86.5
     if res["condition_type"] == "unknown" and "-B" in ticker:
         ticker_match = re.search(r"-B(\d+(?:\.\d+)?)", ticker)
         if ticker_match:
-            res["condition_type"] = "above" # B usually denotes binary above/below boundary
+            res["condition_type"] = "above"
             res["threshold_f"] = float(ticker_match.group(1))
+            res["lower_inclusive"] = False # Ticker B usually denotes boundary, assumed strict >
 
     if res["condition_type"] == "unknown":
-        res["warnings"].append(f"Could not determine condition for ticker {ticker}")
+        res["parse_warnings"].append(f"Could not determine condition for ticker {ticker}")
         
     return res
 
 def bin_string_to_range(bin_str: str) -> tuple[int, int]:
     """
     Converts a bin string like "91-92", ">=95", "<=89" into a tuple of (low, high) integers.
+    Supports half-degree boundaries by mapping them to clean integer ranges.
     """
     if bin_str.startswith("<="):
-        high = int(bin_str[2:])
+        high = int(float(bin_str[2:]))
         low = -999
     elif bin_str.startswith(">="):
-        low = int(bin_str[2:])
+        low = int(float(bin_str[2:]))
         high = 999
     elif bin_str.startswith("<"):
-        high = int(bin_str[1:]) - 1
+        val = float(bin_str[1:])
+        if val.is_integer():
+            high = int(val) - 1
+        else:
+            high = int(val) # <84.5 means <=84
         low = -999
     elif bin_str.startswith(">"):
-        low = int(bin_str[1:]) + 1
+        val = float(bin_str[1:])
+        if val.is_integer():
+            low = int(val) + 1
+        else:
+            low = int(val) + 1 # >84.5 means >=85
         high = 999
     elif "-" in bin_str:
         parts = bin_str.split("-")
-        low = int(parts[0])
-        high = int(parts[1])
+        low = int(float(parts[0]))
+        high = int(float(parts[1]))
     else:
-        # Single number
-        low = int(bin_str)
-        high = int(bin_str)
+        val = float(bin_str)
+        low = int(val)
+        high = int(val)
         
     return low, high
 
@@ -133,24 +157,37 @@ def mapping_to_bin_string(mapping: Dict[str, Any]) -> Optional[str]:
     cond = mapping.get("condition_type")
     thresh = mapping.get("threshold_f")
     high = mapping.get("range_high_f")
+    lower_inc = mapping.get("lower_inclusive")
+    upper_inc = mapping.get("upper_inclusive")
     
     if thresh is None:
         return None
         
     import math
-    
     if cond == "between" and high is not None:
         return f"{int(thresh)}-{int(high)}"
     elif cond == "above":
-        # Use > for integer thresholds to match user request
         if thresh == float(int(thresh)):
-            return f">{int(thresh)}"
-        return f">={math.floor(thresh) + 1}"
+            if lower_inc:
+                return f">={int(thresh)}"
+            else:
+                return f">{int(thresh)}"
+        else:
+            if lower_inc:
+                return f">={math.ceil(thresh)}"
+            else:
+                return f">={math.floor(thresh) + 1}"
     elif cond == "below":
-        # Use < for integer thresholds to match user request
         if thresh == float(int(thresh)):
-            return f"<{int(thresh)}"
-        return f"<={math.ceil(thresh) - 1}"
+            if upper_inc:
+                return f"<={int(thresh)}"
+            else:
+                return f"<{int(thresh)}"
+        else:
+            if upper_inc:
+                return f"<={math.floor(thresh)}"
+            else:
+                return f"<={math.ceil(thresh) - 1}"
         
     return None
 

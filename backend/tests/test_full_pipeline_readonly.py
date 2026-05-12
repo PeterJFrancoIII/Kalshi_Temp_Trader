@@ -192,7 +192,7 @@ def test_full_pipeline_with_paper_trading():
     - verify no real order placement
     """
     current_ts = int(time.time())
-    test_storage = "backend/tests/test_pipeline_trades.jsonl"
+    test_storage = "tests/test_pipeline_trades.jsonl"
     if os.path.exists(test_storage):
         os.remove(test_storage)
     

@@ -5,7 +5,7 @@ from datetime import datetime
 from paper_trading.persistence import save_recommendation, load_recommendations, update_paper_trade
 from paper_trading.simulator import simulate_fill_from_snapshot, settle_paper_trade
 
-TEST_DB_PATH = "backend/tests/test_paper_trades.jsonl"
+TEST_DB_PATH = "tests/test_paper_trades.jsonl"
 
 def setup_test_db():
     if os.path.exists(TEST_DB_PATH):

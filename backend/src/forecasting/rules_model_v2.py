@@ -4,6 +4,15 @@ from typing import Optional, Dict, List, Any
 from forecasting.bin_converter import temp_to_bin
 from forecasting.rules_model import zero_impossible_bins, normalize_bins, validate_probability_bins
 from forecasting.climatology_model import climatology_prior_for_date
+from forecasting.distribution_utils import (
+    build_integer_distribution,
+    apply_weather_suppression_integer,
+    zero_impossible_temps,
+    normalize_probability_mass,
+    build_cdf,
+    compute_percentile,
+    integer_dist_to_fixed_bins,
+)
 
 from shared.types import REQUIRED_BINS
 
@@ -177,6 +186,28 @@ def forecast_daily_high_bins_v2(
     elif observed_max_so_far_f >= 85:
         confidence = "high"
 
+    # --- Integer-level distribution (dynamic bins support) ---
+    # Build a discrete normal centered on forecast_high_f, then apply the same
+    # weather suppression and hard-constraint logic at integer resolution.
+    # This is the canonical output for contract_probability_mapper and the
+    # full TWC/NBM blending pipeline.
+    integer_dist: Dict[int, float] = {}
+    int_cdf: Dict[int, float] = {}
+    if forecast_high_f is not None:
+        center = max(int(forecast_high_f), observed_max_so_far_f)
+        integer_dist = build_integer_distribution(center_f=center)
+        integer_dist = apply_weather_suppression_integer(
+            integer_dist,
+            thunderstorm_flag=input_features.get("thunderstorm_flag", False),
+            recent_rain_flag=input_features.get("recent_rain_flag", False),
+            overcast_flag=input_features.get("overcast_flag", False),
+        )
+        if observed_max_so_far_f > 0:
+            integer_dist = zero_impossible_temps(integer_dist, observed_max_so_far_f)
+        else:
+            integer_dist = normalize_probability_mass(integer_dist)
+        int_cdf = build_cdf(integer_dist)
+
     return {
         "station": "KMIA",
         "date": target_date,
@@ -184,6 +215,10 @@ def forecast_daily_high_bins_v2(
         "model_version": "rules_v2_climatology",
         "best_single_number_f": best_single_number_f,
         "probability_bins": final_bins,
+        # Integer-level distribution for dynamic Kalshi contract bin mapping.
+        # Keys are int Fahrenheit temperatures; values are probability masses.
+        "integer_distribution": integer_dist,
+        "integer_distribution_cdf": int_cdf,
         "observed_max_so_far_f": observed_max_so_far_f,
         "current_temp_f": input_features.get("current_temp_f"),
         "forecast_high_f": forecast_high_f,

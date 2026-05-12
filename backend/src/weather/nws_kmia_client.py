@@ -72,15 +72,31 @@ class NWSKMIAClient:
             latest = observations[-1]
             status["current_temp_f"] = latest.temperature_f
             status["latest_observation_time"] = latest.timestamp.isoformat()
-            
-            # Check for staleness (1 hour)
-            time_diff = datetime.now(timezone.utc) - latest.timestamp.replace(tzinfo=timezone.utc)
+
+            # Staleness: convert to UTC via astimezone (safe for both naive and tz-aware timestamps).
+            latest_utc = latest.timestamp.astimezone(timezone.utc) if latest.timestamp.tzinfo else latest.timestamp.replace(tzinfo=timezone.utc)
+            time_diff = datetime.now(timezone.utc) - latest_utc
             status["stale_data"] = time_diff > timedelta(hours=1)
 
-            # Compute observed max for TODAY (local time)
-            # Assuming observations are already sorted by time
-            today_local = datetime.now().date()
-            today_obs = [o for o in observations if o.timestamp.date() == today_local and o.temperature_f is not None]
+            # Observed daily max: compare dates in ET so observations at 00:00–04:00 UTC
+            # (still the previous local day) are not incorrectly counted for "today".
+            try:
+                from dateutil import tz as _tz
+                _ET = _tz.gettz("America/New_York")
+                today_et = datetime.now(_ET).date()
+                today_obs = [
+                    o for o in observations
+                    if o.temperature_f is not None
+                    and (
+                        o.timestamp.astimezone(_ET) if o.timestamp.tzinfo
+                        else o.timestamp.replace(tzinfo=timezone.utc).astimezone(_ET)
+                    ).date() == today_et
+                ]
+            except Exception:
+                # Fallback: use system local date if dateutil unavailable
+                today_et = datetime.now().date()
+                today_obs = [o for o in observations if o.timestamp.date() == today_et and o.temperature_f is not None]
+
             if today_obs:
                 status["observed_max_so_far_f"] = max(o.temperature_f for o in today_obs)
         else:

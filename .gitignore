@@ -26,6 +26,9 @@ Thumbs.db
 .env.deploy
 deploy_secrets.json
 
+# Streamlit local config (contains credentials.toml — never commit)
+.streamlit/
+
 # KMIA Generated Data
 backend/data/processed/
 backend/data/test_reports/

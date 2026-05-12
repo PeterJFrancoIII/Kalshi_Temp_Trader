@@ -2,14 +2,14 @@ import unittest
 import json
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 from src.paper_trading import settlement
 
 class TestPaperSettlement(unittest.TestCase):
     def setUp(self):
-        self.test_dir = Path("backend/tests/temp_settlement")
-        self.test_dir.mkdir(parents=True, exist_ok=True)
+        self.test_dir = Path(tempfile.mkdtemp())
         
         self.ledger_file = self.test_dir / "ledger.jsonl"
         self.history_file = self.test_dir / "history.jsonl"

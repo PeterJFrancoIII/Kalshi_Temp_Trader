@@ -45,7 +45,20 @@ from test_calibration_metrics import (
     test_brier_score_reasonable,
     test_log_loss_finite_and_clipping,
     test_invalid_probabilities_errors,
-    test_may_3_2026_specific_case
+    test_may_3_2026_specific_case,
+    # P2 — reliability diagram, lead-time bucketing, multi-source comparison
+    test_reliability_bins_empty,
+    test_reliability_bins_basic_structure,
+    test_reliability_bins_perfect_calibration,
+    test_reliability_bins_total_count_matches_input,
+    test_score_prediction_without_lead_time,
+    test_score_prediction_with_lead_time,
+    test_aggregate_stats_by_lead_time_basic,
+    test_aggregate_stats_by_lead_time_unknown_bucket,
+    test_score_multi_source_returns_all_sources,
+    test_score_multi_source_better_source_has_lower_brier,
+    test_score_multi_source_with_lead_time,
+    test_score_multi_source_empty_sources,
 )
 
 from test_kalshi_market_mapping import (
@@ -215,9 +228,9 @@ from test_weather_ingestion import (
     test_history_record_count
 )
 
-from test_paper_ledger import (
-    test_record_paper_trade_logic
-)
+from test_paper_ledger import TestPaperLedger
+from test_risk_engine import TestRiskEngine
+from test_edge_engine import TestEdgeEngine
 
 from test_health_summary import (
     test_health_summary_script_exists,
@@ -253,6 +266,7 @@ from test_nws_live_client import (
 from test_kalshi_contract_mapper import TestKalshiContractMapper
 from test_kalshi_public_client import TestKalshiPublicClient
 from test_paper_signal_enhanced import TestPaperSignalEnhanced
+from test_distribution_utils import TestDistributionUtils
 from test_weather_providers_page import (
     test_normalize_time_utc_for_merge,
     test_build_matched_table_with_mixed_resolutions,
@@ -263,6 +277,63 @@ from test_weather_providers_page import (
     test_normalize_twc_forecast_returns_twc_forecast_dataframe,
     test_build_matched_table_returns_nearest_forecasts,
     test_build_observed_match_returns_forecast_error_rows
+)
+
+from test_contract_probability_mapper import TestContractProbabilityMapper
+from test_kmia_distribution_blender import TestKMIADistributionBlender
+from test_kmia_observation_bias_corrector import TestKmiaObservationBiasCorrector
+from test_twc_daily_max_distribution import TestTWCDailyMaxDistribution
+from test_twc_probabilistic_client import TestTWCProbabilisticClient
+from test_twc_kmia_client import (
+    test_normalize_current_handles_missing_input,
+    test_normalize_current_maps_common_twc_fields,
+    test_normalize_daily_handles_list_payload,
+    test_normalize_hourly_handles_list_payload,
+    test_derive_features_returns_expected_fields,
+    test_normalize_bundle_preserves_safety_and_missing_hourly_flag,
+    test_normalize_current_does_not_use_expire_time_as_observation,
+    test_normalize_current_observation_time_from_valid_fields,
+)
+
+from test_risk_integration import (
+    TestTempSatisfiesBinLabel,
+    TestLoadTradesFromLedger,
+    TestSettlementWithJsonLedger,
+    TestPnLWriteback,
+    TestGate2WeatherFreshness,
+    TestDynamicBinSettlement,
+    TestRiskEndToEnd,
+)
+
+from test_backtest_coordinator import (
+    test_backtest_coordinator_initialization,
+    test_backtest_missing_data_handling,
+    test_extract_embedded_timestamp_fetched_at_utc,
+    test_extract_embedded_timestamp_generated_at_utc,
+    test_extract_embedded_timestamp_timestamp_field,
+    test_extract_embedded_timestamp_missing_returns_none,
+    test_extract_embedded_timestamp_invalid_value_returns_none,
+    test_extract_embedded_timestamp_bad_file_returns_none,
+    test_select_snapshot_as_of_basic,
+    test_select_snapshot_as_of_all_future_returns_none,
+    test_snapshot_selection_uses_embedded_ts_not_mtime,
+    test_snapshot_with_missing_embedded_ts_is_excluded,
+    test_snapshot_directory_with_only_no_ts_files_returns_none,
+    test_settlement_blocked_before_settlement_as_of_time,
+    test_settlement_blocked_next_day_before_06_utc,
+    test_settlement_proceeds_after_settlement_as_of_time,
+    test_record_trade_stores_model_probability_and_forecast_bin,
+    test_record_trade_without_optional_fields,
+    test_backtest_coordinator_as_of_times_are_premarket,
+    # Phase 9 P1 — SnapshotRegistry + replay manifest
+    test_snapshot_registry_resolve_basic,
+    test_snapshot_registry_resolve_unknown_type_returns_none,
+    test_snapshot_registry_caches_results,
+    test_snapshot_registry_lookup_log_populated,
+    test_backtest_coordinator_has_registry,
+    test_replay_manifest_written_after_run_backtest,
+    test_replay_manifest_schema,
+    test_signal_generator_uses_embedded_ts_not_mtime,
 )
 
 
@@ -281,6 +352,19 @@ tests = [
     test_log_loss_finite_and_clipping,
     test_invalid_probabilities_errors,
     test_may_3_2026_specific_case,
+    # Phase 9 P2 — calibration metrics: reliability diagram, lead-time, multi-source
+    test_reliability_bins_empty,
+    test_reliability_bins_basic_structure,
+    test_reliability_bins_perfect_calibration,
+    test_reliability_bins_total_count_matches_input,
+    test_score_prediction_without_lead_time,
+    test_score_prediction_with_lead_time,
+    test_aggregate_stats_by_lead_time_basic,
+    test_aggregate_stats_by_lead_time_unknown_bucket,
+    test_score_multi_source_returns_all_sources,
+    test_score_multi_source_better_source_has_lower_brier,
+    test_score_multi_source_with_lead_time,
+    test_score_multi_source_empty_sources,
     test_map_kalshi_subtitle_to_bin,
     test_map_markets_to_bins,
     test_map_markets_to_bins_uncertain,
@@ -383,7 +467,9 @@ tests = [
     test_stale_data_flag,
     test_observed_max_so_far,
     test_history_record_count,
-    test_record_paper_trade_logic,
+    lambda: run_unittest_class(TestPaperLedger),
+    lambda: run_unittest_class(TestRiskEngine),
+    lambda: run_unittest_class(TestEdgeEngine),
     test_scripts_contain_safety_disclaimer,
     test_check_sync_status_runs,
     test_health_summary_script_exists,
@@ -427,7 +513,60 @@ tests = [
     lambda: run_unittest_class(TestKalshiPublicClient),
     lambda: run_unittest_class(TestPaperSignalGenerator),
     lambda: run_unittest_class(TestUpdateKalshiSnapshots),
-    lambda: run_unittest_class(TestArtifactPaths)
+    lambda: run_unittest_class(TestArtifactPaths),
+    # Phase 9 P0 lookahead-safety tests
+    test_backtest_coordinator_initialization,
+    test_backtest_missing_data_handling,
+    test_extract_embedded_timestamp_fetched_at_utc,
+    test_extract_embedded_timestamp_generated_at_utc,
+    test_extract_embedded_timestamp_timestamp_field,
+    test_extract_embedded_timestamp_missing_returns_none,
+    test_extract_embedded_timestamp_invalid_value_returns_none,
+    test_extract_embedded_timestamp_bad_file_returns_none,
+    test_select_snapshot_as_of_basic,
+    test_select_snapshot_as_of_all_future_returns_none,
+    test_snapshot_selection_uses_embedded_ts_not_mtime,
+    test_snapshot_with_missing_embedded_ts_is_excluded,
+    test_snapshot_directory_with_only_no_ts_files_returns_none,
+    test_settlement_blocked_before_settlement_as_of_time,
+    test_settlement_blocked_next_day_before_06_utc,
+    test_settlement_proceeds_after_settlement_as_of_time,
+    test_record_trade_stores_model_probability_and_forecast_bin,
+    test_record_trade_without_optional_fields,
+    test_backtest_coordinator_as_of_times_are_premarket,
+    # Phase 9 P1 — SnapshotRegistry + replay manifest
+    test_snapshot_registry_resolve_basic,
+    test_snapshot_registry_resolve_unknown_type_returns_none,
+    test_snapshot_registry_caches_results,
+    test_snapshot_registry_lookup_log_populated,
+    test_backtest_coordinator_has_registry,
+    test_replay_manifest_written_after_run_backtest,
+    test_replay_manifest_schema,
+    test_signal_generator_uses_embedded_ts_not_mtime,
+    # F1-F4/F6 Risk critical defect fixes
+    lambda: run_unittest_class(TestTempSatisfiesBinLabel),
+    lambda: run_unittest_class(TestLoadTradesFromLedger),
+    lambda: run_unittest_class(TestSettlementWithJsonLedger),
+    lambda: run_unittest_class(TestPnLWriteback),
+    lambda: run_unittest_class(TestGate2WeatherFreshness),
+    lambda: run_unittest_class(TestDynamicBinSettlement),
+    lambda: run_unittest_class(TestRiskEndToEnd),
+    # Phase 2–6 forecast/ingestion pipeline tests (integer distribution layer)
+    lambda: run_unittest_class(TestContractProbabilityMapper),
+    lambda: run_unittest_class(TestKMIADistributionBlender),
+    lambda: run_unittest_class(TestKmiaObservationBiasCorrector),
+    lambda: run_unittest_class(TestTWCDailyMaxDistribution),
+    lambda: run_unittest_class(TestTWCProbabilisticClient),
+    lambda: run_unittest_class(TestDistributionUtils),
+    # TWC KMIA client — weather data normalization correctness
+    test_normalize_current_handles_missing_input,
+    test_normalize_current_maps_common_twc_fields,
+    test_normalize_daily_handles_list_payload,
+    test_normalize_hourly_handles_list_payload,
+    test_derive_features_returns_expected_fields,
+    test_normalize_bundle_preserves_safety_and_missing_hourly_flag,
+    test_normalize_current_does_not_use_expire_time_as_observation,
+    test_normalize_current_observation_time_from_valid_fields,
 ]
 
 

@@ -12,7 +12,7 @@ class TestKalshiAuth(unittest.TestCase):
         self.env_patcher.start()
 
         # Create a dummy key for testing
-        self.test_key_path = "backend/tests/test_key.pem"
+        self.test_key_path = "tests/test_key.pem"
         subprocess.run(
             ["openssl", "genrsa", "-out", self.test_key_path, "2048"],
             capture_output=True,

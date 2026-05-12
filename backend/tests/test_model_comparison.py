@@ -92,8 +92,8 @@ def test_report_writers(tmp_path=None):
         json_path = os.path.join(str(tmp_path), "report.json")
         md_path = os.path.join(str(tmp_path), "report.md")
     else:
-        # Fallback for manual run
-        test_dir = "backend/data/test_reports"
+        # Fallback for manual run (CWD is backend/ when run via run_tests.sh)
+        test_dir = "data/test_reports"
         os.makedirs(test_dir, exist_ok=True)
         json_path = os.path.join(test_dir, "report.json")
         md_path = os.path.join(test_dir, "report.md")
@@ -121,7 +121,8 @@ def test_legacy_save_comparison_report(tmp_path=None):
     if tmp_path:
         test_dir = str(tmp_path / "legacy")
     else:
-        test_dir = "backend/data/test_reports/legacy"
+        # CWD is backend/ when run via run_tests.sh
+        test_dir = "data/test_reports/legacy"
 
     json_p, md_p = save_comparison_report(report, test_dir, "legacy_test")
 
@@ -143,7 +144,8 @@ def test_comparison_markdown_nonzero_probabilities():
     )
 
     # Write the markdown and verify per-bin rows are non-zero
-    test_dir = "backend/data/test_reports/prob_test"
+    # CWD is backend/ when run via run_tests.sh
+    test_dir = "data/test_reports/prob_test"
     os.makedirs(test_dir, exist_ok=True)
     md_path = os.path.join(test_dir, "prob_test.md")
     write_comparison_markdown(report, md_path)

@@ -1,113 +1,95 @@
-import json
 import os
+import tempfile
+import json
+import unittest
 from pathlib import Path
-from paper_trading.ledger import record_paper_trade
+from datetime import datetime, timezone, timedelta
 
+from src.paper_trading.paper_ledger import PaperLedger
 
-def test_record_paper_trade_logic():
-    """Verify that a trade is recorded correctly from a mock signal."""
-    temp_dir = Path(__file__).resolve().parent / "temp"
-    temp_dir.mkdir(exist_ok=True)
-    
-    signal_file = temp_dir / "latest_paper_signal.json"
-    ledger_file = temp_dir / "paper_trade_ledger.jsonl"
-    
-    # 1. Mock Signal with PAPER BUY CANDIDATE
-    signal_data = {
-        "best_signal": {
-            "market_ticker": "TEST-TICKER-1",
-            "paper_action": "PAPER BUY CANDIDATE",
-            "forecast_bin": "85-86",
-            "model_probability": 0.4,
-            "market_implied_probability": 0.2,
-            "edge": 0.2
+class TestPaperLedger(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.ledger_path = Path(self.temp_dir.name) / "ledger.json"
+        
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_initialization(self):
+        ledger = PaperLedger(ledger_path=self.ledger_path)
+        summary = ledger.get_summary()
+        self.assertEqual(summary["account_balance"], 1000.0)
+        self.assertEqual(summary["daily_pnl"], 0.0)
+        self.assertEqual(summary["weekly_pnl"], 0.0)
+        self.assertEqual(summary["active_trades_by_date"], {})
+
+    def test_get_summary_with_data(self):
+        now = datetime.now(timezone.utc)
+        
+        # 1 trade closed 2 hours ago (daily pnl)
+        # 1 trade closed 3 days ago (weekly pnl)
+        # 1 trade open for tomorrow (active trade)
+        
+        data = {
+            "account_balance": 1050.0,
+            "trades": [
+                {
+                    "market_ticker": "KX-A",
+                    "target_date": "2026-05-11",
+                    "execution_price": 0.50,
+                    "quantity": 10,
+                    "timestamp_utc": (now - timedelta(hours=2)).isoformat(),
+                    "status": "closed",
+                    "pnl": 50.0
+                },
+                {
+                    "market_ticker": "KX-B",
+                    "target_date": "2026-05-08",
+                    "execution_price": 0.40,
+                    "quantity": 10,
+                    "timestamp_utc": (now - timedelta(days=3)).isoformat(),
+                    "status": "closed",
+                    "pnl": -20.0
+                },
+                {
+                    "market_ticker": "KX-C",
+                    "target_date": "2026-05-12",
+                    "execution_price": 0.60,
+                    "quantity": 20,
+                    "timestamp_utc": (now - timedelta(minutes=5)).isoformat(),
+                    "status": "open",
+                    "pnl": 0.0
+                }
+            ]
         }
-    }
-    with open(signal_file, "w") as f:
-        json.dump(signal_data, f)
         
-    # Patch paths in ledger
-    import paper_trading.ledger as ledger
-    original_signal = ledger.SIGNAL_FILE
-    original_ledger = ledger.LEDGER_FILE
-    ledger.SIGNAL_FILE = signal_file
-    ledger.LEDGER_FILE = ledger_file
-    
-    try:
-        if ledger_file.exists():
-            os.remove(ledger_file)
+        with open(self.ledger_path, "w") as f:
+            json.dump(data, f)
             
-        # First Run
-        trade = record_paper_trade()
-        assert trade is not None
-        assert trade["market_ticker"] == "TEST-TICKER-1"
-        assert trade["status"] == "OPEN"
-        assert trade["market_probability"] == 0.2
+        ledger = PaperLedger(ledger_path=self.ledger_path)
+        summary = ledger.get_summary()
         
-        # Verify file
-        with open(ledger_file, "r") as f:
-            lines = f.readlines()
-            assert len(lines) == 1
-            entry = json.loads(lines[0])
-            assert entry["market_ticker"] == "TEST-TICKER-1"
-            assert entry["market_probability"] == 0.2
-            
-        # Second Run (Duplicate)
-        trade2 = record_paper_trade()
-        assert trade2 is None # Should skip duplicate
+        self.assertEqual(summary["account_balance"], 1050.0)
+        self.assertEqual(summary["daily_pnl"], 50.0)
+        self.assertEqual(summary["weekly_pnl"], 30.0) # 50 - 20
+        self.assertEqual(summary["active_trades_by_date"], {"2026-05-12": 1})
+
+    def test_record_trade(self):
+        ledger = PaperLedger(ledger_path=self.ledger_path)
+        ledger.record_trade("KXHIGHMIA-11MAY-B85", "2026-05-11", 0.55, 10)
         
-        with open(ledger_file, "r") as f:
-            lines = f.readlines()
-            assert len(lines) == 1 # Still 1
+        # Verify it was saved to file
+        with open(self.ledger_path, "r") as f:
+            saved_data = json.load(f)
             
-        # Run with NO EDGE
-        signal_data["best_signal"]["paper_action"] = "NO EDGE"
-        with open(signal_file, "w") as f:
-            json.dump(signal_data, f)
-            
-        trade3 = record_paper_trade()
-        assert trade3 is None
+        self.assertEqual(len(saved_data["trades"]), 1)
+        self.assertEqual(saved_data["trades"][0]["market_ticker"], "KXHIGHMIA-11MAY-B85")
+        self.assertEqual(saved_data["trades"][0]["status"], "open")
+        self.assertEqual(saved_data["trades"][0]["pnl"], 0.0)
         
-    finally:
-        ledger.SIGNAL_FILE = original_signal
-        ledger.LEDGER_FILE = original_ledger
+        # Summary should see 1 active trade
+        summary = ledger.get_summary()
+        self.assertEqual(summary["active_trades_by_date"]["2026-05-11"], 1)
 
-
-def test_record_paper_trade_prefers_current_market_probability_alias():
-    """Current signal payloads use market_probability, not market_implied_probability."""
-    temp_dir = Path(__file__).resolve().parent / "temp"
-    temp_dir.mkdir(exist_ok=True)
-
-    signal_file = temp_dir / "latest_paper_signal_alias.json"
-    ledger_file = temp_dir / "paper_trade_ledger_alias.jsonl"
-    signal_data = {
-        "best_signal": {
-            "market_ticker": "TEST-TICKER-ALIAS",
-            "paper_action": "PAPER BUY CANDIDATE",
-            "forecast_bin": "85-86",
-            "model_probability": 0.55,
-            "market_probability": 0.31,
-            "market_implied_probability": 0.99,
-            "yes_ask": 0.0,
-            "edge": 0.24,
-        }
-    }
-    signal_file.write_text(json.dumps(signal_data))
-
-    import paper_trading.ledger as ledger
-    original_signal = ledger.SIGNAL_FILE
-    original_ledger = ledger.LEDGER_FILE
-    ledger.SIGNAL_FILE = signal_file
-    ledger.LEDGER_FILE = ledger_file
-
-    try:
-        if ledger_file.exists():
-            os.remove(ledger_file)
-        trade = record_paper_trade()
-        assert trade is not None
-        assert trade["market_probability"] == 0.31
-        # A valid zero ask should not be replaced by the market probability fallback.
-        assert trade["simulated_entry_price"] == 0.0
-    finally:
-        ledger.SIGNAL_FILE = original_signal
-        ledger.LEDGER_FILE = original_ledger
+if __name__ == "__main__":
+    unittest.main()

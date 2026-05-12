@@ -47,7 +47,7 @@ def test_report_writers():
     
     report = score_model_comparison(v1_probs, v2_probs, 82, date_str="2026-05-03")
     
-    test_dir = "backend/data/test_reports"
+    test_dir = "data/test_reports"
     os.makedirs(test_dir, exist_ok=True)
     json_path = os.path.join(test_dir, "test_comp.json")
     md_path = os.path.join(test_dir, "test_comp.md")
