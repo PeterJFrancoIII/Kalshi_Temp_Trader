@@ -51,3 +51,6 @@ data/
 backend/data/
 .tmp.driveupload/
 test_output*.txt
+
+# Local scratch workspace
+scratch/
