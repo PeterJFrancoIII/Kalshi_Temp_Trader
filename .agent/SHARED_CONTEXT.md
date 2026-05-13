@@ -1238,3 +1238,93 @@ A comprehensive governance, architecture, and safety review has been completed a
   "next_step": "Proceed to Agent 8 Consolidation"
 }
 ```
+
+---
+
+# Agent 8 — Final Roll-Up / Project Admin — Phase 10 Consolidation
+
+## Status: CONSOLIDATION COMPLETE
+
+**Date:** 2026-05-12T20:15:00-04:00  
+**Model:** Claude Opus 4.6 (Thinking)  
+**Role:** Final Roll-Up / Project Admin  
+**Trigger:** Post Agent 1 APPROVED_TO_PROCEED validation  
+
+### Verdict Tokens
+
+| Token | Decision | Rationale |
+|:------|:---------|:----------|
+| LOCAL_CONTINUATION_GO | ✅ | Clean tree, all tests pass, workflow completes safely |
+| COMMIT_READY | ✅ | Commit `69ccad1` exists, tree is clean |
+| PUSH_READY | ✅ | No C0/C1 blockers; awaiting explicit user instruction |
+| PAPER_EVALUATION_GO | ✅ | Ready for monitored dry-run in DNS-unblocked environment |
+| REAL_TRADING_NO_GO | ⛔ | Mandatory — no execution logic exists |
+
+### Git State
+- **Branch:** `twc-kmia-console-integration`
+- **HEAD:** `69ccad1 fix: stabilize Phase 10 dry-run data freshness checks`
+- **Origin:** `55747d0` (1 commit behind HEAD)
+- **Working tree:** CLEAN — zero uncommitted changes
+
+### Evidence Summary
+- **Tests:** ALL TESTS PASSED — 79 test methods, 0 failures
+- **Workflows:** `run_tests.sh`, `update_nws_live_data.sh`, `update_kalshi_market_data.sh`, `run_kmia_daily_workflow.sh` — all SUCCESS
+- **Safety:** 0 execution methods in src, 0 HTTP mutations in src, fail-closed on DNS failure
+- **Kalshi:** EMPTY status written, expired tickers filtered, NameResolutionError handled
+- **NWS:** Fresh snapshot with `latest_observation_time: 2026-05-12T22:40:00+00:00`
+- **Paper signal:** NO_SIGNAL — correct given 0 available markets
+- **Lookahead:** No mtime on any critical path; embedded JSON timestamps enforced
+
+### Environment Notes
+- DNS/API is blocked in current sandbox
+- This run is NOT valid live market-data evidence
+- This run IS valid safety evidence (correct fail-closed behavior)
+
+### Blockers
+- **C0:** None
+- **C1:** None
+- **P1:** Historical forecast JSONs missing embedded `generated_at_utc` timestamps
+- **P2:** mtime in UI display code, untracked `calibration_config.py`, hardcoded position sizing, .gitignore grooming
+
+### Next Task
+Push `69ccad1` to origin (on explicit user instruction), then execute dry-run pipeline in DNS-unblocked environment.
+
+### Machine-Readable Summary
+```json
+{
+  "agent": "Agent 8",
+  "model": "Claude Opus 4.6 (Thinking)",
+  "timestamp": "2026-05-12T20:15:00-04:00",
+  "verdict_tokens": [
+    "LOCAL_CONTINUATION_GO",
+    "COMMIT_READY",
+    "PUSH_READY",
+    "PAPER_EVALUATION_GO",
+    "REAL_TRADING_NO_GO"
+  ],
+  "git": {
+    "branch": "twc-kmia-console-integration",
+    "head": "69ccad1",
+    "origin": "55747d0",
+    "ahead": 1,
+    "working_tree": "CLEAN"
+  },
+  "tests": {
+    "methods_passed": 79,
+    "methods_failed": 0,
+    "status": "ALL TESTS PASSED"
+  },
+  "safety": {
+    "execution_methods_in_src": 0,
+    "http_mutations_in_src": 0,
+    "mtime_on_critical_path": false,
+    "fail_closed_on_missing_data": true
+  },
+  "environment": {
+    "dns_blocked": true,
+    "valid_market_evidence": false,
+    "valid_safety_evidence": true
+  },
+  "next_task": "Push 69ccad1, then dry-run in DNS-unblocked environment"
+}
+```
