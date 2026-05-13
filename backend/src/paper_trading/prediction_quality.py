@@ -79,6 +79,8 @@ def generate_report():
         markets_found = 0
         if kalshi_snapshot:
             markets_found = kalshi_snapshot.get("markets_found", 0)
+            if markets_found == 0 and "markets" in kalshi_snapshot:
+                markets_found = len(kalshi_snapshot["markets"])
         
         best_signal = None
         if paper_signal:

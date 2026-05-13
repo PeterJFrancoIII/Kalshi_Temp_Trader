@@ -531,6 +531,8 @@ def render_kalshi_market_console(m_data, o_data, s_data):
                 yes_bids = ob.get("yes_bids", [])
                 if yes_bids:
                     st.dataframe(yes_bids[:5], columns=["Price", "Quantity"])
+                elif prices.get("top_yes_bid") is not None:
+                    st.write(f"Depth unavailable. Top Bid: {prices['top_yes_bid']}")
                 else:
                     st.write("No bids available.")
             with dc2:
@@ -538,6 +540,8 @@ def render_kalshi_market_console(m_data, o_data, s_data):
                 no_bids = ob.get("no_bids", [])
                 if no_bids:
                     st.dataframe(no_bids[:5], columns=["Price", "Quantity"])
+                elif prices.get("top_no_bid") is not None:
+                    st.write(f"Depth unavailable. Top Bid: {prices['top_no_bid']}")
                 else:
                     st.write("No bids available.")
                     

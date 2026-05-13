@@ -30,9 +30,9 @@ try:
     best = data.get('best_signal')
     if best:
         print(f\"TICKER:      {best.get('market_ticker')}\")
-        print(f\"BIN:         {best.get('forecast_bin')}\")
+        print(f\"BIN:         {best.get('forecast_bin_label')}\")
         print(f\"MODEL PROB:  {best.get('model_probability'):.2%}\")
-        print(f\"MARKET PROB: {best.get('market_implied_probability'):.2%}\" if best.get('market_implied_probability') else \"MARKET PROB: N/A\")
+        print(f\"MARKET PROB: {best.get('market_probability'):.2%}\" if best.get('market_probability') else \"MARKET PROB: N/A\")
         print(f\"EDGE:        {best.get('edge'):+.2%}\" if best.get('edge') is not None else \"EDGE: N/A\")
         print(f\"CONFIDENCE:  {best.get('confidence').upper()}\")
         print(f\"ACTION:      {best.get('paper_action')}\")
