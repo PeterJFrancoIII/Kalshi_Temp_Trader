@@ -244,6 +244,21 @@ def build_live_nws_snapshot() -> Dict[str, Any]:
 
     meta = fetch_kmia_point_metadata()
     if not meta:
+        # P1 Resilience: Attempt to load previous valid snapshot if fetch fails
+        try:
+            from shared.artifact_paths import LATEST_NWS_KMIA_SNAPSHOT
+            if LATEST_NWS_KMIA_SNAPSHOT.exists():
+                with open(LATEST_NWS_KMIA_SNAPSHOT, 'r') as f:
+                    prev_snap = json.load(f)
+                if prev_snap and prev_snap.get("endpoint_status") == "OK":
+                    prev_snap["warnings"] = prev_snap.get("warnings", [])
+                    prev_snap["warnings"].append(f"Fetch failed at {snapshot['fetched_at_utc']}. Preserving previous valid snapshot.")
+                    prev_snap["stale_fallback"] = True
+                    # Return the preserved snapshot immediately
+                    return prev_snap
+        except Exception as e:
+            snapshot["warnings"].append(f"Failed to load previous snapshot for fallback: {e}")
+
         snapshot["endpoint_status"] = "ERROR"
         snapshot["warnings"].append("Could not fetch point metadata.")
 
@@ -342,5 +357,8 @@ def build_live_nws_snapshot() -> Dict[str, Any]:
     return snapshot
 
 if __name__ == "__main__":
+    import sys
     snap = build_live_nws_snapshot()
     print(json.dumps(snap, indent=2))
+    if snap.get("endpoint_status") == "ERROR":
+        sys.exit(1)

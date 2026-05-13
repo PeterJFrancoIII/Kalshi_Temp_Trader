@@ -26,6 +26,20 @@ class KalshiPublicClient:
             from market_data.kalshi_auth import get_required_env
             get_required_env("KALSHI_API_KEY_ID")
 
+        # Setup session with retries
+        self.session = requests.Session()
+        from requests.adapters import HTTPAdapter
+        from urllib3.util import Retry
+        
+        retries = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[500, 502, 503, 504],
+            # Note: NameResolutionError is often not retried by default Retry
+            # but we can try to be resilient.
+        )
+        self.session.mount("https://", HTTPAdapter(max_retries=retries))
+
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Internal helper for GET requests."""
         url = f"{self.base_url}{path}"
@@ -35,7 +49,8 @@ class KalshiPublicClient:
             from market_data.kalshi_auth import create_kalshi_auth_headers
             headers.update(create_kalshi_auth_headers("GET", path))
 
-        response = requests.get(url, params=params, headers=headers)
+        # Use session and add timeout
+        response = self.session.get(url, params=params, headers=headers, timeout=15)
         response.raise_for_status()
         return response.json()
 

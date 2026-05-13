@@ -12,7 +12,7 @@ class TestKalshiPublicClient(unittest.TestCase):
     def tearDown(self):
         self.env_patcher.stop()
 
-    @patch("requests.get")
+    @patch("requests.Session.get")
     def test_get_requests_include_auth_headers_when_enabled(self, mock_get):
         from market_data.kalshi_public_client import KalshiPublicClient
 
@@ -40,7 +40,7 @@ class TestKalshiPublicClient(unittest.TestCase):
             self.assertIn("KALSHI-ACCESS-TIMESTAMP", headers)
             self.assertIn("KALSHI-ACCESS-SIGNATURE", headers)
 
-    @patch("requests.get")
+    @patch("requests.Session.get")
     def test_get_requests_do_not_include_auth_headers_when_disabled(self, mock_get):
         from market_data.kalshi_public_client import KalshiPublicClient
 
@@ -83,7 +83,7 @@ class TestKalshiPublicClient(unittest.TestCase):
         self.assertFalse(hasattr(client, "cancel_order"))
 
 
-    @patch("requests.get")
+    @patch("requests.Session.get")
     def test_get_orderbook_calls_correct_path(self, mock_get):
         from market_data.kalshi_public_client import KalshiPublicClient
         

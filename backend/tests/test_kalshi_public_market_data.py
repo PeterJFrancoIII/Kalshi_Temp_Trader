@@ -58,14 +58,14 @@ def test_kalshi_client_mocked_discovery():
     mock_series_resp.raise_for_status = MagicMock()
 
     # Define side_effect to handle multiple calls
-    def side_effect(url, params=None, headers=None):
+    def side_effect(url, *args, **kwargs):
         if "/markets" in url:
             return mock_markets_resp
         if "/series" in url:
             return mock_series_resp
         return MagicMock()
 
-    with patch("requests.get", side_effect=side_effect):
+    with patch("requests.Session.get", side_effect=side_effect):
         client = KalshiPublicClient()
         result = client.discover_temperature_markets(["miami", "high"])
         discovered = result["candidate_markets"]
@@ -109,14 +109,14 @@ def test_kalshi_client_broad_discovery():
     mock_series_resp.json.return_value = {"series": []}
     mock_series_resp.raise_for_status = MagicMock()
 
-    def side_effect(url, params=None, headers=None):
+    def side_effect(url, *args, **kwargs):
         if "/markets" in url:
             return mock_markets_resp
         if "/series" in url:
             return mock_series_resp
         return MagicMock()
 
-    with patch("requests.get", side_effect=side_effect):
+    with patch("requests.Session.get", side_effect=side_effect):
         client = KalshiPublicClient()
         # Should match MIA-HEAT (Miami) and NYC-WX (temperature)
         result = client.discover_temperature_markets(["Miami", "temperature"])
@@ -148,7 +148,7 @@ def test_kalshi_manual_ticker_lookup():
         "market": {"ticker": "KNOWN-TICKER", "title": "Manual Market"}
     }
     
-    with patch("requests.get", return_value=mock_market_resp):
+    with patch("requests.Session.get", return_value=mock_market_resp):
         client = KalshiPublicClient()
         result = client.get_market("KNOWN-TICKER")
     
@@ -161,7 +161,7 @@ def test_kalshi_manual_series_lookup():
         "markets": [{"ticker": "SERIES-M1", "title": "Series Market"}]
     }
     
-    with patch("requests.get", return_value=mock_series_resp):
+    with patch("requests.Session.get", return_value=mock_series_resp):
         client = KalshiPublicClient()
         result = client.get_markets_for_series("KXKX")
     

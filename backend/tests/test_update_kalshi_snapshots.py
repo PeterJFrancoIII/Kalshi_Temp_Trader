@@ -14,7 +14,6 @@ mocks = {
     'requests': MagicMock(),
     'pydantic': MagicMock(),
     'beautifulsoup4': MagicMock(),
-    'sqlalchemy': MagicMock(),
     'python-dateutil': MagicMock(),
     'dateutil': MagicMock(),
     'dateutil.parser': MagicMock(),
@@ -107,7 +106,7 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
         
         # Mock open to return a valid snapshot when reading latest
         m_open = mock_open(read_data=json.dumps({
-            "selected_temperature_markets": [{"ticker": "PRESERVED-1"}]
+            "selected_temperature_markets": [{"ticker": "KXHIGHMIA-99DEC31-T80"}]
         }))
         
         with patch('builtins.open', m_open):
@@ -117,7 +116,7 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
                 pass
                 
         # Verify that it attempted to fetch orderbooks for the preserved ticker
-        mock_client.get_orderbook.assert_called_with("PRESERVED-1")
+        mock_client.get_orderbook.assert_called_with("KXHIGHMIA-99DEC31-T80")
         
         # Verify that it did NOT overwrite latest (did not call save_market_snapshot)
         mock_client.save_market_snapshot.assert_not_called()

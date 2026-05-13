@@ -342,8 +342,33 @@ def save_snapshot(snapshot: Dict[str, Any], raw: Dict[str, Any]) -> Tuple[Path, 
 
 
 if __name__ == "__main__":
+    import sys
     client = TWCKMIAClient()
     raw_bundle = client.fetch_raw_bundle()
     normalized = normalize_bundle(raw_bundle)
+
+    # P2 Resilience: Check for critical fetch failure (current conditions)
+    cc_status = raw_bundle.get("endpoints", {}).get("current_conditions", {}).get("status")
+    if cc_status != "OK":
+        if LATEST_FILE.exists():
+            try:
+                with open(LATEST_FILE, 'r') as f:
+                    prev_snap = json.load(f)
+                # Check if previous snapshot is 'OK' enough (has some data)
+                if prev_snap and prev_snap.get("current_conditions"):
+                    prev_snap["warnings"] = prev_snap.get("warnings", [])
+                    prev_snap["warnings"].append(f"Fetch failed ({cc_status}) at {normalized['fetched_at_utc']}. Preserving previous valid snapshot.")
+                    prev_snap["stale_fallback"] = True
+                    # Update LATEST_FILE but don't archive a broken raw bundle
+                    LATEST_FILE.write_text(json.dumps(prev_snap, indent=2))
+                    print(json.dumps(prev_snap, indent=2))
+                    sys.exit(0)
+            except Exception as e:
+                print(f"Warning: Failed to load previous TWC snapshot for fallback: {e}", file=sys.stderr)
+
+        # If we reach here, either no fallback exists or fallback failed
+        print(json.dumps(normalized, indent=2))
+        sys.exit(1)
+
     save_snapshot(normalized, raw_bundle)
     print(json.dumps(normalized, indent=2))

@@ -23,7 +23,7 @@ from shared.artifact_paths import (
     LATEST_NWS_KMIA_SNAPSHOT,
     LATEST_PAPER_SIGNAL,
 )
-from shared.timestamp_utils import extract_embedded_timestamp
+from shared.timestamp_utils import extract_embedded_timestamp, parse_ticker_date
 from trading.edge_engine import calculate_edge, calculate_expected_value, calculate_speed_to_roi
 from risk.risk_engine import evaluate_risk_gates
 from paper_trading.paper_ledger import PaperLedger
@@ -73,16 +73,6 @@ def parse_timestamp_from_filename(filename: str) -> Optional[datetime]:
             return None
     return None
 
-def parse_ticker_date(ticker: str) -> Optional[str]:
-    """Parses date from ticker like KXHIGHMIA-26MAY06-B84.5"""
-    match = re.search(r"([0-9]{2})([A-Z]{3})([0-9]{2})", ticker)
-    if not match: return None
-    year_short, mon_str, day_str = match.groups()
-    months = {"JAN":"01","FEB":"02","MAR":"03","APR":"04","MAY":"05","JUN":"06",
-              "JUL":"07","AUG":"08","SEP":"09","OCT":"10","NOV":"11","DEC":"12"}
-    month = months.get(mon_str.upper())
-    if not month: return None
-    return f"20{year_short}-{month}-{day_str}"
 
 def parse_forecast_bins_from_md(md_path: Path) -> Dict[str, float]:
     """Parses probability bins from a forecast markdown report."""
@@ -318,6 +308,11 @@ def generate_paper_signal(
         global_warnings.append("No active KXHIGHMIA markets available in current market snapshot.")
         status = "NO_SIGNAL"
 
+    # 3. Process markets
+    if prediction_timestamp is None:
+        prediction_timestamp = datetime.now(timezone.utc)
+    now_date_str = prediction_timestamp.strftime("%Y-%m-%d")
+
     for m in markets:
         ticker = m.get("ticker")
         mapping = m.get("contract_mapping", {})
@@ -346,8 +341,11 @@ def generate_paper_signal(
             
         ticker_date = parse_ticker_date(ticker)
         is_stale = False
-        if ticker_date and forecast_date_str and ticker_date < forecast_date_str:
-            is_stale = True
+        if ticker_date:
+            if forecast_date_str and ticker_date < forecast_date_str:
+                is_stale = True
+            elif ticker_date < now_date_str:
+                is_stale = True
         
         # Legacy compatibility bridge:
         # Historical markdown reports may still contain coarse fixed bins.

@@ -12,6 +12,8 @@ from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
+from paper_trading.signal_generator import generate_paper_signal, parse_forecast_bins_from_md
+
 class MockBaseModel:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -33,15 +35,11 @@ mocks = {
     'requests': MagicMock(),
     'pydantic': pydantic_mock,
     'beautifulsoup4': MagicMock(),
-    'sqlalchemy': MagicMock(),
-    'python-dateutil': MagicMock(),
-    'dateutil': MagicMock(),
-    'dateutil.parser': MagicMock()
+    'sqlalchemy': MagicMock()
 }
 
-with patch.dict('sys.modules', mocks):
-    from paper_trading.signal_generator import generate_paper_signal, parse_forecast_bins_from_md
-
+# Patch sys.modules for this class to avoid contamination during execution
+@patch.dict('sys.modules', mocks)
 class TestPaperSignalGenerator(unittest.TestCase):
 
     def setUp(self):
@@ -115,10 +113,14 @@ class TestPaperSignalGenerator(unittest.TestCase):
             json.dump(nws_data, f)
         sg.NWS_SNAPSHOT_FILE = nws_path
 
+        # Mock prediction date to May 7
+        test_now = datetime(2026, 5, 7, 12, 0, 0, tzinfo=timezone.utc)
+
         latest_path = self.temp_dir / "latest_paper_signal.json"
         report_path = generate_paper_signal(
             forecast_path=md_path,
             snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
             output_dir=self.temp_dir,
             latest_path_override=str(latest_path)
         )
@@ -161,10 +163,14 @@ class TestPaperSignalGenerator(unittest.TestCase):
             json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
         sg.NWS_SNAPSHOT_FILE = nws_path
         
+        # Mock prediction date to May 7
+        test_now = datetime(2026, 5, 7, 12, 0, 0, tzinfo=timezone.utc)
+
         latest_path = self.temp_dir / "latest_paper_signal.json"
         report_path = generate_paper_signal(
             forecast_path=md_path,
             snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
             output_dir=self.temp_dir,
             latest_path_override=str(latest_path)
         )
@@ -264,10 +270,14 @@ class TestPaperSignalGenerator(unittest.TestCase):
             json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
         sg.NWS_SNAPSHOT_FILE = nws_path
         
+        # Mock prediction date to May 7
+        test_now = datetime(2026, 5, 7, 12, 0, 0, tzinfo=timezone.utc)
+
         latest_path = self.temp_dir / "latest_paper_signal.json"
         report_path = generate_paper_signal(
             forecast_path=md_path,
             snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
             output_dir=self.temp_dir,
             latest_path_override=str(latest_path)
         )
@@ -305,10 +315,14 @@ class TestPaperSignalGenerator(unittest.TestCase):
             json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
         sg.NWS_SNAPSHOT_FILE = nws_path
         
+        # Mock prediction date to May 7
+        test_now = datetime(2026, 5, 7, 12, 0, 0, tzinfo=timezone.utc)
+
         latest_path = self.temp_dir / "latest_paper_signal.json"
         report_path = generate_paper_signal(
             forecast_path=md_path,
             snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
             output_dir=self.temp_dir,
             latest_path_override=str(latest_path)
         )

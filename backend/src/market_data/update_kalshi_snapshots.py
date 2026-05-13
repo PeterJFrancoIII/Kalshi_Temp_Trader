@@ -6,9 +6,16 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 from market_data.kalshi_public_client import KalshiPublicClient
 from shared.artifact_paths import LATEST_KALSHI_ORDERBOOKS
+from shared.timestamp_utils import parse_ticker_date
 
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
+
+# Paths and Config
+ROOT = Path(__file__).resolve().parents[3]
+CONFIG_PATH = ROOT / "backend" / "config" / "kalshi_market_discovery.json"
+OUTPUT_DIR = ROOT / "backend" / "data" / "processed" / "kalshi_market_snapshots"
+
 
 def normalize_orderbook(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize Kalshi orderbook response."""
@@ -35,11 +42,6 @@ def normalize_orderbook(raw: Dict[str, Any]) -> Dict[str, Any]:
 def main():
     print("--- Kalshi Public Market Data Updater ---")
     print("Mode: READ-ONLY / PAPER EVALUATION")
-    
-    # ROOT resolution
-    ROOT = Path(__file__).resolve().parents[3]
-    CONFIG_PATH = ROOT / "backend" / "config" / "kalshi_market_discovery.json"
-    OUTPUT_DIR = ROOT / "backend" / "data" / "processed" / "kalshi_market_snapshots"
     
     # Load Config
     if CONFIG_PATH.exists():
@@ -136,10 +138,21 @@ def main():
                     with open(latest_path, 'r') as f:
                         prev_snapshot = json.load(f)
                     prev_markets = prev_snapshot.get("selected_temperature_markets", [])
-                    if prev_markets:
-                        print(f"Preserving previous valid snapshot with {len(prev_markets)} markets.")
-                        final_selected = prev_markets
+                    
+                    # Filter for non-expired markets
+                    now_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    fresh_prev_markets = []
+                    for m in prev_markets:
+                        t_date = parse_ticker_date(m.get("ticker", ""))
+                        if t_date and t_date >= now_date_str:
+                            fresh_prev_markets.append(m)
+                    
+                    if fresh_prev_markets:
+                        print(f"Preserving {len(fresh_prev_markets)} fresh markets from previous valid snapshot.")
+                        final_selected = fresh_prev_markets
                         preserved_snapshot = True
+                    else:
+                        print("Previous snapshot contains only expired markets. Rejection preserved.")
                 except Exception as e:
                     print(f"Error reading previous snapshot: {e}")
         

@@ -149,8 +149,9 @@ def test_stale_data_detection():
 
 def test_missing_fields_no_crash():
     with patch("requests.get") as mock_get:
-        mock_get.return_value.json.return_value = {}
-        mock_get.return_value.status_code = 200
-        snap = build_live_nws_snapshot()
-        assert snap["station"] == "KMIA"
-        assert snap["current_temp_f"] is None
+        with patch("pathlib.Path.exists", return_value=False):
+            mock_get.return_value.json.return_value = {}
+            mock_get.return_value.status_code = 200
+            snap = build_live_nws_snapshot()
+            assert snap["station"] == "KMIA"
+            assert snap["current_temp_f"] is None

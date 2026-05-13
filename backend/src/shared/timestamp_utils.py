@@ -8,6 +8,7 @@ Rule: embedded JSON timestamps are canonical. Filesystem mtime is NEVER used
 for safety-critical ordering decisions.
 """
 
+import re
 import json
 import logging
 from datetime import datetime, timezone
@@ -27,6 +28,26 @@ EMBEDDED_TIMESTAMP_FIELDS: List[str] = [
     "snapshot_time",
     "as_of",
 ]
+
+
+def parse_ticker_date(ticker: str) -> Optional[str]:
+    """Parses date from ticker like KXHIGHMIA-26MAY06-B84.5
+    Returns YYYY-MM-DD string or None.
+    """
+    if not ticker:
+        return None
+    match = re.search(r"([0-9]{2})([A-Z]{3})([0-9]{2})", ticker)
+    if not match:
+        return None
+    year_short, mon_str, day_str = match.groups()
+    months = {
+        "JAN": "01", "FEB": "02", "MAR": "03", "APR": "04", "MAY": "05", "JUN": "06",
+        "JUL": "07", "AUG": "08", "SEP": "09", "OCT": "10", "NOV": "11", "DEC": "12"
+    }
+    month = months.get(mon_str.upper())
+    if not month:
+        return None
+    return f"20{year_short}-{month}-{day_str}"
 
 
 def extract_embedded_timestamp(filepath: Path) -> Optional[datetime]:
