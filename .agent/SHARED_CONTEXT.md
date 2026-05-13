@@ -1328,3 +1328,32 @@ Push `69ccad1` to origin (on explicit user instruction), then execute dry-run pi
   "next_task": "Push 69ccad1, then dry-run in DNS-unblocked environment"
 }
 ```
+
+
+# Skills Setup Note — AG/Cursor Agents
+
+## Off-the-shelf Skills installed or intended
+- writing-plans
+- executing-plans
+- subagent-driven-development
+- systematic-debugging
+- verification-before-completion
+- tdd
+- improve-codebase-architecture
+- using-git-worktrees
+- finishing-a-development-branch
+- webapp-testing
+
+## Local project Skills created
+- kalshi-weather-settlement-safety
+- kmia-probability-modeling
+- kalshi-contract-range-mapping
+- point-in-time-backtesting
+- risk-gate-auditor
+- kalshi-agent-governance-rollup
+
+## Reminder
+- **Dry-run / paper-evaluation only**: No live trading is allowed.
+- **No live trading**: No order placement or HTTP write methods.
+- **Agent 1** reviews phase/local changes.
+- **Agent 8** handles system-wide Go/No-Go and consolidation.
