@@ -87,11 +87,21 @@ def save_reports(prediction_data: Dict[str, Any], report_dir: str):
     with open(html_path, "w") as f:
         f.write(html_content)
     
+    # JSON (added for risk engine and signal generator compliance)
+    json_data = prediction_data.copy()
+    if "generated_at_utc" not in json_data:
+        json_data["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    
+    json_path = os.path.join(report_dir, f"{base_filename}.json")
+    with open(json_path, "w") as f:
+        json.dump(json_data, f, indent=2)
+    
     logger.info(f"Reports saved to {report_dir}")
     logger.info(f"  MD: {os.path.basename(md_path)}")
     logger.info(f"  HTML: {os.path.basename(html_path)}")
+    logger.info(f"  JSON: {os.path.basename(json_path)}")
     
-    return md_path, html_path
+    return md_path, html_path, json_path
 
 def run_prediction_pipeline(
     target_date: Optional[date] = None, 

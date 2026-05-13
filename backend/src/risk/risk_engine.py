@@ -185,7 +185,7 @@ def check_forecast_integrity(
         contract_labels = set()
         for cb in contract_bins:
             if isinstance(cb, dict):
-                label = cb.get("label") or cb.get("contract_bin", {}).get("label")
+                label = cb.get("label") or cb.get("contract_bin", {}).get("label") or cb.get("contract_mapping", {}).get("label")
             else:
                 label = getattr(cb, "label", None)
             
