@@ -54,3 +54,7 @@ test_output*.txt
 
 # Local scratch workspace
 scratch/
+
+# Agent Artifacts and Logs
+artifacts/
+backend/test_results*.log
