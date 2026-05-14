@@ -208,11 +208,28 @@ def forecast_daily_high_bins_v2(
         final_bins = {b: 1.0/len(REQUIRED_BINS) for b in REQUIRED_BINS}
         warnings.append("Failed to generate valid distribution; using uniform fallback.")
 
-    # Best single number (heuristic: peak of distribution or forecast high)
-    # Peak of derived bins
-    best_single_number_f = forecast_high_f if forecast_high_f else 82
+    # Best single number (heuristic: expected value of distribution)
+    expected_value = sum(t * p for t, p in integer_dist.items()) if integer_dist else (forecast_high_f if forecast_high_f else 82)
+    best_single_number_f = int(round(expected_value))
+    
     if observed_max_so_far_f is not None and observed_max_so_far_f > best_single_number_f:
         best_single_number_f = observed_max_so_far_f
+
+    # Mode calculation
+    dist_mode = max(integer_dist, key=integer_dist.get) if integer_dist else best_single_number_f
+
+    # Weather suppression shift for metadata (replicating mapping logic)
+    suppression_shift = 0.0
+    if integer_dist:
+        t_sev = thunderstorm_severity.lower()
+        if "slight" in t_sev or "isolated" in t_sev:
+            suppression_shift = -0.5
+        elif "chance" in t_sev or "scattered" in t_sev:
+            suppression_shift = -1.0
+        elif "likely" in t_sev or "definite" in t_sev or "thunderstorm" in t_sev or thunderstorm_flag:
+            suppression_shift = -2.0
+        elif recent_rain_flag or overcast_flag:
+            suppression_shift = -1.0
 
     # Confidence heuristic
     confidence = "medium"
@@ -221,16 +238,19 @@ def forecast_daily_high_bins_v2(
     elif observed_max_so_far_f is not None and observed_max_so_far_f >= 85:
         confidence = "high"
 
-
     return {
         "station": "KMIA",
         "date": target_date,
         "metric": "daily_max_temperature_f",
         "model_version": "rules_v2_climatology",
         "best_single_number_f": best_single_number_f,
+        "deterministic_anchor_f": forecast_high_f,
+        "final_distribution_mean_f": round(expected_value, 2) if integer_dist else None,
+        "final_distribution_mode_f": dist_mode,
+        "forecast_weight": V2_FORECAST_WEIGHT,
+        "climatology_weight": V2_CLIMATOLOGY_WEIGHT,
+        "weather_suppression_shift_f": suppression_shift,
         "probability_bins": final_bins,
-        # Integer-level distribution for dynamic Kalshi contract bin mapping.
-        # Keys are int Fahrenheit temperatures; values are probability masses.
         "integer_distribution": integer_dist,
         "integer_distribution_cdf": int_cdf,
         "observed_max_so_far_f": observed_max_so_far_f,

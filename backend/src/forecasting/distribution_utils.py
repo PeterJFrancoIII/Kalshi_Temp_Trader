@@ -40,7 +40,7 @@ def _normal_cdf(z: float) -> float:
 
 def build_integer_distribution(
     center_f: int,
-    std_f: float = 3.0,
+    std_f: float = 2.2,
     temp_range: Tuple[int, int] = (60, 115),
 ) -> Dict[int, float]:
     """
@@ -52,7 +52,7 @@ def build_integer_distribution(
 
     Args:
         center_f:   Distribution center (e.g. NWS forecast high).
-        std_f:      Standard deviation in °F.  Default 3.0 (scaffold value).
+        std_f:      Standard deviation in °F.  Default 2.2 (calibrated value).
         temp_range: (min_temp, max_temp) inclusive.
 
     Returns:
