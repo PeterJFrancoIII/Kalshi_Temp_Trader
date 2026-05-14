@@ -145,10 +145,34 @@ def run_prediction_pipeline(
                 with open(nws_snapshot_path, "r") as _f:
                     nws_data = json.load(_f)
                 
-                # Extract current conditions
-                current_temp_f = int(round(nws_data.get("current_temp_f", current_temp_f)))
-                observed_max_f = int(round(nws_data.get("observed_max_so_far_f", observed_max_f)))
-                live_data_stale = nws_data.get("stale_data", True)
+                # Extract current conditions (Only if they match the target date)
+                target_date_str = target_date.isoformat()
+                obs_table = nws_data.get("recent_observations_table", [])
+                
+                # Filter observations to target date
+                target_day_obs = [
+                    row for row in obs_table 
+                    if row.get("date_et") == target_date_str
+                ]
+                
+                if target_day_obs:
+                    # Latest observation for target date
+                    latest_target = target_day_obs[0]
+                    current_temp_f = int(round(latest_target.get("temperature_f", current_temp_f)))
+                    
+                    # Max temperature observed on target date
+                    target_day_temps = [r.get("temperature_f") for r in target_day_obs if r.get("temperature_f") is not None]
+                    if target_day_temps:
+                        observed_max_f = int(round(max(target_day_temps)))
+                    else:
+                        observed_max_f = None
+                    live_data_stale = False # We found data for today
+                else:
+                    # No data for target date
+                    observed_max_f = None
+                    # If we have no data for target date, we remain in "stale" or "unknown" state for live correction
+                    live_data_stale = True
+                    logger.warning(f"No observations found in snapshot for target date {target_date_str}")
                 
                 # Extract forecast high for the target date from daily_forecast array
                 daily_forecast = nws_data.get("daily_forecast", [])

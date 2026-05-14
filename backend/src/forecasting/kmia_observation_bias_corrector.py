@@ -51,7 +51,21 @@ def correct_distribution(
     stale_data = nws_snapshot.get("stale_data", True)
     
     # 1. Rule 1: Observed Max Truncation
-    obs_max = nws_snapshot.get("observed_max_so_far_f")
+    # We MUST only truncate using observations from the SAME ET date as the distribution.
+    target_date_str = output.get("date")
+    obs_table = nws_snapshot.get("recent_observations_table", [])
+    
+    target_day_obs = [
+        row for row in obs_table 
+        if row.get("date_et") == target_date_str
+    ]
+    
+    obs_max = None
+    if target_day_obs:
+        target_day_temps = [r.get("temperature_f") for r in target_day_obs if r.get("temperature_f") is not None]
+        if target_day_temps:
+            obs_max = max(target_day_temps)
+            
     if obs_max is not None:
         obs_max_int = int(round(obs_max))
         truncated = False
@@ -61,7 +75,7 @@ def correct_distribution(
                 truncated = True
         if truncated:
             probs = normalize_probability_mass(probs)
-            output["correction_reasons"].append(f"Truncated lower-tail probabilities below observed max of {obs_max}F.")
+            output["correction_reasons"].append(f"Truncated lower-tail probabilities below observed max of {obs_max}F for {target_date_str}.")
 
     # 2. Rule 2: Stale Data Check
     if stale_data:

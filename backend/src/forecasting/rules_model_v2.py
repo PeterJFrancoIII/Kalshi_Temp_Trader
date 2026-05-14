@@ -170,6 +170,9 @@ def forecast_daily_high_bins_v2(
         main_drivers.append("Adjusted for cloud cover/precipitation.")
 
     # 5. Apply Hard live constraint
+    if observed_max_so_far_f is None:
+        warnings.append("No same-day NWS observations available; skipping lower-tail truncation.")
+    
     final_bins = zero_impossible_bins(blended_bins, observed_max_so_far_f)
     
     # 6. Normalize
@@ -182,14 +185,14 @@ def forecast_daily_high_bins_v2(
     peak_bin = max(final_bins, key=final_bins.get)
     # This is a bit crude but works for v2
     best_single_number_f = forecast_high_f if forecast_high_f else 82
-    if observed_max_so_far_f > best_single_number_f:
+    if observed_max_so_far_f is not None and observed_max_so_far_f > best_single_number_f:
         best_single_number_f = observed_max_so_far_f
 
     # Confidence heuristic
     confidence = "medium"
     if input_features.get("stale_data_flag"):
         confidence = "low"
-    elif observed_max_so_far_f >= 85:
+    elif observed_max_so_far_f is not None and observed_max_so_far_f >= 85:
         confidence = "high"
 
     # --- Integer-level distribution (dynamic bins support) ---
@@ -204,7 +207,10 @@ def forecast_daily_high_bins_v2(
     clim_int_dist = climatology_prior_integer_for_date(history_records or [], target_date)
     
     if forecast_high_f is not None:
-        center = max(int(forecast_high_f), observed_max_so_far_f)
+        center = forecast_high_f
+        if observed_max_so_far_f is not None:
+            center = max(int(forecast_high_f), int(observed_max_so_far_f))
+        
         forecast_int_dist = build_integer_distribution(center_f=center)
         
         # Blend (using centralized weights)
@@ -227,7 +233,7 @@ def forecast_daily_high_bins_v2(
             recent_rain_flag=input_features.get("recent_rain_flag", False),
             overcast_flag=input_features.get("overcast_flag", False),
         )
-        if observed_max_so_far_f > 0:
+        if observed_max_so_far_f is not None and observed_max_so_far_f > 0:
             integer_dist = zero_impossible_temps(integer_dist, observed_max_so_far_f)
         else:
             integer_dist = normalize_probability_mass(integer_dist)

@@ -9,6 +9,7 @@ class TestKmiaObservationBiasCorrector(unittest.TestCase):
     def test_observed_max_truncation(self):
         """Probabilities below observed max are zeroed and renormalized."""
         dist = {
+            "date": "2026-05-11",
             "integer_probs": {85: 0.2, 86: 0.3, 87: 0.5},
             "cdf": {},
             "warnings": []
@@ -18,7 +19,13 @@ class TestKmiaObservationBiasCorrector(unittest.TestCase):
             "stale_data": False,
             "wind_direction_compass": "N",
             "wind_speed_mph": 5.0,
-            "current_temp_f": 86.0
+            "current_temp_f": 86.0,
+            "recent_observations_table": [
+                {
+                    "date_et": "2026-05-11",
+                    "temperature_f": 86.4
+                }
+            ]
         }
         dt = datetime(2026, 5, 11, 14, 0, tzinfo=tz.gettz("America/New_York"))
 
@@ -33,6 +40,7 @@ class TestKmiaObservationBiasCorrector(unittest.TestCase):
     def test_stale_observation_skips_heuristics(self):
         """Stale NWS data skips all speculative regime shifts."""
         dist = {
+            "date": "2026-05-11",
             "integer_probs": {85: 0.2, 86: 0.8},
             "warnings": []
         }
@@ -52,6 +60,7 @@ class TestKmiaObservationBiasCorrector(unittest.TestCase):
     def test_sea_breeze_cooling_shift(self):
         """East wind above 8 mph applies -1F cooling shift."""
         dist = {
+            "date": "2026-05-11",
             "integer_probs": {85: 0.2, 86: 0.8},
             "warnings": []
         }
@@ -72,6 +81,7 @@ class TestKmiaObservationBiasCorrector(unittest.TestCase):
     def test_offshore_warming_shift(self):
         """West/southwest wind applies +1F warming shift."""
         dist = {
+            "date": "2026-05-11",
             "integer_probs": {85: 0.2, 86: 0.8},
             "warnings": []
         }
@@ -92,6 +102,7 @@ class TestKmiaObservationBiasCorrector(unittest.TestCase):
     def test_warm_ramp_morning(self):
         """High morning temperature (>=85 before 11h ET) applies +1F warm ramp."""
         dist = {
+            "date": "2026-05-11",
             "integer_probs": {85: 0.2, 86: 0.8},
             "warnings": []
         }

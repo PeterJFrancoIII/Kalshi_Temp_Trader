@@ -24,11 +24,14 @@ def validate_probability_bins(bins: Dict[str, float]):
     if total < 0:
         raise ValueError("Total probability cannot be negative")
 
-def zero_impossible_bins(bins: Dict[str, float], observed_max_so_far_f: int) -> Dict[str, float]:
+def zero_impossible_bins(bins: Dict[str, float], observed_max_so_far_f: Optional[int]) -> Dict[str, float]:
     """
     Strict rule: If the upper bound of a bin is less than the observed max so far, 
     that bin must receive 0.0 probability.
     """
+    if not observed_max_so_far_f:
+        return bins
+    
     # Bin upper bounds for comparison
     boundaries = {
         "<=78": 78,

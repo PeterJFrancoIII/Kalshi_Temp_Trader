@@ -61,14 +61,11 @@ def compute_live_features(
                 observed_max_so_far_f = temp_int
                 time_of_observed_max = o.timestamp
                 
-    # If no temp today, fallback to latest temp if available
+    # If no temp today, we do not fall back to latest_obs if it's from a prior day.
     if observed_max_so_far_f is None:
-        if latest_obs.temperature_f is not None:
-            observed_max_so_far_f = int(round(latest_obs.temperature_f))
-            time_of_observed_max = latest_obs.timestamp
-        else:
-            observed_max_so_far_f = 0
-            stale_data_flag = True
+        # Default to 0 for safety, but flag as stale if no data for today exists
+        observed_max_so_far_f = 0
+        stale_data_flag = True
 
     current_temp_f = int(round(latest_obs.temperature_f)) if latest_obs.temperature_f is not None else 0
     if latest_obs.temperature_f is None:
