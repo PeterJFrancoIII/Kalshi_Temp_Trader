@@ -73,6 +73,13 @@ def parse_timestamp_from_filename(filename: str) -> Optional[datetime]:
             return None
     return None
 
+def _normalize_contract_key(label: str) -> str:
+    """Internal helper to normalize contract labels for risk comparison."""
+    if not label:
+        return label
+    res = re.sub(r'\.0(?!\d)', '', label)
+    res = re.sub(r'([<>]=?)\s+', r'\1', res)
+    return res
 
 def parse_forecast_bins_from_md(md_path: Path) -> Dict[str, float]:
     """Parses probability bins from a forecast markdown report."""
@@ -299,6 +306,7 @@ def generate_paper_signal(
     signals = []
     global_warnings = []
     status = "OK"
+    dynamic_contract_probabilities = {}
     
     if not model_bins:
         global_warnings.append("No forecast bins available. Ensure daily workflow ran.")
@@ -369,6 +377,10 @@ def generate_paper_signal(
                 results = map_distribution_to_contracts(integer_dist, [mapping])
                 prob = results.get(ticker, {}).get("probability")
 
+            if prob is not None and not is_stale:
+                norm_key = _normalize_contract_key(bin_str)
+                dynamic_contract_probabilities[norm_key] = prob
+
             if prob is None and not is_stale:
                 global_warnings.append(f"{ticker}: Probability for bin {bin_str} not found in forecast.")
                 # Requirement 5: Generate Dashboard-Compatible Signal Rows even if mapping fails
@@ -415,6 +427,7 @@ def generate_paper_signal(
         forecast_data_for_risk = dict(forecast_data_obj)
         if global_warnings:
             forecast_data_for_risk.setdefault("warnings", []).extend(global_warnings)
+        forecast_data_for_risk["dynamic_contract_probabilities"] = dynamic_contract_probabilities
 
         risk_decision = evaluate_risk_gates(
             forecast_data=forecast_data_for_risk,
@@ -512,6 +525,7 @@ def generate_paper_signal(
         "status": status,
         "forecast_source": str(forecast_file.name) if forecast_file else None,
         "market_snapshot_source": str(snapshot_to_use.name) if snapshot_to_use else None,
+        "dynamic_contract_probabilities": dynamic_contract_probabilities,
         "signals": signals,
         "best_signal": best_signal,
         "warnings": list(set(global_warnings)),

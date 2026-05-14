@@ -129,6 +129,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
 
         self.assertEqual(len(report["signals"]), 1)
         self.assertEqual(report["signals"][0]["market_ticker"], "KXHIGHMIA-26MAY07-B86.5")
+        self.assertIn("model_probability", report["signals"][0])
 
     def test_generate_signal_safety_and_skipping(self):
         """Verify safety field and price-based skipping."""

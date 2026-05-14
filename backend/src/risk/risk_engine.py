@@ -7,12 +7,23 @@ from datetime import datetime, timezone, timedelta
 logger = logging.getLogger(__name__)
 
 class RiskDecision:
-    def __init__(self, passed: bool, reason: str = "OK"):
+    def __init__(self, passed: bool, reason: str = "OK", failed_gate_id: str = None, failed_gate_name: str = None, no_trade_reason: str = None):
         self.passed = passed
         self.reason = reason
+        self.failed_gate_id = failed_gate_id
+        self.failed_gate_name = failed_gate_name
+        self.no_trade_reason = no_trade_reason
         
     def __repr__(self):
         return f"RiskDecision(passed={self.passed}, reason={self.reason})"
+
+def _normalize_contract_key(label: str) -> str:
+    """Internal helper to normalize contract labels for risk comparison."""
+    if not label:
+        return label
+    res = re.sub(r'\.0(?!\d)', '', label)
+    res = re.sub(r'([<>]=?)\s+', r'\1', res)
+    return res
 
 def check_kill_switch() -> RiskDecision:
     """Gate 10: Manual Kill Switch."""
@@ -173,12 +184,16 @@ def check_forecast_integrity(
 ) -> RiskDecision:
     """Gate 11: Forecast Integrity (Sum and Bins)."""
     probs = forecast_data.get("probability_bins", {})
-    if not probs:
-        return RiskDecision(False, "Missing probability bins.")
+    dynamic_probs = forecast_data.get("dynamic_contract_probabilities", {})
     
-    total = sum(probs.values())
-    if not (0.99 <= total <= 1.01):
-        return RiskDecision(False, f"Forecast integrity failure: probabilities sum to {total:.4f} (expected ~1.0).")
+    if not probs and not dynamic_probs:
+        return RiskDecision(False, "Missing probability bins or dynamic probabilities.")
+    
+    # Sum check on probs (legacy bins) if present
+    if probs:
+        total = sum(probs.values())
+        if not (0.99 <= total <= 1.01):
+            return RiskDecision(False, f"Forecast integrity failure: probabilities sum to {total:.4f} (expected ~1.0).")
     
     # If contract_bins are provided, ensure the probability_bins keys match the labels
     if contract_bins:
@@ -193,12 +208,25 @@ def check_forecast_integrity(
                 contract_labels.add(str(label))
                 
         # Check that we have probabilities for all active contracts
-        missing = [lbl for lbl in contract_labels if lbl not in probs]
+        missing = []
+        for lbl in contract_labels:
+            norm_lbl = _normalize_contract_key(lbl)
+            if dynamic_probs:
+                if norm_lbl not in dynamic_probs:
+                    missing.append(lbl)
+            else:
+                if lbl not in probs:
+                    missing.append(lbl)
+                    
         if missing:
             return RiskDecision(False, f"Missing probabilities for discovered contracts: {', '.join(missing)}")
         
         # Check that we don't have extra probabilities not in contracts (warn only)
-        extra = [lbl for lbl in probs if lbl not in contract_labels]
+        if dynamic_probs:
+            extra = [lbl for lbl in dynamic_probs if lbl not in [_normalize_contract_key(l) for l in contract_labels]]
+        else:
+            extra = [lbl for lbl in probs if lbl not in contract_labels]
+            
         if extra:
             logger.warning(f"Extra probabilities found not mapping to active contracts: {', '.join(extra)}")
             
@@ -220,52 +248,96 @@ def evaluate_risk_gates(
     contract_bins: Optional[List[Any]] = None
 ) -> RiskDecision:
     """
-    Evaluates all 10 risk gates in sequence.
+    Evaluates all 11 risk gates in sequence.
     Returns the first failure, or a passing RiskDecision.
     """
     
     # Gate 10
     res = check_kill_switch()
-    if not res.passed: return res
+    if not res.passed:
+        res.failed_gate_id = "GATE_10"
+        res.failed_gate_name = "KILL_SWITCH"
+        res.no_trade_reason = res.reason
+        return res
     
     # Gate 1
     res = check_weather_data_availability(forecast_data)
-    if not res.passed: return res
+    if not res.passed:
+        res.failed_gate_id = "GATE_1"
+        res.failed_gate_name = "WEATHER_DATA_AVAILABILITY"
+        res.no_trade_reason = res.reason
+        return res
     
     # Gate 2
     res = check_weather_freshness(latest_obs_time_iso)
-    if not res.passed: return res
+    if not res.passed:
+        res.failed_gate_id = "GATE_2"
+        res.failed_gate_name = "WEATHER_FRESHNESS"
+        res.no_trade_reason = res.reason
+        return res
     
     # Gate 3
     res = check_forecast_confidence(forecast_data)
-    if not res.passed: return res
+    if not res.passed:
+        res.failed_gate_id = "GATE_3"
+        res.failed_gate_name = "FORECAST_CONFIDENCE"
+        res.no_trade_reason = res.reason
+        return res
     
     # Gate 4
     res = check_settlement_boundary_risk(model_prob, raw_edge, best_high_f, bin_label)
-    if not res.passed: return res
+    if not res.passed:
+        res.failed_gate_id = "GATE_4"
+        res.failed_gate_name = "SETTLEMENT_BOUNDARY_RISK"
+        res.no_trade_reason = res.reason
+        return res
     
     # Gate 5
     res = check_liquidity_and_spread(yes_ask, yes_bid)
-    if not res.passed: return res
+    if not res.passed:
+        res.failed_gate_id = "GATE_5"
+        res.failed_gate_name = "LIQUIDITY_AND_SPREAD"
+        res.no_trade_reason = res.reason
+        return res
     
     # Gate 6
     res = check_fee_adjusted_edge(edge)
-    if not res.passed: return res
+    if not res.passed:
+        res.failed_gate_id = "GATE_6"
+        res.failed_gate_name = "FEE_ADJUSTED_EDGE"
+        res.no_trade_reason = res.reason
+        return res
     
     # Gate 7
     res = check_daily_loss_limit(ledger_summary)
-    if not res.passed: return res
+    if not res.passed:
+        res.failed_gate_id = "GATE_7"
+        res.failed_gate_name = "DAILY_LOSS_LIMIT"
+        res.no_trade_reason = res.reason
+        return res
     
     # Gate 8
     res = check_weekly_drawdown_limit(ledger_summary)
-    if not res.passed: return res
+    if not res.passed:
+        res.failed_gate_id = "GATE_8"
+        res.failed_gate_name = "WEEKLY_DRAWDOWN_LIMIT"
+        res.no_trade_reason = res.reason
+        return res
     
     # Gate 9
     res = check_market_concentration(ledger_summary, target_date_str)
-    if not res.passed: return res
+    if not res.passed:
+        res.failed_gate_id = "GATE_9"
+        res.failed_gate_name = "MARKET_CONCENTRATION"
+        res.no_trade_reason = res.reason
+        return res
 
     # Gate 11
     res = check_forecast_integrity(forecast_data, contract_bins)
-    if not res.passed: return res
+    if not res.passed:
+        res.failed_gate_id = "GATE_11"
+        res.failed_gate_name = "FORECAST_INTEGRITY"
+        res.no_trade_reason = res.reason
+        return res
     
     return RiskDecision(True, "All risk gates passed.")

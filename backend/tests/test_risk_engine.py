@@ -141,6 +141,51 @@ class TestRiskEngine(unittest.TestCase):
         data = {"probability_bins": {"81-82": 1.0}}
         self.assertTrue(check_forecast_integrity(data, contracts).passed)
 
+    def test_gate_11_dynamic_probabilities_pass(self):
+        contracts = [{"label": "86.0-87.0"}]
+        data = {
+            "probability_bins": {"<=78": 1.0},
+            "dynamic_contract_probabilities": {"86-87": 0.5}
+        }
+        self.assertTrue(check_forecast_integrity(data, contracts).passed)
+
+    def test_gate_11_dynamic_probabilities_missing(self):
+        contracts = [{"label": "86.0-87.0"}, {"label": "88.0-89.0"}]
+        data = {
+            "probability_bins": {"<=78": 1.0},
+            "dynamic_contract_probabilities": {"86-87": 0.5}
+        }
+        self.assertFalse(check_forecast_integrity(data, contracts).passed)
+
+    def test_gate_2_stale_weather_precedence(self):
+        now_dt = datetime.now(timezone.utc)
+        stale_dt = (now_dt - timedelta(minutes=100)).isoformat()
+        
+        decision = evaluate_risk_gates(
+            forecast_data={"warnings": [], "probability_bins": {"<=78": 1.0}},
+            latest_obs_time_iso=stale_dt,
+            model_prob=0.70,
+            executable_price=0.50,
+            yes_ask=0.52,
+            yes_bid=0.48,
+            edge=0.15,
+            raw_edge=0.20,
+            ledger_summary={"daily_pnl": 0, "weekly_pnl": 0, "active_trades_by_date": {}},
+            target_date_str="2026-05-11",
+            best_high_f=83.5,
+            bin_label="83-84"
+        )
+        self.assertFalse(decision.passed)
+        self.assertEqual(decision.failed_gate_id, "GATE_2")
+
+    def test_gate_11_legacy_fallback(self):
+        contracts = [{"label": "81-82"}]
+        data = {"probability_bins": {"81-82": 1.0}}
+        self.assertTrue(check_forecast_integrity(data, contracts).passed)
+        
+        data = {"probability_bins": {"<=78": 1.0}}
+        self.assertFalse(check_forecast_integrity(data, contracts).passed)
+
     @patch.dict(os.environ, {}, clear=True)
     def test_evaluate_all_gates(self):
         now_dt = datetime.now(timezone.utc).isoformat()
