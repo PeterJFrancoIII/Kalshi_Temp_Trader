@@ -124,20 +124,90 @@ def run_prediction_pipeline(
     logger.info(f"Starting prediction pipeline for {target_date} (Dry Run: {dry_run}, Model: {model_name}, Compare: {compare_models})...")
     
     if dry_run:
-        # Mock features for dry run
+        # C1-A Fix: Read live NWS snapshot instead of using hardcoded values.
+        # The hardcoded forecast_high_f=85 caused a 5°F cold bias when NWS said 90°F.
+        nws_snapshot_path = os.path.join(
+            os.path.dirname(__file__), "../../data/processed/weather_nws/latest_nws_kmia_snapshot.json"
+        )
+        nws_snapshot_path = os.path.abspath(nws_snapshot_path)
+        
+        # Climatological defaults — only used if NWS snapshot is unavailable.
+        forecast_high_f = 85
+        current_temp_f = 81
+        observed_max_f = 82
+        overcast_flag = False
+        thunderstorm_flag = False
+        recent_rain_flag = False
+        live_data_stale = True  # Default to stale if no snapshot
+        
+        if os.path.exists(nws_snapshot_path):
+            try:
+                with open(nws_snapshot_path, "r") as _f:
+                    nws_data = json.load(_f)
+                
+                # Extract current conditions
+                current_temp_f = int(round(nws_data.get("current_temp_f", current_temp_f)))
+                observed_max_f = int(round(nws_data.get("observed_max_so_far_f", observed_max_f)))
+                live_data_stale = nws_data.get("stale_data", True)
+                
+                # Extract forecast high for the target date from daily_forecast array
+                daily_forecast = nws_data.get("daily_forecast", [])
+                target_date_str = target_date.isoformat()
+                nws_forecast_high = None
+                for period in daily_forecast:
+                    if (period.get("forecast_date_et") == target_date_str 
+                            and period.get("isDaytime", False)):
+                        nws_forecast_high = period.get("temperature_f")
+                        break
+                
+                if nws_forecast_high is not None:
+                    forecast_high_f = int(nws_forecast_high)
+                    logger.info(f"NWS forecast high for {target_date_str}: {forecast_high_f}°F")
+                else:
+                    # Fallback: use the top-level forecast_high_f if available
+                    top_level_high = nws_data.get("forecast_high_f")
+                    if top_level_high is not None:
+                        forecast_high_f = int(top_level_high)
+                        logger.warning(
+                            f"No daily_forecast entry for {target_date_str}; "
+                            f"using top-level forecast_high_f={forecast_high_f}°F"
+                        )
+                    else:
+                        logger.warning(
+                            f"No NWS forecast high found for {target_date_str}. "
+                            f"Using climatological fallback: {forecast_high_f}°F"
+                        )
+                
+                # Precipitation/cloud flags from short forecast text
+                for period in daily_forecast:
+                    if (period.get("forecast_date_et") == target_date_str 
+                            and period.get("isDaytime", False)):
+                        short_fc = (period.get("shortForecast") or "").lower()
+                        thunderstorm_flag = "thunderstorm" in short_fc
+                        recent_rain_flag = "rain" in short_fc or "shower" in short_fc
+                        overcast_flag = "cloudy" in short_fc and "partly" not in short_fc
+                        break
+                        
+                logger.info(f"Loaded NWS snapshot for dry-run features (fetched: {nws_data.get('fetched_at_utc', 'unknown')}).")
+            except Exception as e:
+                logger.warning(f"Failed to load NWS snapshot for dry-run: {e}. Using climatological defaults.")
+                live_data_stale = True
+        else:
+            logger.warning(f"NWS snapshot not found at {nws_snapshot_path}. Using climatological defaults.")
+        
         features = {
-            "observed_max_so_far_f": 82,
-            "current_temp_f": 81,
-            "forecast_high_f": 85,
+            "observed_max_so_far_f": observed_max_f,
+            "current_temp_f": current_temp_f,
+            "forecast_high_f": forecast_high_f,
             "normal_high_f": 82,
-            "recent_rain_flag": False,
-            "thunderstorm_flag": False,
-            "overcast_flag": True,
+            "recent_rain_flag": recent_rain_flag,
+            "thunderstorm_flag": thunderstorm_flag,
+            "overcast_flag": overcast_flag,
             "current_time_et": datetime.now(tz.gettz('US/Eastern')),
-            "live_data_stale": False,
+            "live_data_stale": live_data_stale,
             "target_date": target_date.isoformat()
         }
-        logger.info("Using mock features for dry run.")
+        logger.info(f"Dry-run features: forecast_high_f={forecast_high_f}, observed_max={observed_max_f}, current_temp={current_temp_f}")
     else:
         if SessionLocal is None:
             logger.error("Database session not available. Use --dry-run for testing.")

@@ -396,5 +396,179 @@ class TestPaperSignalGenerator(unittest.TestCase):
         self.assertEqual(report["dynamic_contract_probabilities"][">=87"], 0.5)
         self.assertEqual(report["dynamic_contract_probabilities"][">=85"], 0.1)
 
+    def test_stale_when_forecast_older_than_ticker(self):
+        """C1-B regression: forecast dated May 7, ticker for May 8 → stale.
+        The signal generator must not apply an older forecast to newer contracts."""
+        import paper_trading.signal_generator as sg
+
+        # Forecast is for May 7
+        forecast_path = self.temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.json"
+        forecast_data = {
+            "date": "2026-05-07",
+            "probability_bins": {">=87": 0.50, "85-86": 0.30, "83-84": 0.20},
+            "integer_distribution": {str(t): 0.02 for t in range(60, 110)},
+            "forecast_high_f": 87,
+            "generated_at_utc": "2026-05-07T12:00:00Z"
+        }
+        with open(forecast_path, "w") as f:
+            json.dump(forecast_data, f)
+
+        # But the active contract is for May 8
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_data = {
+            "generated_at_utc": "2026-05-08T12:00:00Z",
+            "selected_temperature_markets": [
+                {
+                    "ticker": "KXHIGHMIA-26MAY08-B86.5",
+                    "title": "Above 86.5",
+                    "subtitle": "86.5 or above",
+                    "yes_ask_dollars": "0.10",
+                    "status": "open",
+                    "strike_type": "greater",
+                    "floor_strike": 86.5
+                }
+            ]
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot_data, f)
+
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        with open(nws_path, "w") as f:
+            json.dump({"latest_observation_time": "2026-05-08T12:00:00Z"}, f)
+        sg.NWS_SNAPSHOT_FILE = nws_path
+
+        test_now = datetime(2026, 5, 8, 12, 0, 0, tzinfo=timezone.utc)
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        report_path = generate_paper_signal(
+            forecast_path=forecast_path,
+            snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        with open(report_path, "r") as f:
+            report = json.load(f)
+
+        # All signals must be stale → filtered out → NO_SIGNAL
+        self.assertEqual(report["status"], "NO_SIGNAL",
+            "Forecast from May 7 must NOT produce active signals for May 8 contracts")
+
+    def test_forecast_date_mismatch_warning(self):
+        """C1-B regression: forecast date field doesn't match any active contract date.
+        The signal generator must emit a warning about the mismatch."""
+        import paper_trading.signal_generator as sg
+
+        # Forecast JSON has date: 2026-05-07
+        forecast_path = self.temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.json"
+        forecast_data = {
+            "date": "2026-05-07",
+            "probability_bins": {">=87": 0.50, "85-86": 0.50},
+            "integer_distribution": {str(t): 0.02 for t in range(60, 110)},
+            "forecast_high_f": 87,
+            "generated_at_utc": "2026-05-07T12:00:00Z"
+        }
+        with open(forecast_path, "w") as f:
+            json.dump(forecast_data, f)
+
+        # Active contract is for May 9 (two days ahead, clear mismatch)
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_data = {
+            "generated_at_utc": "2026-05-09T12:00:00Z",
+            "selected_temperature_markets": [
+                {
+                    "ticker": "KXHIGHMIA-26MAY09-B86.5",
+                    "title": "Above 86.5",
+                    "subtitle": "86.5 or above",
+                    "yes_ask_dollars": "0.10",
+                    "status": "open",
+                    "strike_type": "greater",
+                    "floor_strike": 86.5
+                }
+            ]
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot_data, f)
+
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        with open(nws_path, "w") as f:
+            json.dump({"latest_observation_time": "2026-05-09T12:00:00Z"}, f)
+        sg.NWS_SNAPSHOT_FILE = nws_path
+
+        test_now = datetime(2026, 5, 9, 12, 0, 0, tzinfo=timezone.utc)
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        report_path = generate_paper_signal(
+            forecast_path=forecast_path,
+            snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        with open(report_path, "r") as f:
+            report = json.load(f)
+
+        # Must have a date-mismatch warning
+        self.assertTrue(
+            any("does not match" in w or "mismatch" in w.lower() for w in report.get("warnings", [])),
+            f"Expected date-mismatch warning in: {report.get('warnings')}"
+        )
+
+    def test_same_date_forecast_and_ticker_still_works(self):
+        """Regression guard: matching dates must still produce signals normally."""
+        import paper_trading.signal_generator as sg
+
+        forecast_path = self.temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.json"
+        forecast_data = {
+            "date": "2026-05-07",
+            "probability_bins": {">=87": 0.50, "85-86": 0.50},
+            "integer_distribution": {str(t): 0.02 for t in range(60, 110)},
+            "forecast_high_f": 87,
+            "generated_at_utc": "2026-05-07T12:00:00Z"
+        }
+        with open(forecast_path, "w") as f:
+            json.dump(forecast_data, f)
+
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_data = {
+            "generated_at_utc": "2026-05-07T12:00:00Z",
+            "selected_temperature_markets": [
+                {
+                    "ticker": "KXHIGHMIA-26MAY07-B86.5",
+                    "title": "Above 86.5",
+                    "subtitle": "86.5 or above",
+                    "yes_ask_dollars": "0.10",
+                    "status": "open",
+                    "strike_type": "greater",
+                    "floor_strike": 86.5
+                }
+            ]
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot_data, f)
+
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        with open(nws_path, "w") as f:
+            json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
+        sg.NWS_SNAPSHOT_FILE = nws_path
+
+        test_now = datetime(2026, 5, 7, 12, 0, 0, tzinfo=timezone.utc)
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        report_path = generate_paper_signal(
+            forecast_path=forecast_path,
+            snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        with open(report_path, "r") as f:
+            report = json.load(f)
+
+        self.assertEqual(report["status"], "OK")
+        self.assertEqual(len(report["signals"]), 1)
+        # No date-mismatch warning
+        self.assertFalse(
+            any("does not match" in w for w in report.get("warnings", [])),
+            f"Should NOT have date-mismatch warning: {report.get('warnings')}"
+        )
+
 if __name__ == "__main__":
     unittest.main()

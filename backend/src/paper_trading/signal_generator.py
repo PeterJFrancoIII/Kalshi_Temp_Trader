@@ -252,9 +252,13 @@ def generate_paper_signal(
                 raw_int_dist = forecast_data_obj.get("integer_distribution", {})
                 integer_dist = {int(k): v for k, v in raw_int_dist.items()}
     
-    # Extract forecast date
+    # Extract forecast date — prefer the embedded JSON "date" field over filename parsing.
+    # The JSON field is the canonical target date the forecast was built for.
     forecast_date_str = None
-    if forecast_file:
+    forecast_target_date = forecast_data_obj.get("date")  # e.g. "2026-05-13"
+    if forecast_target_date:
+        forecast_date_str = forecast_target_date
+    elif forecast_file:
         file_ts = parse_timestamp_from_filename(forecast_file.name)
         if file_ts:
             forecast_date_str = file_ts.strftime("%Y-%m-%d")
@@ -321,6 +325,24 @@ def generate_paper_signal(
         prediction_timestamp = datetime.now(timezone.utc)
     now_date_str = prediction_timestamp.strftime("%Y-%m-%d")
 
+    # C1-B Fix: Validate forecast date against active contract dates.
+    # If the forecast target date doesn't match any active contract's date,
+    # emit a warning so operators know the signal may be unreliable.
+    if forecast_date_str and markets:
+        contract_dates = set()
+        for _m in markets:
+            _td = parse_ticker_date(_m.get("ticker"))
+            if _td:
+                contract_dates.add(_td)
+        if contract_dates and forecast_date_str not in contract_dates:
+            global_warnings.append(
+                f"Forecast date {forecast_date_str} does not match any active contract dates: {sorted(contract_dates)}. "
+                f"Signals may be unreliable due to date mismatch."
+            )
+            logger.warning(
+                f"Forecast-contract date mismatch: forecast={forecast_date_str}, contracts={sorted(contract_dates)}"
+            )
+
     # Pre-compute dynamic contract probabilities for all discovered contracts
     for m in markets:
         ticker = m.get("ticker")
@@ -331,6 +353,10 @@ def generate_paper_signal(
         is_stale = False
         if ticker_date:
             if forecast_date_str and ticker_date < forecast_date_str:
+                is_stale = True
+            # C1-B Fix: Also mark stale if forecast is OLDER than the contract.
+            # A May 13 forecast must not drive May 14 contract signals.
+            elif forecast_date_str and ticker_date > forecast_date_str:
                 is_stale = True
             elif ticker_date < now_date_str:
                 is_stale = True
@@ -386,6 +412,9 @@ def generate_paper_signal(
         is_stale = False
         if ticker_date:
             if forecast_date_str and ticker_date < forecast_date_str:
+                is_stale = True
+            # C1-B Fix: Also mark stale if forecast is OLDER than the contract.
+            elif forecast_date_str and ticker_date > forecast_date_str:
                 is_stale = True
             elif ticker_date < now_date_str:
                 is_stale = True
