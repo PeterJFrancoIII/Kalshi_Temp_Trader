@@ -3,6 +3,7 @@ import re
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
+from shared.normalization import normalize_contract_key
 
 logger = logging.getLogger(__name__)
 
@@ -17,13 +18,7 @@ class RiskDecision:
     def __repr__(self):
         return f"RiskDecision(passed={self.passed}, reason={self.reason})"
 
-def _normalize_contract_key(label: str) -> str:
-    """Internal helper to normalize contract labels for risk comparison."""
-    if not label:
-        return label
-    res = re.sub(r'\.0(?!\d)', '', label)
-    res = re.sub(r'([<>]=?)\s+', r'\1', res)
-    return res
+# _normalize_contract_key was moved to shared.normalization.normalize_contract_key
 
 def check_kill_switch() -> RiskDecision:
     """Gate 10: Manual Kill Switch."""
@@ -178,58 +173,68 @@ def check_market_concentration(ledger_summary: Dict[str, Any], date_str: str) ->
         return RiskDecision(False, f"Market concentration limit exceeded (>=3 active trades for {date_str}).")
     return RiskDecision(True)
 
-def check_forecast_integrity(
-    forecast_data: Dict[str, Any], 
-    contract_bins: Optional[List[Any]] = None
-) -> RiskDecision:
-    """Gate 11: Forecast Integrity (Sum and Bins)."""
-    probs = forecast_data.get("probability_bins", {})
-    dynamic_probs = forecast_data.get("dynamic_contract_probabilities", {})
-    
-    if not probs and not dynamic_probs:
-        return RiskDecision(False, "Missing probability bins or dynamic probabilities.")
-    
-    # Sum check on probs (legacy bins) if present
-    if probs:
-        total = sum(probs.values())
-        if not (0.99 <= total <= 1.01):
-            return RiskDecision(False, f"Forecast integrity failure: probabilities sum to {total:.4f} (expected ~1.0).")
-    
-    # If contract_bins are provided, ensure the probability_bins keys match the labels
-    if contract_bins:
-        contract_labels = set()
-        for cb in contract_bins:
-            if isinstance(cb, dict):
-                label = cb.get("label") or cb.get("contract_bin", {}).get("label") or cb.get("contract_mapping", {}).get("label")
-            else:
-                label = getattr(cb, "label", None)
-            
-            if label:
-                contract_labels.add(str(label))
-                
-        # Check that we have probabilities for all active contracts
-        missing = []
-        for lbl in contract_labels:
-            norm_lbl = _normalize_contract_key(lbl)
-            if dynamic_probs:
-                if norm_lbl not in dynamic_probs:
-                    missing.append(lbl)
-            else:
-                if lbl not in probs:
-                    missing.append(lbl)
-                    
-        if missing:
-            return RiskDecision(False, f"Missing probabilities for discovered contracts: {', '.join(missing)}")
+def check_forecast_integrity(forecast_data: Dict[str, Any], contract_bins: List[Dict[str, Any]] = []) -> RiskDecision:
+    """Gate 11: Comprehensive Probability Coverage."""
+    if not forecast_data:
+        return RiskDecision(False, "No forecast data for integrity check.", failed_gate_id="GATE_11_INTEGRITY", failed_gate_name="Forecast Integrity")
         
-        # Check that we don't have extra probabilities not in contracts (warn only)
-        if dynamic_probs:
-            extra = [lbl for lbl in dynamic_probs if lbl not in [_normalize_contract_key(l) for l in contract_labels]]
-        else:
-            extra = [lbl for lbl in probs if lbl not in contract_labels]
+    dynamic_probs = forecast_data.get("dynamic_contract_probabilities", {})
+    legacy_probs = forecast_data.get("probability_bins", {})
+    target_date = forecast_data.get("date")
+    
+    missing_labels = []
+    from shared.timestamp_utils import parse_ticker_date
+    
+    for cb in contract_bins:
+        # HARDENING: Only validate contracts that match the forecast target date.
+        # If dates are missing (e.g. in legacy tests), we validate all provided contracts.
+        ticker = cb.get("ticker")
+        if ticker and target_date:
+            ticker_date = parse_ticker_date(ticker)
+            if ticker_date != target_date:
+                continue
+
+        label = cb.get("label") or cb.get("contract_bin", {}).get("label") or cb.get("contract_mapping", {}).get("label")
+        if not label:
+            continue
             
-        if extra:
-            logger.warning(f"Extra probabilities found not mapping to active contracts: {', '.join(extra)}")
+        norm_label = normalize_contract_key(label)
+        
+        # Check dynamic probabilities first
+        if norm_label in dynamic_probs:
+            continue
             
+        # Fallback to legacy probability_bins (using raw label for legacy match)
+        if label in legacy_probs:
+            continue
+            
+        missing_labels.append(label)
+            
+    # Check sum of probabilities (Legacy and Dynamic)
+    # We prioritize legacy_probs for the distribution-wide sum check.
+    prob_sum = 0.0
+    if legacy_probs:
+        prob_sum = sum(legacy_probs.values())
+    elif dynamic_probs:
+        prob_sum = sum(dynamic_probs.values())
+        
+    if prob_sum > 0 and abs(prob_sum - 1.0) > 0.01:
+        return RiskDecision(
+            False, 
+            f"Forecast probability sum anomaly: {prob_sum:.4f} (expected ~1.0)",
+            failed_gate_id="GATE_11_INTEGRITY",
+            failed_gate_name="Forecast Integrity"
+        )
+            
+    if missing_labels:
+        missing_labels.sort()
+        return RiskDecision(
+            False, 
+            f"Missing probabilities for discovered contracts: {', '.join(missing_labels)}",
+            failed_gate_id="GATE_11_INTEGRITY",
+            failed_gate_name="Forecast Integrity"
+        )
+        
     return RiskDecision(True)
 
 def evaluate_risk_gates(

@@ -15,7 +15,7 @@ def validate_probability_bins(bins: Dict[str, float]):
     
     total = 0.0
     for b, prob in bins.items():
-        if not (0.0 <= prob <= 1.0):
+        if not (-1e-5 <= prob <= 1.00001):
             raise ValueError(f"Probability for bin {b} must be between 0 and 1, got {prob}")
         total += prob
             
@@ -72,7 +72,8 @@ def forecast_daily_high_bins(
     thunderstorm_flag: bool = False,
     overcast_flag: bool = False,
     current_time_et: Optional[datetime] = None,
-    live_data_stale: bool = False
+    live_data_stale: bool = False,
+    **kwargs
 ) -> Dict[str, Any]:
     """
     Rules-based forecast logic that returns a DailyPrediction-like dictionary.

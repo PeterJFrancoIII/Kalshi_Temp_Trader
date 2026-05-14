@@ -230,9 +230,10 @@ def market_to_contract_bin(market: Dict[str, Any]) -> Any:
         warnings=mapping.get("parse_warnings", [])
     )
 
-def parse_kalshi_markets(snapshot_path: Path) -> List[Dict[str, Any]]:
+def parse_kalshi_markets(snapshot_path: Path, target_date: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Parses a Kalshi market snapshot and returns KMIA temperature markets with structured thresholds.
+    If target_date is provided (YYYY-MM-DD), only returns markets for that date.
     """
     if not snapshot_path.exists():
         logger.warning(f"Snapshot not found: {snapshot_path}")
@@ -260,6 +261,13 @@ def parse_kalshi_markets(snapshot_path: Path) -> List[Dict[str, Any]]:
         status = m.get("status", "").lower()
         if status not in ["open", "active", "pending"]:
             continue
+            
+        # Optional: Filter by target date
+        if target_date:
+            from shared.timestamp_utils import parse_ticker_date
+            ticker_date = parse_ticker_date(ticker)
+            if ticker_date and ticker_date != target_date:
+                continue
             
         mapping = extract_contract_thresholds(m)
         contract_bin = market_to_contract_bin(m)

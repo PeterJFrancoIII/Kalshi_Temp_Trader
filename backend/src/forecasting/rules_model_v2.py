@@ -129,61 +129,87 @@ def forecast_daily_high_bins_v2(
     warnings = []
     main_drivers = []
     
-    # 1. Climatology Prior
-    prior_res = climatology_prior_for_date(history_records or [], target_date)
-    climatology_dist = prior_res["probability_bins"]
-    if prior_res["warnings"]:
-        warnings.extend(prior_res["warnings"])
-    else:
+    # --- 1. Probability Distribution Source of Truth ---
+    # We calculate the high-resolution integer distribution first, blending
+    # climatology and forecast leads, then apply weather suppression and 
+    # hard constraints. Legacy bins are derived from this final distribution.
+    
+    integer_dist: Dict[int, float] = {}
+    int_cdf: Dict[int, float] = {}
+    
+    # Climatology lead
+    clim_int_dist = climatology_prior_integer_for_date(history_records or [], target_date)
+    if clim_int_dist:
         main_drivers.append("Integrated 30-year seasonal climatology prior.")
-        
-    # 2. Forecast Target Distribution
+    
+    # Forecast lead
     if forecast_high_f is not None:
-        forecast_dist = forecast_target_distribution(forecast_high_f)
         main_drivers.append(f"Centered forecast around NWS high of {forecast_high_f}F.")
+        center = forecast_high_f
+        if observed_max_so_far_f is not None:
+            center = max(int(forecast_high_f), int(observed_max_so_far_f))
+        
+        forecast_int_dist = build_integer_distribution(center_f=center)
+        
+        # Blend (using centralized weights)
+        if clim_int_dist:
+            # Mixture model of climatology and NWS forecast
+            integer_dist = blend_integer_distributions(
+                clim_int_dist, forecast_int_dist, V2_CLIMATOLOGY_WEIGHT, V2_FORECAST_WEIGHT
+            )
+            # Add uniform floor
+            uniform_prob = V2_UNIFORM_WEIGHT / 56 # Approx range 60-115
+            for t in range(60, 116):
+                integer_dist[t] = integer_dist.get(t, 0.0) + uniform_prob
+            integer_dist = normalize_probability_mass(integer_dist)
+        else:
+            integer_dist = forecast_int_dist
+            warnings.append("Climatology lead unavailable; using forecast distribution only.")
     else:
         warnings.append("forecast_high_f is missing. Using climatology as primary lead.")
-        forecast_dist = climatology_dist.copy()
+        integer_dist = clim_int_dist
 
-    # 3. Blend (using centralized weights)
-    blended_bins = {}
-    for b in REQUIRED_BINS:
-        # Base blend
-        blended_bins[b] = (climatology_dist[b] * V2_CLIMATOLOGY_WEIGHT) + (forecast_dist[b] * V2_FORECAST_WEIGHT)
-        # Small uniform prior for the remaining weight
-        blended_bins[b] += (V2_UNIFORM_WEIGHT / len(REQUIRED_BINS))
-
-    # 4. Apply weather suppression
+    # --- 2. Apply weather suppression and constraints ---
     recent_rain_flag = input_features.get("recent_rain_flag", False)
     thunderstorm_flag = input_features.get("thunderstorm_flag", False)
     overcast_flag = input_features.get("overcast_flag", False)
-    
-    blended_bins = apply_weather_suppression(
-        blended_bins, 
-        recent_rain_flag, 
-        thunderstorm_flag, 
-        overcast_flag
-    )
-    if thunderstorm_flag:
-        main_drivers.append("Adjusted for expected thunderstorms.")
-    elif recent_rain_flag or overcast_flag:
-        main_drivers.append("Adjusted for cloud cover/precipitation.")
+    thunderstorm_severity = input_features.get("thunderstorm_severity", "none")
 
-    # 5. Apply Hard live constraint
-    if observed_max_so_far_f is None:
-        warnings.append("No same-day NWS observations available; skipping lower-tail truncation.")
-    
-    final_bins = zero_impossible_bins(blended_bins, observed_max_so_far_f)
-    
-    # 6. Normalize
-    final_bins = normalize_bins(final_bins)
-    
-    # 7. Validation
-    validate_probability_bins(final_bins)
-    
+    if integer_dist:
+        integer_dist = apply_weather_suppression_integer(
+            integer_dist,
+            thunderstorm_flag=thunderstorm_flag,
+            recent_rain_flag=recent_rain_flag,
+            overcast_flag=overcast_flag,
+            thunderstorm_severity=thunderstorm_severity,
+        )
+
+        if thunderstorm_severity != "none":
+            main_drivers.append(f"Adjusted for {thunderstorm_severity} thunderstorms.")
+        elif thunderstorm_flag:
+            main_drivers.append("Adjusted for expected thunderstorms.")
+        elif recent_rain_flag or overcast_flag:
+            main_drivers.append("Adjusted for cloud cover/precipitation.")
+
+        # Apply Hard live constraint (observed max)
+        if observed_max_so_far_f is not None and observed_max_so_far_f > 0:
+            integer_dist = zero_impossible_temps(integer_dist, observed_max_so_far_f)
+        else:
+            integer_dist = normalize_probability_mass(integer_dist)
+            if observed_max_so_far_f is None:
+                warnings.append("No same-day NWS observations available; skipping lower-tail truncation.")
+
+        # --- 3. Derive legacy bins and metadata ---
+        final_bins = integer_dist_to_fixed_bins(integer_dist)
+        int_cdf = build_cdf(integer_dist)
+        validate_probability_bins(final_bins)
+    else:
+        # Fallback: Equal distribution
+        final_bins = {b: 1.0/len(REQUIRED_BINS) for b in REQUIRED_BINS}
+        warnings.append("Failed to generate valid distribution; using uniform fallback.")
+
     # Best single number (heuristic: peak of distribution or forecast high)
-    peak_bin = max(final_bins, key=final_bins.get)
-    # This is a bit crude but works for v2
+    # Peak of derived bins
     best_single_number_f = forecast_high_f if forecast_high_f else 82
     if observed_max_so_far_f is not None and observed_max_so_far_f > best_single_number_f:
         best_single_number_f = observed_max_so_far_f
@@ -195,49 +221,6 @@ def forecast_daily_high_bins_v2(
     elif observed_max_so_far_f is not None and observed_max_so_far_f >= 85:
         confidence = "high"
 
-    # --- Integer-level distribution (dynamic bins support) ---
-    # Build a discrete normal centered on forecast_high_f, then apply the same
-    # weather suppression and hard-constraint logic at integer resolution.
-    # This is the canonical output for contract_probability_mapper and the
-    # full TWC/NBM blending pipeline.
-    integer_dist: Dict[int, float] = {}
-    int_cdf: Dict[int, float] = {}
-    
-    # Get climatology integer prior
-    clim_int_dist = climatology_prior_integer_for_date(history_records or [], target_date)
-    
-    if forecast_high_f is not None:
-        center = forecast_high_f
-        if observed_max_so_far_f is not None:
-            center = max(int(forecast_high_f), int(observed_max_so_far_f))
-        
-        forecast_int_dist = build_integer_distribution(center_f=center)
-        
-        # Blend (using centralized weights)
-        if clim_int_dist:
-            # We need to make sure both distributions cover the same range for blending
-            integer_dist = blend_integer_distributions(
-                clim_int_dist, forecast_int_dist, V2_CLIMATOLOGY_WEIGHT, V2_FORECAST_WEIGHT
-            )
-            # Add uniform floor
-            uniform_prob = V2_UNIFORM_WEIGHT / 56 # Approx range 60-115
-            for t in range(60, 116):
-                integer_dist[t] = integer_dist.get(t, 0.0) + uniform_prob
-            integer_dist = normalize_probability_mass(integer_dist)
-        else:
-            integer_dist = forecast_int_dist
-
-        integer_dist = apply_weather_suppression_integer(
-            integer_dist,
-            thunderstorm_flag=input_features.get("thunderstorm_flag", False),
-            recent_rain_flag=input_features.get("recent_rain_flag", False),
-            overcast_flag=input_features.get("overcast_flag", False),
-        )
-        if observed_max_so_far_f is not None and observed_max_so_far_f > 0:
-            integer_dist = zero_impossible_temps(integer_dist, observed_max_so_far_f)
-        else:
-            integer_dist = normalize_probability_mass(integer_dist)
-        int_cdf = build_cdf(integer_dist)
 
     return {
         "station": "KMIA",

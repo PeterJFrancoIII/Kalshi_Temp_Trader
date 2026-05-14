@@ -13,8 +13,9 @@ def test_scripts_contain_safety_disclaimer():
     
     disclaimer = "NO REAL TRADING EXECUTION"
     
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
     for script_path in scripts_to_check:
-        full_path = os.path.abspath(os.path.join(os.getcwd(), "..", script_path))
+        full_path = os.path.join(project_root, script_path)
         assert os.path.exists(full_path), f"{full_path} does not exist"
         
         with open(full_path, "r") as f:
@@ -25,7 +26,8 @@ def test_check_sync_status_runs():
     """
     Ensure scripts/check_sync_status.sh runs without error on the local environment.
     """
-    script_path = os.path.abspath(os.path.join(os.getcwd(), "..", "scripts/check_sync_status.sh"))
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    script_path = os.path.join(project_root, "scripts/check_sync_status.sh")
     result = subprocess.run(["bash", script_path], capture_output=True, text=True)
     assert result.returncode == 0, f"check_sync_status.sh failed with stderr: {result.stderr}"
     assert "KMIA Sync Status Checker" in result.stdout

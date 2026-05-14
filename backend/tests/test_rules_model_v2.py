@@ -88,7 +88,7 @@ class TestRulesModelV2(unittest.TestCase):
             "forecast_high_f": 82
         }
         res = forecast_daily_high_bins_v2(input_features, [])
-        self.assertTrue(any("No historical records found" in w for w in res["warnings"]))
+        self.assertTrue(any("Climatology lead unavailable" in w for w in res["warnings"]))
         self.assertEqual(len(res["probability_bins"]), 6)
         self.assertAlmostEqual(sum(res["probability_bins"].values()), 1.0, places=3)
 

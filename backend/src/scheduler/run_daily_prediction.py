@@ -202,14 +202,34 @@ def run_prediction_pipeline(
                             f"Using climatological fallback: {forecast_high_f}°F"
                         )
                 
-                # Precipitation/cloud flags from short forecast text
+                # Precipitation/cloud flags and severity from forecast text
+                thunderstorm_severity = "none"
                 for period in daily_forecast:
                     if (period.get("forecast_date_et") == target_date_str 
                             and period.get("isDaytime", False)):
                         short_fc = (period.get("shortForecast") or "").lower()
-                        thunderstorm_flag = "thunderstorm" in short_fc
-                        recent_rain_flag = "rain" in short_fc or "shower" in short_fc
-                        overcast_flag = "cloudy" in short_fc and "partly" not in short_fc
+                        detailed_fc = (period.get("detailedForecast") or "").lower()
+                        full_fc = f"{short_fc} {detailed_fc}".lower()
+                        
+                        thunderstorm_flag = "thunderstorm" in full_fc
+                        recent_rain_flag = "rain" in full_fc or "shower" in full_fc
+                        overcast_flag = "cloudy" in full_fc and "partly" not in full_fc
+                        
+                        if thunderstorm_flag:
+                            if "definite" in full_fc:
+                                thunderstorm_severity = "definite"
+                            elif "likely" in full_fc:
+                                thunderstorm_severity = "likely"
+                            elif "slight chance" in full_fc or "isolated" in full_fc:
+                                # Check if 'chance' or 'scattered' also appears later
+                                if any(x in full_fc for x in ["then a chance", "then chance", "then scattered"]):
+                                    thunderstorm_severity = "chance"
+                                else:
+                                    thunderstorm_severity = "slight chance"
+                            elif "chance" in full_fc or "scattered" in full_fc:
+                                thunderstorm_severity = "chance"
+                            else:
+                                thunderstorm_severity = "likely" # Default for generic mention
                         break
                         
                 logger.info(f"Loaded NWS snapshot for dry-run features (fetched: {nws_data.get('fetched_at_utc', 'unknown')}).")
@@ -227,6 +247,7 @@ def run_prediction_pipeline(
             "recent_rain_flag": recent_rain_flag,
             "thunderstorm_flag": thunderstorm_flag,
             "overcast_flag": overcast_flag,
+            "thunderstorm_severity": thunderstorm_severity,
             "current_time_et": datetime.now(tz.gettz('US/Eastern')),
             "live_data_stale": live_data_stale,
             "target_date": target_date.isoformat()

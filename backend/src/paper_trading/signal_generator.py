@@ -24,6 +24,7 @@ from shared.artifact_paths import (
     LATEST_PAPER_SIGNAL,
 )
 from shared.timestamp_utils import extract_embedded_timestamp, parse_ticker_date
+from shared.normalization import normalize_contract_key
 from trading.edge_engine import calculate_edge, calculate_expected_value, calculate_speed_to_roi
 from risk.risk_engine import evaluate_risk_gates
 from paper_trading.paper_ledger import PaperLedger
@@ -73,13 +74,7 @@ def parse_timestamp_from_filename(filename: str) -> Optional[datetime]:
             return None
     return None
 
-def _normalize_contract_key(label: str) -> str:
-    """Internal helper to normalize contract labels for risk comparison."""
-    if not label:
-        return label
-    res = re.sub(r'\.0(?!\d)', '', label)
-    res = re.sub(r'([<>]=?)\s+', r'\1', res)
-    return res
+# _normalize_contract_key was moved to shared.normalization.normalize_contract_key
 
 def parse_forecast_bins_from_md(md_path: Path) -> Dict[str, float]:
     """Parses probability bins from a forecast markdown report."""
@@ -305,7 +300,18 @@ def generate_paper_signal(
         logger.warning(f"Could not load NWS snapshot for Gate 2 check: {_e}. Gate 2 will block.")
 
     from market_data.kalshi_contract_mapper import parse_kalshi_markets, mapping_to_bin_string
-    markets = parse_kalshi_markets(snapshot_to_use)
+    all_discovered_markets = parse_kalshi_markets(snapshot_to_use)
+    
+    # HARDENING: Filter strictly for the forecast target date.
+    # This prevents stale contracts (e.g. May 13) from leaking into a May 14 signal.
+    markets = []
+    if forecast_date_str:
+        for m in all_discovered_markets:
+            ticker_date = parse_ticker_date(m.get("ticker"))
+            if ticker_date == forecast_date_str:
+                markets.append(m)
+    else:
+        markets = all_discovered_markets
 
     signals = []
     global_warnings = []
@@ -328,19 +334,16 @@ def generate_paper_signal(
     # C1-B Fix: Validate forecast date against active contract dates.
     # If the forecast target date doesn't match any active contract's date,
     # emit a warning so operators know the signal may be unreliable.
-    if forecast_date_str and markets:
-        contract_dates = set()
-        for _m in markets:
-            _td = parse_ticker_date(_m.get("ticker"))
-            if _td:
-                contract_dates.add(_td)
+    if forecast_date_str and all_discovered_markets:
+        contract_dates = {parse_ticker_date(m.get("ticker")) for m in all_discovered_markets}
+        contract_dates.discard(None)
         if contract_dates and forecast_date_str not in contract_dates:
             global_warnings.append(
-                f"Forecast date {forecast_date_str} does not match any active contract dates: {sorted(contract_dates)}. "
+                f"Forecast date {forecast_date_str} does not match any active contract dates: {sorted(list(contract_dates))}. "
                 f"Signals may be unreliable due to date mismatch."
             )
             logger.warning(
-                f"Forecast-contract date mismatch: forecast={forecast_date_str}, contracts={sorted(contract_dates)}"
+                f"Forecast-contract date mismatch: forecast={forecast_date_str}, contracts={sorted(list(contract_dates))}"
             )
 
     # Pre-compute dynamic contract probabilities for all discovered contracts
@@ -379,7 +382,7 @@ def generate_paper_signal(
                 prob = results.get(ticker, {}).get("probability")
 
             if prob is not None:
-                norm_key = _normalize_contract_key(bin_str)
+                norm_key = normalize_contract_key(bin_str)
                 dynamic_contract_probabilities[norm_key] = prob
 
     for m in markets:
@@ -426,9 +429,12 @@ def generate_paper_signal(
             
         if not bin_str:
             global_warnings.append(f"{ticker}: Could not convert contract mapping to bin string.")
+            if mapping:
+                norm_label = normalize_contract_key(bin_str)
+                row_prob = dynamic_contract_probabilities.get(norm_label)
             continue
             
-        norm_key = _normalize_contract_key(bin_str)
+        norm_key = normalize_contract_key(bin_str)
         prob = dynamic_contract_probabilities.get(norm_key)
         
         if is_stale:
@@ -543,7 +549,10 @@ def generate_paper_signal(
             "confidence": confidence,
             "risk_decision": {
                 "passed": risk_decision.passed,
-                "reason": risk_decision.reason
+                "reason": risk_decision.reason,
+                "failed_gate_id": risk_decision.failed_gate_id,
+                "failed_gate_name": risk_decision.failed_gate_name,
+                "no_trade_reason": risk_decision.no_trade_reason
             },
             "yes_ask": ask,
             "yes_bid": bid,

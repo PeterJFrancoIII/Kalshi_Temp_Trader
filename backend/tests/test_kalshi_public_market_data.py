@@ -11,7 +11,8 @@ def test_kalshi_client_no_auth_references():
     or order execution, while allowing approved read-only auth references.
     """
     # The test runs from the backend/ directory, so src/ is the correct relative path.
-    client_file = "src/market_data/kalshi_public_client.py"
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    client_file = os.path.join(base_dir, "src/market_data/kalshi_public_client.py")
     with open(client_file, "r") as f:
         content = f.read().lower()
         
@@ -78,7 +79,8 @@ def test_kalshi_client_mocked_discovery():
 
 def test_kalshi_config_exists():
     """Verify that the discovery config file exists and is valid JSON."""
-    config_file = "config/kalshi_market_discovery.json"
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    config_file = os.path.join(base_dir, "config/kalshi_market_discovery.json")
     assert os.path.exists(config_file), f"Config file {config_file} is missing."
     
     import json
@@ -173,7 +175,8 @@ def test_kalshi_updater_logic():
     Verify that the updater correctly references the market data module.
     """
     # The test runs from the backend/ directory, so src/ is the correct relative path.
-    updater_file = "src/market_data/update_kalshi_snapshots.py"
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    updater_file = os.path.join(base_dir, "src/market_data/update_kalshi_snapshots.py")
     with open(updater_file, "r") as f:
         content = f.read()
     

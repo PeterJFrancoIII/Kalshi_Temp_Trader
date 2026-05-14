@@ -8,8 +8,9 @@ from pathlib import Path
 
 def get_script_path():
     """Helper to find the script relative to the test location."""
-    # Assuming tests run from backend/ directory
-    return Path(os.getcwd()).parent / "scripts" / "health_summary.sh"
+    # Find script relative to this file
+    project_root = Path(__file__).resolve().parent.parent.parent
+    return project_root / "scripts" / "health_summary.sh"
 
 def test_health_summary_script_exists():
     """Verify that scripts/health_summary.sh exists."""
