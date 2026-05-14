@@ -333,5 +333,68 @@ class TestPaperSignalGenerator(unittest.TestCase):
         self.assertEqual(len(report["signals"]), 1)
         self.assertEqual(report["status"], "OK")
 
+    def test_dynamic_probabilities_full_coverage(self):
+        """Verify that dynamic_contract_probabilities contains all contracts, including those without price."""
+        import paper_trading.signal_generator as sg
+        md_path = self.temp_dir / "kmia_forecast_2026-05-07_rules_v2_climatology_120000.md"
+        md_path.write_text("## Probability Bins\n| >=87 | 50.0% |\n| >=85 | 10.0% |")
+    
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_data = {
+            "generated_at_utc": "2026-05-07T12:00:00Z",
+            "selected_temperature_markets": [
+                {
+                    "ticker": "KXHIGHMIA-26MAY07-B86.5",
+                    "title": "Above 86.5",
+                    "subtitle": "86.5 or above",
+                    "yes_ask_dollars": "0.10",
+                    "status": "open",
+                    "strike_type": "greater",
+                    "floor_strike": 86.5,
+                    "contract_bin": {"label": ">=87"}
+                },
+                {
+                    "ticker": "KXHIGHMIA-26MAY07-B84.5",
+                    "title": "Above 84.5",
+                    "subtitle": "84.5 or above",
+                    "yes_ask_dollars": "0.00", # No price!
+                    "status": "open",
+                    "strike_type": "greater",
+                    "floor_strike": 84.5,
+                    "contract_bin": {"label": "<85"}
+                }
+            ]
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot_data, f)
+    
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        with open(nws_path, "w") as f:
+            json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
+        sg.NWS_SNAPSHOT_FILE = nws_path
+    
+        # Mock prediction date to May 7
+        test_now = datetime(2026, 5, 7, 12, 0, 0, tzinfo=timezone.utc)
+    
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        report_path = generate_paper_signal(
+            forecast_path=md_path,
+            snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        with open(report_path, "r") as f:
+            report = json.load(f)
+    
+        # The market with no price should be skipped for signal generation
+        self.assertEqual(len(report["signals"]), 1)
+        
+        # But BOTH should be in dynamic_contract_probabilities!
+        self.assertIn(">=87", report["dynamic_contract_probabilities"])
+        self.assertIn(">=85", report["dynamic_contract_probabilities"])
+        self.assertEqual(report["dynamic_contract_probabilities"][">=87"], 0.5)
+        self.assertEqual(report["dynamic_contract_probabilities"][">=85"], 0.1)
+
 if __name__ == "__main__":
     unittest.main()

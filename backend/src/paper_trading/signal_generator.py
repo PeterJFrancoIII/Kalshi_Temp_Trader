@@ -321,6 +321,41 @@ def generate_paper_signal(
         prediction_timestamp = datetime.now(timezone.utc)
     now_date_str = prediction_timestamp.strftime("%Y-%m-%d")
 
+    # Pre-compute dynamic contract probabilities for all discovered contracts
+    for m in markets:
+        ticker = m.get("ticker")
+        mapping = m.get("contract_mapping", {})
+        contract_bin_data = m.get("contract_bin")
+        
+        ticker_date = parse_ticker_date(ticker)
+        is_stale = False
+        if ticker_date:
+            if forecast_date_str and ticker_date < forecast_date_str:
+                is_stale = True
+            elif ticker_date < now_date_str:
+                is_stale = True
+                
+        if contract_bin_data:
+            bin_str = contract_bin_data.get("label")
+        else:
+            bin_str = mapping_to_bin_string(mapping)
+            
+        prob = None
+        if bin_str:
+            if is_stale:
+                prob = 0.0
+            else:
+                prob = model_bins.get(bin_str)
+                
+            if prob is None and integer_dist and not is_stale:
+                from forecasting.contract_probability_mapper import map_distribution_to_contracts
+                results = map_distribution_to_contracts(integer_dist, [mapping])
+                prob = results.get(ticker, {}).get("probability")
+
+            if prob is not None:
+                norm_key = _normalize_contract_key(bin_str)
+                dynamic_contract_probabilities[norm_key] = prob
+
     for m in markets:
         ticker = m.get("ticker")
         mapping = m.get("contract_mapping", {})
@@ -354,62 +389,48 @@ def generate_paper_signal(
                 is_stale = True
             elif ticker_date < now_date_str:
                 is_stale = True
-        
-        # Legacy compatibility bridge:
-        # Historical markdown reports may still contain coarse fixed bins.
-        # Active Kalshi paper signals should map an integer temperature distribution
-        # into Kalshi-discovered contract_bin ranges.
+                
         if contract_bin_data:
             bin_str = contract_bin_data.get("label")
         else:
             bin_str = mapping_to_bin_string(mapping)
-        prob = None
-        
-        if bin_str:
-            if is_stale:
-                prob = 0.0
-            else:
-                prob = model_bins.get(bin_str)
-                
-            if prob is None and integer_dist and not is_stale:
-                # Fallback: map from integer distribution using rich mapping (inclusive/exclusive flags)
-                from forecasting.contract_probability_mapper import map_distribution_to_contracts
-                results = map_distribution_to_contracts(integer_dist, [mapping])
-                prob = results.get(ticker, {}).get("probability")
-
-            if prob is not None and not is_stale:
-                norm_key = _normalize_contract_key(bin_str)
-                dynamic_contract_probabilities[norm_key] = prob
-
-            if prob is None and not is_stale:
-                global_warnings.append(f"{ticker}: Probability for bin {bin_str} not found in forecast.")
-                # Requirement 5: Generate Dashboard-Compatible Signal Rows even if mapping fails
-                signals.append({
-                    "market_ticker": ticker,
-                    "event_ticker": m.get("event_ticker"),
-                    "market_title": m.get("title"),
-                    "status": m.get("status"),
-                    "condition_type": mapping.get("condition_type"),
-                    "threshold_f": mapping.get("threshold_f"),
-                    "contract_range": mapping.get("contract_range"),
-                    "model_probability": None,
-                    "market_probability": round(executable_price, 4) if executable_price else None,
-                    "raw_edge": None,
-                    "edge": None,
-                    "breakeven_probability": None,
-                    "expected_value": None,
-                    "paper_action": "NO SIGNAL",
-                    "confidence": "low",
-                    "yes_ask": ask,
-                    "yes_bid": bid,
-                    "last_price": last,
-                    "warnings": [f"Probability for bin {bin_str} not found in forecast"],
-                    "market_open_time_et": get_market_open_time_et(ticker_date) if ticker_date else None,
-                    "stale": is_stale
-                })
-                continue
-        else:
+            
+        if not bin_str:
             global_warnings.append(f"{ticker}: Could not convert contract mapping to bin string.")
+            continue
+            
+        norm_key = _normalize_contract_key(bin_str)
+        prob = dynamic_contract_probabilities.get(norm_key)
+        
+        if is_stale:
+            prob = 0.0
+            
+        if prob is None and not is_stale:
+            global_warnings.append(f"{ticker}: Probability for bin {bin_str} not found in forecast.")
+            # Requirement 5: Generate Dashboard-Compatible Signal Rows even if mapping fails
+            signals.append({
+                "market_ticker": ticker,
+                "event_ticker": m.get("event_ticker"),
+                "market_title": m.get("title"),
+                "status": m.get("status"),
+                "condition_type": mapping.get("condition_type"),
+                "threshold_f": mapping.get("threshold_f"),
+                "contract_range": mapping.get("contract_range"),
+                "model_probability": None,
+                "market_probability": round(executable_price, 4) if executable_price else None,
+                "raw_edge": None,
+                "edge": None,
+                "breakeven_probability": None,
+                "expected_value": None,
+                "paper_action": "NO SIGNAL",
+                "confidence": "low",
+                "yes_ask": ask,
+                "yes_bid": bid,
+                "last_price": last,
+                "warnings": [f"Probability for bin {bin_str} not found in forecast"],
+                "market_open_time_et": get_market_open_time_et(ticker_date) if ticker_date else None,
+                "stale": is_stale
+            })
             continue
         # Use Edge Engine for math
         edge, raw_edge, final_breakeven = calculate_edge(prob, executable_price, slippage=0.0)
