@@ -166,26 +166,77 @@ def shift_distribution(probs: Dict[int, float], shift_f: int) -> Dict[int, float
     return {t + shift_f: p for t, p in probs.items()}
 
 
+def shift_distribution_fractional(probs: Dict[int, float], shift_f: float) -> Dict[int, float]:
+    """
+    Rigidly shifts an integer distribution by shift_f degrees (can be fractional).
+    
+    For a fractional shift, mass is linearly interpolated between adjacent integer buckets.
+    Example: 100% mass at 90 shifted by -0.5 results in 50% at 89 and 50% at 90.
+    """
+    if shift_f == 0:
+        return probs
+        
+    new_probs: Dict[int, float] = {}
+    
+    # Let s_int = floor(shift_f)
+    # Let s_frac = shift_f - s_int
+    # new_p(t + s_int) += (1 - s_frac) * old_p(t)
+    # new_p(t + s_int + 1) += s_frac * old_p(t)
+    
+    s_int = math.floor(shift_f)
+    s_frac = shift_f - s_int
+    
+    for t, p in probs.items():
+        # Lower bucket
+        t_low = t + s_int
+        new_probs[t_low] = new_probs.get(t_low, 0.0) + (1.0 - s_frac) * p
+        
+        # Upper bucket
+        t_high = t + s_int + 1
+        if s_frac > 0:
+            new_probs[t_high] = new_probs.get(t_high, 0.0) + s_frac * p
+            
+    return normalize_probability_mass(new_probs)
+
+
 def apply_weather_suppression_integer(
     probs: Dict[int, float],
-    thunderstorm_flag: bool,
-    recent_rain_flag: bool,
-    overcast_flag: bool,
+    thunderstorm_flag: bool = False,
+    recent_rain_flag: bool = False,
+    overcast_flag: bool = False,
+    thunderstorm_severity: str = "none",
 ) -> Dict[int, float]:
     """
-    Applies a cooling shift to the integer distribution based on weather flags.
+    Applies a cooling shift to the integer distribution based on weather flags or severity.
 
-    Uses the same heuristic magnitudes as the legacy fixed-bin suppressor:
-    - Thunderstorm → -2°F shift
-    - Rain / overcast → -1°F shift
+    Severity levels for thunderstorms:
+    - 'slight chance' / 'isolated': -0.5°F shift
+    - 'chance' / 'scattered': -1.0°F shift
+    - 'likely' / 'definite' / generic 'thunderstorm': -2.0°F shift
 
-    Consistent with apply_regime_adjustment() in kmia_distribution_blender.
+    Rain / overcast:
+    - -1.0°F shift if flags are set and no thunderstorm severity is provided.
     """
-    if thunderstorm_flag:
-        return shift_distribution(probs, -2)
-    if recent_rain_flag or overcast_flag:
-        return shift_distribution(probs, -1)
-    return probs
+    shift = 0.0
+    
+    # 1. Map thunderstorm severity to shift
+    t_sev = thunderstorm_severity.lower()
+    if "slight" in t_sev or "isolated" in t_sev:
+        shift = -0.5
+    elif "chance" in t_sev or "scattered" in t_sev:
+        shift = -1.0
+    elif "likely" in t_sev or "definite" in t_sev or "thunderstorm" in t_sev or thunderstorm_flag:
+        shift = -2.0
+        
+    # 2. Fallback to rain/overcast if no thunderstorm suppression
+    if shift == 0.0:
+        if recent_rain_flag or overcast_flag:
+            shift = -1.0
+            
+    if shift == 0.0:
+        return probs
+        
+    return shift_distribution_fractional(probs, shift)
 
 
 # ---------------------------------------------------------------------------
