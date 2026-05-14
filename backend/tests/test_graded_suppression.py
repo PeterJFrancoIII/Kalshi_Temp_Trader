@@ -4,7 +4,8 @@ from forecasting.distribution_utils import (
     blend_integer_distributions,
     shift_distribution_fractional,
     apply_weather_suppression_integer,
-    normalize_probability_mass
+    normalize_probability_mass,
+    zero_impossible_temps
 )
 
 class TestGradedSuppression(unittest.TestCase):
@@ -97,8 +98,10 @@ class TestV2Calibration(unittest.TestCase):
         blended = blend_integer_distributions(self.clim_dist, fc_dist, self.w_clim, self.w_fc)
         
         # Add uniform floor
-        uni_prob = self.w_uni / 56
-        for t in range(60, 116):
+        uni_range = (60, 105)
+        n_buckets = uni_range[1] - uni_range[0] + 1
+        uni_prob = self.w_uni / n_buckets
+        for t in range(uni_range[0], uni_range[1] + 1):
             blended[t] = blended.get(t, 0.0) + uni_prob
         blended = normalize_probability_mass(blended)
         
@@ -130,9 +133,11 @@ class TestV2Calibration(unittest.TestCase):
         # New config
         fc_dist = build_integer_distribution(center_f=90, std_f=2.2)
         blended = blend_integer_distributions(self.clim_dist, fc_dist, self.w_clim, self.w_fc)
-        # Add uniform 0.1
-        uni_prob = self.w_uni / 56
-        for t in range(60, 116):
+        # Add uniform 0.1 in new range [60, 105]
+        uni_range = (60, 105)
+        n_buckets = uni_range[1] - uni_range[0] + 1
+        uni_prob = self.w_uni / n_buckets
+        for t in range(uni_range[0], uni_range[1] + 1):
             blended[t] = blended.get(t, 0.0) + uni_prob
         blended = normalize_probability_mass(blended)
         final = apply_weather_suppression_integer(blended, thunderstorm_severity="slight chance")
@@ -149,8 +154,10 @@ class TestV2Calibration(unittest.TestCase):
         fc_dist = build_integer_distribution(center_f=90, std_f=2.2)
         blended = blend_integer_distributions(self.clim_dist, fc_dist, self.w_clim, self.w_fc)
         
-        uni_prob = self.w_uni / 56
-        for t in range(60, 116):
+        uni_range = (60, 105)
+        n_buckets = uni_range[1] - uni_range[0] + 1
+        uni_prob = self.w_uni / n_buckets
+        for t in range(uni_range[0], uni_range[1] + 1):
             blended[t] = blended.get(t, 0.0) + uni_prob
         blended = normalize_probability_mass(blended)
         
@@ -173,6 +180,46 @@ class TestV2Calibration(unittest.TestCase):
         expected = sum(t * p for t, p in dist.items()) # 88*0.2 + 89*0.3 + 90*0.5 = 17.6 + 26.7 + 45 = 89.3
         best = int(round(expected))
         self.assertEqual(best, 89)
+
+    def test_upper_tail_inflation_regression(self):
+        """
+        Regression test: Verify that after observed_max truncation, 
+        there is no flat artificial tail extending to 115F.
+        """
+        # 1. Build distribution with new 105F limit
+        fc_dist = build_integer_distribution(center_f=90, std_f=2.2)
+        blended = blend_integer_distributions(self.clim_dist, fc_dist, self.w_clim, self.w_fc)
+        
+        uni_range = (60, 105)
+        n_buckets = uni_range[1] - uni_range[0] + 1
+        uni_prob = self.w_uni / n_buckets
+        for t in range(uni_range[0], uni_range[1] + 1):
+            blended[t] = blended.get(t, 0.0) + uni_prob
+        blended = normalize_probability_mass(blended)
+        
+        # 2. Truncate at 95F
+        truncated = zero_impossible_temps(blended, 95)
+        
+        # 3. Assertions
+        # Mass below 95 must be zero
+        for t in range(60, 95):
+            self.assertEqual(truncated.get(t, 0.0), 0.0)
+            
+        # P(>93) must be 1.0 (since 95 is the min)
+        p_gt_93 = sum(v for t, v in truncated.items() if t > 93)
+        self.assertAlmostEqual(p_gt_93, 1.0, places=5)
+        
+        # P(>105) must be zero
+        p_gt_105 = sum(v for t, v in truncated.items() if t > 105)
+        self.assertEqual(p_gt_105, 0.0)
+        
+        # Ensure no keys > 105 exist with positive value
+        for t in truncated:
+            if t > 105:
+                self.assertEqual(truncated[t], 0.0)
+                
+        # Distribution sums to 1.0
+        self.assertAlmostEqual(sum(truncated.values()), 1.0, places=5)
 
 if __name__ == "__main__":
     unittest.main()

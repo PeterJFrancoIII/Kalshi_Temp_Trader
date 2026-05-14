@@ -157,9 +157,11 @@ def forecast_daily_high_bins_v2(
             integer_dist = blend_integer_distributions(
                 clim_int_dist, forecast_int_dist, V2_CLIMATOLOGY_WEIGHT, V2_FORECAST_WEIGHT
             )
-            # Add uniform floor
-            uniform_prob = V2_UNIFORM_WEIGHT / 56 # Approx range 60-115
-            for t in range(60, 116):
+            # Add uniform floor in sane KMIA range [60, 105]
+            uniform_range = (60, 105)
+            n_buckets = uniform_range[1] - uniform_range[0] + 1
+            uniform_prob = V2_UNIFORM_WEIGHT / n_buckets
+            for t in range(uniform_range[0], uniform_range[1] + 1):
                 integer_dist[t] = integer_dist.get(t, 0.0) + uniform_prob
             integer_dist = normalize_probability_mass(integer_dist)
         else:

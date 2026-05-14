@@ -41,7 +41,7 @@ def _normal_cdf(z: float) -> float:
 def build_integer_distribution(
     center_f: int,
     std_f: float = 2.2,
-    temp_range: Tuple[int, int] = (60, 115),
+    temp_range: Tuple[int, int] = (60, 105),
 ) -> Dict[int, float]:
     """
     Builds a discrete normal distribution over integer Fahrenheit temperatures.
