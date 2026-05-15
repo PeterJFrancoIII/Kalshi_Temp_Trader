@@ -27,7 +27,7 @@ P1 Covers:
 import json
 import os
 import tempfile
-import pytest
+# import pytest (unused)
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -662,6 +662,118 @@ def test_signal_generator_uses_embedded_ts_not_mtime():
                 f"Wrong error message: {e}"
 
 
+def test_point_in_time_leakage_prevention():
+    """
+    Scope explicit requirement:
+    Test explicitly creating a dummy artifact with a JSON timestamp 1 minute AFTER
+    the simulated as_of time, verifying that the coordinator completely ignores it
+    and falls back to an older artifact.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir)
+        sim_date = datetime(2026, 5, 6, tzinfo=timezone.utc)
+        
+        # simulated as_of time
+        as_of = datetime(2026, 5, 6, 14, 0, 0, tzinfo=timezone.utc)
+        
+        # Older valid artifact
+        _write_json(d / "fore_2026-05-06_older.json", {
+            "generated_at_utc": "2026-05-06T13:00:00+00:00",
+            "probability_bins": {},
+        })
+        
+        # Leaking artifact exactly 1 minute AFTER as_of
+        _write_json(d / "fore_2026-05-06_leaking.json", {
+            "generated_at_utc": "2026-05-06T14:01:00+00:00",
+            "probability_bins": {},
+        })
+        
+        registry = SnapshotRegistry(search_roots={"forecast": d})
+        
+        result = registry.resolve("forecast", sim_date, as_of)
+        
+        assert result is not None, "Should fall back to older artifact"
+        assert result.name == "fore_2026-05-06_older.json", (
+            f"Expected fore_2026-05-06_older.json but got {result.name}. "
+            "Lookahead leakage detected!"
+        )
+        
+        # Verify manifest entry reason
+        log = registry.lookup_log()
+        assert log[-1]["reason"] == "resolved"
+        assert log[-1]["embedded_timestamp"] == "2026-05-06T13:00:00+00:00"
+
+def test_missing_timestamp_artifact_rejected():
+    """Verify that artifacts with no usable embedded timestamp are recorded and skipped."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir)
+        sim_date = datetime(2026, 5, 6, tzinfo=timezone.utc)
+        as_of = datetime(2026, 5, 6, 14, 0, 0, tzinfo=timezone.utc)
+        
+        # Artifact with NO timestamp field
+        _write_json(d / "fore_2026-05-06_junk.json", {
+            "some_other_field": "no_timestamp_here"
+        })
+        
+        registry = SnapshotRegistry(search_roots={"forecast": d})
+        result = registry.resolve("forecast", sim_date, as_of)
+        
+        assert result is None
+        log = registry.lookup_log()
+        assert log[-1]["reason"] == "missing_timestamp"
+
+def test_manifest_summary_and_reasons():
+    """Verify replay_manifest.json summary counts and granular reasons."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = Path(tmpdir)
+        forecasts = base / "forecasts"
+        forecasts.mkdir()
+        
+        # Setup one resolved, one future, one missing_timestamp
+        sim_date = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        as_of = datetime(2026, 5, 1, 13, 0, tzinfo=timezone.utc)
+        
+        # Resolved
+        _write_json(forecasts / "forecast_2026-05-01.json", {"generated_at_utc": "2026-05-01T12:00:00Z"})
+        
+        registry = SnapshotRegistry(search_roots={"forecast": forecasts, "market_snapshot": base / "missing"})
+        
+        coordinator = BacktestCoordinator(
+            start_date="2026-05-01",
+            end_date="2026-05-01",
+            forecast_as_of_hour_utc=13,
+            market_snapshot_as_of_hour_utc=14,
+            weather_observation_as_of_hour_utc=14,
+            reports_root=base / "reports"
+        )
+        # Inject our registry
+        coordinator._registry = registry
+        
+        # Trigger a manifest write
+        coordinator._write_replay_manifest()
+        
+        with open(coordinator.manifest_path, "r") as f:
+            manifest = json.load(f)
+            
+        assert "summary" in manifest
+        assert "total_lookups" in manifest["summary"]
+        assert "resolved" in manifest["summary"]
+        assert "failed" in manifest["summary"]
+        
+        # Check lookup reasons
+        registry.resolve("forecast", sim_date, as_of) # Resolved
+        registry.resolve("market_snapshot", sim_date, as_of) # missing_directory
+        
+        coordinator._write_replay_manifest()
+        with open(coordinator.manifest_path, "r") as f:
+            manifest = json.load(f)
+            
+        reasons = [l["reason"] for l in manifest["lookups"]]
+        assert "resolved" in reasons
+        assert "missing_directory" in reasons
+
+
+
 # ---------------------------------------------------------------------------
 # Run manually (without pytest)
 # ---------------------------------------------------------------------------
@@ -696,6 +808,9 @@ if __name__ == "__main__":
         test_replay_manifest_written_after_run_backtest,
         test_replay_manifest_schema,
         test_signal_generator_uses_embedded_ts_not_mtime,
+        test_point_in_time_leakage_prevention,
+        test_missing_timestamp_artifact_rejected,
+        test_manifest_summary_and_reasons,
     ]
     failed = 0
     for t in tests:

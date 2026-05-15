@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
@@ -87,12 +87,13 @@ class SnapshotRegistry:
         cache_key = f"{artifact_type}::{date_str}::{as_of_time.isoformat()}"
 
         if cache_key in self._cache:
+            # Note: cache doesn't store the reason/ts, but the manifest log does from the first call.
             return self._cache[cache_key]
 
         directory = self._roots.get(artifact_type)
         if directory is None:
             logger.warning(f"SnapshotRegistry: unknown artifact_type '{artifact_type}'")
-            self._record(artifact_type, date_str, as_of_time, None, "unknown_type")
+            self._record(artifact_type, date_str, as_of_time, None, None, "unknown_type")
             self._cache[cache_key] = None
             return None
 
@@ -105,23 +106,50 @@ class SnapshotRegistry:
                 logger.warning(
                     f"SnapshotRegistry: directory {directory} does not exist."
                 )
-                self._record(artifact_type, date_str, as_of_time, None, "dir_not_found")
+                self._record(artifact_type, date_str, as_of_time, None, None, "missing_directory")
                 self._cache[cache_key] = None
                 return None
 
         if glob_pattern is None:
             glob_pattern = self._default_glob(artifact_type, date_str)
 
-        path = select_snapshot_as_of(
-            directory=directory,
-            glob_pattern=glob_pattern,
-            as_of_time=as_of_time,
-        )
+        # Manual filtering to capture reasons for replay manifest (P1 requirement)
+        candidates: List[Tuple[datetime, Path]] = []
+        rejected_reasons: List[str] = []
+        
+        files = list(directory.glob(glob_pattern))
+        if not files:
+            self._record(artifact_type, date_str, as_of_time, None, None, "no_files_found")
+            self._cache[cache_key] = None
+            return None
 
-        reason = "resolved" if path else "not_found"
-        self._record(artifact_type, date_str, as_of_time, path, reason)
-        self._cache[cache_key] = path
-        return path
+        for filepath in files:
+            ts = extract_embedded_timestamp(filepath)
+            if ts is None:
+                rejected_reasons.append("missing_timestamp")
+                continue
+            
+            if ts <= as_of_time:
+                candidates.append((ts, filepath))
+            else:
+                rejected_reasons.append("future_artifact_excluded")
+
+        if not candidates:
+            reason = rejected_reasons[0] if rejected_reasons else "no_eligible_artifact"
+            # If we have mixed reasons, "future_artifact_excluded" is the most safety-critical to report
+            if "future_artifact_excluded" in rejected_reasons:
+                reason = "future_artifact_excluded"
+            
+            self._record(artifact_type, date_str, as_of_time, None, None, reason)
+            self._cache[cache_key] = None
+            return None
+
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        chosen_ts, chosen_path = candidates[0]
+        
+        self._record(artifact_type, date_str, as_of_time, chosen_path, chosen_ts, "resolved")
+        self._cache[cache_key] = chosen_path
+        return chosen_path
 
     def lookup_log(self) -> List[Dict[str, Any]]:
         """Returns all recorded lookup events (used to build the replay manifest)."""
@@ -151,6 +179,7 @@ class SnapshotRegistry:
         date_str: str,
         as_of_time: datetime,
         path: Optional[Path],
+        embedded_ts: Optional[datetime],
         reason: str,
     ) -> None:
         self._log.append({
@@ -158,6 +187,7 @@ class SnapshotRegistry:
             "target_date": date_str,
             "as_of_time": as_of_time.isoformat(),
             "resolved_path": str(path) if path else None,
+            "embedded_timestamp": embedded_ts.isoformat() if embedded_ts else None,
             "reason": reason,
         })
 
@@ -194,6 +224,7 @@ class BacktestCoordinator:
         market_snapshot_as_of_hour_utc: int = DEFAULT_MARKET_SNAPSHOT_HOUR_UTC,
         weather_observation_as_of_hour_utc: int = DEFAULT_WEATHER_OBS_HOUR_UTC,
         settlement_next_day_hour_utc: int = DEFAULT_SETTLEMENT_NEXT_DAY_HOUR_UTC,
+        reports_root: Optional[Path] = None,
     ):
         """
         Args:
@@ -207,6 +238,7 @@ class BacktestCoordinator:
             weather_observation_as_of_hour_utc: Hour of day UTC for weather obs cutoff.
             settlement_next_day_hour_utc: Hour on the NEXT calendar day when official
                 settlement data is considered available.
+            reports_root: Optional root directory for backtest reports.
         """
         self.start_date = datetime.strptime(start_date, "%Y-%m-%d").replace(
             tzinfo=timezone.utc
@@ -224,7 +256,8 @@ class BacktestCoordinator:
 
         # Output directory
         run_id = f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-        self.run_dir = BACKTEST_REPORTS_DIR / run_id
+        root = reports_root if reports_root else BACKTEST_REPORTS_DIR
+        self.run_dir = root / run_id
         self.ledger_path = self.run_dir / "paper_trade_ledger.jsonl"
         self.settlements_path = self.run_dir / "settlements.jsonl"
         self.performance_path = self.run_dir / "performance_summary.json"
@@ -390,31 +423,8 @@ class BacktestCoordinator:
         """
         Writes a JSON audit trail listing every artifact resolved by the
         SnapshotRegistry during this backtest run.
-
-        The manifest enables exact replay reproduction: given the same
-        manifest, any future run can verify that the same files were (or
-        were not) available at each simulated point-in-time cutoff.
-
-        Schema
-        ------
-        {
-            "run_id": str,
-            "start_date": str,
-            "end_date": str,
-            "as_of_config": { ... },
-            "generated_at_utc": str,
-            "lookups": [
-                {
-                    "artifact_type": str,
-                    "target_date": str,
-                    "as_of_time": str,
-                    "resolved_path": str | null,
-                    "reason": "resolved" | "not_found" | "dir_not_found" | ...
-                },
-                ...
-            ]
-        }
         """
+        lookups = self._registry.lookup_log()
         manifest = {
             "run_id": self.run_dir.name,
             "start_date": self.start_date.strftime("%Y-%m-%d"),
@@ -425,13 +435,19 @@ class BacktestCoordinator:
                 "weather_observation_as_of_hour_utc": self.weather_observation_as_of_hour_utc,
                 "settlement_next_day_hour_utc": self.settlement_next_day_hour_utc,
             },
+            "summary": {
+                "total_lookups": len(lookups),
+                "resolved": sum(1 for l in lookups if l["reason"] == "resolved"),
+                "failed": sum(1 for l in lookups if l["reason"] != "resolved"),
+            },
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "safety": {
                 "no_real_trading": True,
                 "disclaimer": "NO REAL TRADING EXECUTION - PAPER ONLY",
             },
-            "lookups": self._registry.lookup_log(),
+            "lookups": lookups,
         }
+        self.run_dir.mkdir(parents=True, exist_ok=True)
         with open(self.manifest_path, "w") as f:
             json.dump(manifest, f, indent=2)
         logger.info(f"Replay manifest written to {self.manifest_path}")
