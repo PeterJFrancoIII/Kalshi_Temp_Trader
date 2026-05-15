@@ -61,12 +61,12 @@ def load_json(path):
 
 def format_probability(value, show_plus=False):
     if value is None:
-        return "N/A"
+        return "—"
     try:
         prefix = "+" if show_plus and float(value) > 0 else ""
         return f"{prefix}{float(value) * 100:.1f}%"
     except (TypeError, ValueError):
-        return "N/A"
+        return "—"
 
 def extract_bin_from_market(mkt: dict) -> Optional[str]:
     """Extracts a standardized forecast-style bin label from market metadata."""
@@ -106,7 +106,10 @@ def format_num(val, unit=""):
     try:
         res = f"{float(val):.1f}"
         if unit:
-            res += f" {unit}"
+            if unit == "%":
+                res += unit
+            else:
+                res += f" {unit}"
         return res
     except (ValueError, TypeError):
         return str(val)
@@ -922,23 +925,41 @@ def render_weather_nws(w_data, n_data):
                 "precipitation_last_hour_in",
                 "clouds_x100ft",
             ]
-            available_columns = [c for c in display_columns if c in df_obs.columns]
-            df_display = df_obs[available_columns] if available_columns else df_obs
+            # Prepare display dataframe as a clean copy
+            display_cols = [c for c in display_columns if c in df_obs.columns]
+            df_display = df_obs[display_cols].copy()
             
-            # Format decimals for numeric columns
-            format_dict = {
-                "temperature_f": "{:.1f}°F",
-                "dewpoint_f": "{:.1f}°F",
-                "relative_humidity_pct": "{:.1f}%",
-                "wind_speed_mph": "{:.1f} mph",
-                "wind_gust_mph": "{:.1f} mph",
-                "sea_level_pressure_mb": "{:.1f} mb",
-                "barometric_pressure_mb": "{:.1f} mb",
-                "precipitation_last_hour_in": "{:.2f} in"
-            }
-            valid_formats = {k: v for k, v in format_dict.items() if k in df_display.columns}
+            # 4. Pre-format nullable display fields into safe scalar strings before calling st.dataframe
+            # temperatures: format_temp(value) -> "87.8°F" or "—"
+            if "temperature_f" in df_display.columns:
+                df_display["temperature_f"] = df_display["temperature_f"].apply(format_temp)
+            if "dewpoint_f" in df_display.columns:
+                df_display["dewpoint_f"] = df_display["dewpoint_f"].apply(format_temp)
             
-            st.dataframe(df_display.style.format(valid_formats), use_container_width=True, hide_index=True)
+            # humidity: format_num(value, "%") -> "62.0%" or "—"
+            if "relative_humidity_pct" in df_display.columns:
+                df_display["relative_humidity_pct"] = df_display["relative_humidity_pct"].apply(lambda x: format_num(x, unit="%"))
+            
+            # wind: format_num(value, "mph") -> "8.0 mph" or "—"
+            if "wind_speed_mph" in df_display.columns:
+                df_display["wind_speed_mph"] = df_display["wind_speed_mph"].apply(lambda x: format_num(x, unit="mph"))
+            if "wind_gust_mph" in df_display.columns:
+                df_display["wind_gust_mph"] = df_display["wind_gust_mph"].apply(lambda x: format_num(x, unit="mph"))
+            
+            # pressure: "1015.2 mb" or "—"
+            if "sea_level_pressure_mb" in df_display.columns:
+                df_display["sea_level_pressure_mb"] = df_display["sea_level_pressure_mb"].apply(lambda x: format_num(x, unit="mb"))
+            if "barometric_pressure_mb" in df_display.columns:
+                df_display["barometric_pressure_mb"] = df_display["barometric_pressure_mb"].apply(lambda x: format_num(x, unit="mb"))
+            
+            # precipitation: "0.0 in" or "—"
+            if "precipitation_last_hour_in" in df_display.columns:
+                df_display["precipitation_last_hour_in"] = df_display["precipitation_last_hour_in"].apply(
+                    lambda x: f"{float(x):.2f} in" if x is not None and x != "N/A" and x != "" else "—"
+                )
+            
+            # 5. Replace use_container_width=True with width="stretch" in the touched st.dataframe call
+            st.dataframe(df_display, width="stretch", hide_index=True)
         else:
             st.warning("NWS snapshot loaded, but no parsed observation rows were found.")
             if isinstance(n_data, dict):

@@ -217,12 +217,12 @@ def test_is_signal_stale_or_mismatched():
 def test_format_probability():
     from src.web_console import format_probability
     
-    assert format_probability(None) == "N/A"
+    assert format_probability(None) == "—"
     assert format_probability(0.5) == "50.0%"
     assert format_probability(0.5, show_plus=True) == "+50.0%"
     assert format_probability(-0.5, show_plus=True) == "-50.0%"
     assert format_probability(0.0, show_plus=True) == "0.0%"
-    assert format_probability("abc") == "N/A"
+    assert format_probability("abc") == "—"
 
 def test_format_temp():
     from src.web_console import format_temp
@@ -325,3 +325,104 @@ def test_dataframe_config_logic():
     for col in df.columns:
         for val in df[col]:
             assert not isinstance(val, (dict, list)), f"Column '{col}' contains non-scalar value: {val}"
+
+def test_extract_market_rows_logic():
+    """
+    Test that extract_market_rows handles missing fields gracefully
+    and provides data for the active contracts table.
+    """
+    from src.web_console import extract_market_rows
+    mock_markets = [
+        {
+            "ticker": "KX-1",
+            "strike_type": "greater",
+            "floor_strike": 93
+        }
+    ]
+    mock_signals = {
+        "signals": [
+            {
+                "market_ticker": "KX-1",
+                "model_probability": 0.65,
+                "market_probability": 0.60,
+                "edge": 0.05
+            }
+        ]
+    }
+    mock_orderbooks = {
+        "KX-1": {
+            "yes_bids": [],
+            "no_bids": []
+        }
+    }
+    rows = extract_market_rows(mock_markets, mock_signals, mock_orderbooks)
+    assert len(rows) == 1
+    assert rows[0]["ticker"] == "KX-1"
+    assert rows[0]["model_probability"] == 0.65
+
+def test_render_weather_nws_formatting_handles_none():
+    """
+    Test that the display logic for NWS weather table correctly handles None values
+    and returns scalar strings (em-dash) instead of crashing or leaving None/dict.
+    """
+    from src.web_console import extract_nws_observation_rows, format_temp, format_num
+    import pandas as pd
+    
+    # Mock data with None values in various numeric fields
+    n_data = {
+        "observations": [
+            {
+                "timestamp": "2024-05-15T00:00:00Z",
+                "temperature_f": None,
+                "dewpoint_f": 75.2,
+                "relative_humidity_pct": None,
+                "wind_speed_mph": 5.0,
+                "wind_gust_mph": None,
+                "sea_level_pressure_mb": 1015.2,
+                "barometric_pressure_mb": None,
+                "precipitation_last_hour_in": None,
+                "wind_direction_compass": "SE"
+            }
+        ]
+    }
+    
+    obs_rows = extract_nws_observation_rows(n_data)
+    df_obs = pd.DataFrame(obs_rows)
+    
+    # Simulate the prep logic in render_weather_nws
+    df_display = df_obs.copy()
+    if "temperature_f" in df_display.columns:
+        df_display["temperature_f"] = df_display["temperature_f"].apply(format_temp)
+    if "dewpoint_f" in df_display.columns:
+        df_display["dewpoint_f"] = df_display["dewpoint_f"].apply(format_temp)
+    if "relative_humidity_pct" in df_display.columns:
+        df_display["relative_humidity_pct"] = df_display["relative_humidity_pct"].apply(lambda x: format_num(x, unit="%"))
+    if "wind_speed_mph" in df_display.columns:
+        df_display["wind_speed_mph"] = df_display["wind_speed_mph"].apply(lambda x: format_num(x, unit="mph"))
+    if "wind_gust_mph" in df_display.columns:
+        df_display["wind_gust_mph"] = df_display["wind_gust_mph"].apply(lambda x: format_num(x, unit="mph"))
+    if "sea_level_pressure_mb" in df_display.columns:
+        df_display["sea_level_pressure_mb"] = df_display["sea_level_pressure_mb"].apply(lambda x: format_num(x, unit="mb"))
+    if "barometric_pressure_mb" in df_display.columns:
+        df_display["barometric_pressure_mb"] = df_display["barometric_pressure_mb"].apply(lambda x: format_num(x, unit="mb"))
+    if "precipitation_last_hour_in" in df_display.columns:
+        df_display["precipitation_last_hour_in"] = df_display["precipitation_last_hour_in"].apply(
+            lambda x: f"{float(x):.2f} in" if x is not None and x != "N/A" and x != "" else "—"
+        )
+
+    # Assertions
+    assert df_display["temperature_f"].iloc[0] == "—"
+    assert df_display["dewpoint_f"].iloc[0] == "75.2°F"
+    assert df_display["relative_humidity_pct"].iloc[0] == "—"
+    assert df_display["wind_speed_mph"].iloc[0] == "5.0 mph"
+    assert df_display["wind_gust_mph"].iloc[0] == "—"
+    assert df_display["sea_level_pressure_mb"].iloc[0] == "1015.2 mb"
+    assert df_display["barometric_pressure_mb"].iloc[0] == "—"
+    assert df_display["precipitation_last_hour_in"].iloc[0] == "—"
+    
+    # Ensure all values are scalar strings
+    for col in df_display.columns:
+        for val in df_display[col]:
+            if col in ["timestamp", "time_et", "wind_direction_compass"]:
+                continue
+            assert isinstance(val, str), f"Column {col} has non-string value {val} (type {type(val)})"
