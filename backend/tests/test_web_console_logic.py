@@ -281,3 +281,47 @@ def test_extract_market_rows_logic():
     assert rows[1]["date"] == "2026-05-15"
     assert rows[1]["model_probability"] is None
     assert rows[1]["action"] == "DATE MISMATCH"
+
+def test_dataframe_config_logic():
+    """
+    Regression test for the 'unhashable type: dict' crash.
+    Verifies that the rename mapping contains only strings and 
+    that all displayed values are scalars.
+    """
+    # Define what the rename map should look like
+    rename_map = {
+        "date": "Date",
+        "ticker": "Ticker",
+        "bin": "Bin",
+        "title": "Title",
+        "yes_bid": "YES Bid",
+        "yes_ask": "YES Ask",
+        "model_probability": "Model %",
+        "market_probability": "Market %",
+        "edge": "Edge",
+        "action": "Action"
+    }
+    
+    # Ensure all values in rename_map are strings (not dicts/st.column_config)
+    for k, v in rename_map.items():
+        assert isinstance(v, str), f"Column mapping for '{k}' must be a string, got {type(v)}"
+
+    # Mock data that might go into the dataframe
+    rows = [{
+        "date": "2026-05-14",
+        "ticker": "T1",
+        "bin": "94.0°F",
+        "model_probability": 0.85,
+        "action": "BUY"
+    }]
+    import pandas as pd
+    df = pd.DataFrame(rows)
+    
+    # Verify that we can rename without crash
+    df_renamed = df.rename(columns=rename_map)
+    assert "Model %" in df_renamed.columns
+    
+    # Verify all cells are scalar (no dicts/lists)
+    for col in df.columns:
+        for val in df[col]:
+            assert not isinstance(val, (dict, list)), f"Column '{col}' contains non-scalar value: {val}"

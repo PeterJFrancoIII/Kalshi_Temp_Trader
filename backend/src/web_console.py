@@ -614,17 +614,23 @@ def render_kalshi_market_console(m_data, o_data, s_data):
                 st.warning(f"⚠️ **Date Mismatch Detected:** Signal date is {signal_date}, but some contracts are for other dates. Probabilities for mismatched dates will show as N/A.")
 
         # Display with proper formatting
-        col_config = {
+        rename_map = {
             "date": "Date",
             "ticker": "Ticker",
             "bin": "Bin",
             "title": "Title",
             "yes_bid": "YES Bid",
             "yes_ask": "YES Ask",
+            "model_probability": "Model %",
+            "market_probability": "Market %",
+            "edge": "Edge",
+            "action": "Action"
+        }
+
+        streamlit_col_config = {
             "model_probability": st.column_config.NumberColumn("Model %", format="%.1f%%"),
             "market_probability": st.column_config.NumberColumn("Market %", format="%.1f%%"),
-            "edge": st.column_config.NumberColumn("Edge", format="%+.1f%%"),
-            "action": "Action"
+            "edge": st.column_config.NumberColumn("Edge", format="%+.1f%%")
         }
         
         # Scale probabilities for NumberColumn format (0.85 -> 85.0)
@@ -632,8 +638,13 @@ def render_kalshi_market_console(m_data, o_data, s_data):
         df_active["market_probability"] = df_active["market_probability"].apply(lambda x: x * 100 if x is not None else None)
         df_active["edge"] = df_active["edge"].apply(lambda x: x * 100 if x is not None else None)
         
-        display_cols = [c for c in col_config.keys() if c in df_active.columns]
-        st.dataframe(df_active[display_cols].rename(columns=col_config), use_container_width=True, hide_index=True)
+        display_cols = [c for c in rename_map.keys() if c in df_active.columns]
+        st.dataframe(
+            df_active[display_cols].rename(columns=rename_map), 
+            column_config=streamlit_col_config,
+            width="stretch", 
+            hide_index=True
+        )
         
         # 5. Selected contract control
         tickers = [r["ticker"] for r in rows]
