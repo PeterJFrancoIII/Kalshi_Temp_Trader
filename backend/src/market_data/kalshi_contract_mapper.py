@@ -31,6 +31,7 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
         "yes_bid": market.get("yes_bid_dollars") or (market.get("yes_bid") / 100.0 if market.get("yes_bid") is not None else None),
         "yes_ask": market.get("yes_ask_dollars") or (market.get("yes_ask") / 100.0 if market.get("yes_ask") is not None else None),
         "close_time": market.get("close_time"),
+        "fallback_used": False,
         "parse_warnings": []
     }
     
@@ -93,14 +94,21 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
                 res["upper_inclusive"] = False
                 res["contract_range"] = f"<{val}"
 
-    # 3. Ticker fallback: B86.5
-    if res["condition_type"] == "unknown" and "-B" in ticker:
-        ticker_match = re.search(r"-B(\d+(?:\.\d+)?)", ticker)
-        if ticker_match:
-            res["condition_type"] = "above"
-            res["threshold_f"] = float(ticker_match.group(1))
-            res["lower_inclusive"] = False # Ticker B usually denotes boundary, assumed strict >
-            res["contract_range"] = f">{res['threshold_f']}"
+    # 3. Ticker fallback
+    if res["condition_type"] == "unknown":
+        if "-B" in ticker:
+            ticker_match = re.search(r"-B(\d+(?:\.\d+)?)", ticker)
+            if ticker_match:
+                res["condition_type"] = "above"
+                res["threshold_f"] = float(ticker_match.group(1))
+                res["lower_inclusive"] = False # Ticker B usually denotes boundary, assumed strict >
+                res["contract_range"] = f">{res['threshold_f']}"
+        elif "-T" in ticker:
+            ticker_match = re.search(r"-T(\d+(?:\.\d+)?)", ticker)
+            if ticker_match:
+                # Extract threshold but do NOT infer direction (above/below) from T suffix alone.
+                # Leave condition_type as "unknown" for second-pass fallback in parse_kalshi_markets.
+                res["threshold_f"] = float(ticker_match.group(1))
 
     if res["condition_type"] == "unknown":
         res["parse_warnings"].append(f"Could not determine condition for ticker {ticker}")
@@ -207,7 +215,8 @@ def market_to_contract_bin(market: Dict[str, Any]) -> Any:
     """
     from shared.types import ContractBin
     
-    mapping = extract_contract_thresholds(market)
+    # Use existing mapping if already enriched, otherwise extract
+    mapping = market.get("contract_mapping") or extract_contract_thresholds(market)
     label = mapping_to_bin_string(mapping) or "unknown"
     
     low, high = -999, 999
@@ -227,8 +236,57 @@ def market_to_contract_bin(market: Dict[str, Any]) -> Any:
         source="kalshi",
         raw_title=market.get("title"),
         raw_subtitle=market.get("subtitle"),
-        warnings=mapping.get("parse_warnings", [])
+        warnings=mapping.get("parse_warnings", []) + ([f"Fallback direction used"] if mapping.get("fallback_used") else [])
     )
+
+def apply_parsing_fallbacks(markets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Applies multi-market fallbacks for unresolved contracts.
+    Specifically: T-contracts where direction is unknown.
+    Rule: lowest T threshold = below, highest T threshold = above.
+    """
+    # Group unknown T-markets by event
+    unknowns_by_event = {}
+    for m in markets:
+        mapping = m.get("contract_mapping", {})
+        ticker = m.get("ticker", "")
+        if mapping.get("condition_type") == "unknown" and "-T" in ticker:
+            et = m.get("event_ticker", "unknown_event")
+            unknowns_by_event.setdefault(et, []).append(m)
+            
+    for et, m_list in unknowns_by_event.items():
+        if len(m_list) < 1:
+            continue
+            
+        # Sort by threshold
+        m_list.sort(key=lambda x: x["contract_mapping"].get("threshold_f") or 0)
+        
+        # Lowest T threshold = below
+        lowest = m_list[0]
+        mapping_low = lowest["contract_mapping"]
+        mapping_low["condition_type"] = "below"
+        mapping_low["upper_inclusive"] = False
+        mapping_low["contract_range"] = f"<{mapping_low['threshold_f']}"
+        mapping_low["fallback_used"] = True
+        mapping_low["parse_warnings"].append(f"Inferred direction 'below' as lowest T-contract in event {et}")
+        
+        # Re-generate contract_bin for the market
+        lowest["contract_bin"] = market_to_contract_bin(lowest).model_dump()
+        
+        # Highest T threshold = above (if it's a different market)
+        if len(m_list) > 1:
+            highest = m_list[-1]
+            mapping_high = highest["contract_mapping"]
+            mapping_high["condition_type"] = "above"
+            mapping_high["lower_inclusive"] = False
+            mapping_high["contract_range"] = f">{mapping_high['threshold_f']}"
+            mapping_high["fallback_used"] = True
+            mapping_high["parse_warnings"].append(f"Inferred direction 'above' as highest T-contract in event {et}")
+            
+            # Re-generate contract_bin for the market
+            highest["contract_bin"] = market_to_contract_bin(highest).model_dump()
+            
+    return markets
 
 def parse_kalshi_markets(snapshot_path: Path, target_date: Optional[str] = None) -> List[Dict[str, Any]]:
     """
@@ -277,7 +335,7 @@ def parse_kalshi_markets(snapshot_path: Path, target_date: Optional[str] = None)
         m["contract_bin"] = contract_bin.model_dump()
         kmia_markets.append(m)
         
-    return kmia_markets
+    return apply_parsing_fallbacks(kmia_markets)
 
 if __name__ == "__main__":
     # Test with a local file if it exists
