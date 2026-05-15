@@ -181,7 +181,7 @@ def mapping_to_bin_string(mapping: Dict[str, Any]) -> Optional[str]:
             if lower_inc:
                 return f">={int(thresh)}"
             else:
-                return f">{int(thresh)}"
+                return f">={int(thresh) + 1}"
         else:
             if lower_inc:
                 return f">={math.ceil(thresh)}"
@@ -192,7 +192,7 @@ def mapping_to_bin_string(mapping: Dict[str, Any]) -> Optional[str]:
             if upper_inc:
                 return f"<={int(thresh)}"
             else:
-                return f"<{int(thresh)}"
+                return f"<={int(thresh) - 1}"
         else:
             if upper_inc:
                 return f"<={math.floor(thresh)}"

@@ -69,7 +69,7 @@ def format_probability(value, show_plus=False):
         return "N/A"
 
 def extract_bin_from_market(mkt: dict) -> Optional[str]:
-    """Extracts a forecast-style bin label from market metadata."""
+    """Extracts a standardized forecast-style bin label from market metadata."""
     if not isinstance(mkt, dict):
         return None
     strike_type = mkt.get("strike_type")
@@ -77,12 +77,27 @@ def extract_bin_from_market(mkt: dict) -> Optional[str]:
     cap = mkt.get("cap_strike")
     
     if strike_type == "greater":
-        return f">{int(floor)}" if floor is not None else None
+        return f">={int(floor) + 1}" if floor is not None else None
     elif strike_type == "less":
-        return f"<{int(cap)}" if cap is not None else None
+        return f"<={int(cap) - 1}" if cap is not None else None
     elif floor is not None and cap is not None:
         return f"{int(floor)}-{int(cap)}"
     return None
+
+def pretty_format_bin(label: str) -> str:
+    """Pretty-prints bin labels for UI display."""
+    if not label or label == "unknown":
+        return label
+    
+    # Standardize common labels
+    res = label.replace(">=", "≥").replace("<=", "≤")
+    
+    # Add degree symbol if it looks like a temperature/number
+    if any(c.isdigit() for c in res):
+        # Don't add if already has it
+        if "°F" not in res:
+            res += "°F"
+    return res
 
 def format_temp(val):
     if val is None or val == "N/A":
@@ -342,18 +357,26 @@ def extract_market_rows(markets: list, paper_signals: dict, orderbooks: dict) ->
         ob = obs_dict.get(ticker, {})
         
         prices = derive_orderbook_prices(ob)
-        bin_label = mkt.get("contract_bin") or extract_bin_from_market(mkt) or ticker
         
+        # Handle contract_bin as either dict (ContractBin dump) or string
+        cb_data = mkt.get("contract_bin")
+        if isinstance(cb_data, dict):
+            bin_label = cb_data.get("label")
+        else:
+            bin_label = cb_data or extract_bin_from_market(mkt) or ticker
+            
         model_prob = sig.get("model_probability")
         # Fallback for model_probability from dynamic_contract_probabilities if dates match
         if model_prob is None and ticker_date == signal_date and paper_signals and "dynamic_contract_probabilities" in paper_signals:
             if bin_label in paper_signals["dynamic_contract_probabilities"]:
                 model_prob = paper_signals["dynamic_contract_probabilities"][bin_label]
         
+        display_bin = pretty_format_bin(bin_label)
+        
         row = {
             "date": ticker_date,
             "ticker": ticker,
-            "bin": bin_label,
+            "bin": display_bin,
             "title": mkt.get("title", ""),
             "yes_bid": prices["top_yes_bid"] if prices["top_yes_bid"] is not None else mkt.get("yes_bid"),
             "yes_ask": prices["derived_yes_ask"] if prices["derived_yes_ask"] is not None else mkt.get("yes_ask"),

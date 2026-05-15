@@ -13,6 +13,8 @@ class TestKalshiContractMapper(unittest.TestCase):
         res = extract_contract_thresholds(m)
         self.assertEqual(res["condition_type"], "above")
         self.assertEqual(res["threshold_f"], 91.0)
+        from market_data.kalshi_contract_mapper import mapping_to_bin_string
+        self.assertEqual(mapping_to_bin_string(res), ">=92")
 
     def test_structured_below(self):
         m = {
