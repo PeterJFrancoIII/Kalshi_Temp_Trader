@@ -51,11 +51,15 @@ class TestPaperSignalGenerator(unittest.TestCase):
         # Save original module variables
         import paper_trading.signal_generator as sg
         self.orig_nws_snapshot_file = sg.NWS_SNAPSHOT_FILE
+        self.orig_orderbooks_file = sg.LATEST_KALSHI_ORDERBOOKS
+        self.orig_snapshot_file = sg.LATEST_KALSHI_MARKET_SNAPSHOT
 
     def tearDown(self):
         # Restore original module variables
         import paper_trading.signal_generator as sg
         sg.NWS_SNAPSHOT_FILE = self.orig_nws_snapshot_file
+        sg.LATEST_KALSHI_ORDERBOOKS = self.orig_orderbooks_file
+        sg.LATEST_KALSHI_MARKET_SNAPSHOT = self.orig_snapshot_file
         
         if self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
@@ -644,6 +648,135 @@ class TestPaperSignalGenerator(unittest.TestCase):
             any("does not match" in w for w in report.get("warnings", [])),
             f"Should NOT have date-mismatch warning: {report.get('warnings')}"
         )
+
+    def test_orderbook_price_priority(self):
+        """Verify that orderbook prices override stale snapshot prices."""
+        import paper_trading.signal_generator as sg
+        
+        # 1. Mock Forecast (May 15)
+        forecast_path = self.temp_dir / "kmia_forecast_2026-05-15_rules_v2_climatology_120000.json"
+        forecast_data = {
+            "date": "2026-05-15",
+            "probability_bins": {">=93": 1.0},
+            "integer_distribution": {"93": 1.0, "94": 0.0},
+            "generated_at_utc": "2026-05-15T12:00:00Z"
+        }
+        with open(forecast_path, "w") as f:
+            json.dump(forecast_data, f)
+            
+        # 2. Mock Snapshot with STALE prices (0.27) and PREVIOUS fields
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_data = {
+            "generated_at_utc": "2026-05-15T00:37:00Z",
+            "selected_temperature_markets": [
+                {
+                    "ticker": "KXHIGHMIA-26MAY15-T92",
+                    "yes_ask_dollars": 0.27,
+                    "yes_bid_dollars": 0.26,
+                    "last_price_dollars": 0.26,
+                    "previous_yes_ask_dollars": 0.27, # Should be ignored
+                    "status": "active",
+                    "contract_bin": {"label": ">=93"}
+                }
+            ]
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot_data, f)
+        sg.LATEST_KALSHI_MARKET_SNAPSHOT = snapshot_path
+
+        # 3. Mock Orderbook with FRESH prices (1.00)
+        ob_path = self.temp_dir / "latest_kalshi_orderbooks.json"
+        ob_data = {
+            "orderbooks": {
+                "KXHIGHMIA-26MAY15-T92": {
+                    "top_yes_ask_dollars": 1.0,
+                    "top_yes_bid_dollars": 0.99,
+                    "last_price_dollars": 0.99
+                }
+            }
+        }
+        with open(ob_path, "w") as f:
+            json.dump(ob_data, f)
+        sg.LATEST_KALSHI_ORDERBOOKS = ob_path
+
+        # 4. Mock NWS
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        with open(nws_path, "w") as f:
+            json.dump({"latest_observation_time": "2026-05-15T12:00:00Z"}, f)
+        sg.NWS_SNAPSHOT_FILE = nws_path
+        
+        test_now = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        
+        report_path = generate_paper_signal(
+            forecast_path=forecast_path,
+            snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        
+        with open(report_path, "r") as f:
+            report = json.load(f)
+            
+        self.assertEqual(len(report["signals"]), 1)
+        sig = report["signals"][0]
+        self.assertEqual(sig["market_ticker"], "KXHIGHMIA-26MAY15-T92")
+        
+        # ASSERT: Orderbook price used, NOT snapshot price
+        self.assertEqual(sig["yes_ask"], 1.0)
+        self.assertEqual(sig["yes_bid"], 0.99)
+        self.assertEqual(sig["market_probability"], 1.0) # 1.0/1.0 = 1.0
+
+    def test_orderbook_missing_fallback(self):
+        """Verify that signal generator falls back to snapshot if orderbook is missing."""
+        import paper_trading.signal_generator as sg
+        
+        forecast_path = self.temp_dir / "kmia_forecast_2026-05-15_rules_v2_climatology_120000.json"
+        forecast_data = {"date": "2026-05-15", "probability_bins": {">=93": 0.5}, "generated_at_utc": "2026-05-15T12:00:00Z"}
+        with open(forecast_path, "w") as f:
+            json.dump(forecast_data, f)
+            
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_data = {
+            "generated_at_utc": "2026-05-15T12:00:00Z",
+            "selected_temperature_markets": [
+                {
+                    "ticker": "KXHIGHMIA-26MAY15-T92",
+                    "yes_ask_dollars": 0.45,
+                    "status": "active",
+                    "contract_bin": {"label": ">=93"}
+                }
+            ]
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot_data, f)
+        sg.LATEST_KALSHI_MARKET_SNAPSHOT = snapshot_path
+
+        # Orderbook is MISSING
+        sg.LATEST_KALSHI_ORDERBOOKS = self.temp_dir / "non_existent_ob.json"
+
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        with open(nws_path, "w") as f:
+            json.dump({"latest_observation_time": "2026-05-15T12:00:00Z"}, f)
+        sg.NWS_SNAPSHOT_FILE = nws_path
+        
+        test_now = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        
+        generate_paper_signal(
+            forecast_path=forecast_path,
+            snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        
+        with open(latest_path, "r") as f:
+            report = json.load(f)
+            
+        # ASSERT: Used snapshot price 0.45
+        self.assertEqual(report["signals"][0]["yes_ask"], 0.45)
 
 if __name__ == "__main__":
     unittest.main()

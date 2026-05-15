@@ -21,6 +21,7 @@ except ImportError:
 from market_data.kalshi_contract_mapper import parse_kalshi_markets
 from shared.artifact_paths import (
     LATEST_KALSHI_MARKET_SNAPSHOT,
+    LATEST_KALSHI_ORDERBOOKS,
     LATEST_NWS_KMIA_SNAPSHOT,
     LATEST_PAPER_SIGNAL,
 )
@@ -389,12 +390,22 @@ def generate_paper_signal(
                 norm_key = normalize_contract_key(bin_str)
                 dynamic_contract_probabilities[norm_key] = prob
 
+    all_orderbooks = {}
+    if os.path.exists(LATEST_KALSHI_ORDERBOOKS):
+        try:
+            with open(LATEST_KALSHI_ORDERBOOKS, 'r') as f:
+                ob_root = json.load(f)
+                all_orderbooks = ob_root.get("orderbooks", {})
+        except Exception as e:
+            logger.warning(f"Could not load orderbook artifact: {e}")
+
     for m in markets:
         ticker = m.get("ticker")
         mapping = m.get("contract_mapping", {})
         contract_bin_data = m.get("contract_bin")
         
         # Extract Market Price first so we can use it in fallback signals
+        # EXPLICITLY IGNORE ANY KEYS STARTING WITH 'previous_'
         ask = m.get("yes_ask_dollars")
         bid = m.get("yes_bid_dollars")
         last = m.get("last_price_dollars")
@@ -408,6 +419,16 @@ def generate_paper_signal(
 
         if last is None and m.get("last_price") is not None: last = m.get("last_price") / 100.0
         else: last = float(last) if last is not None else None
+
+        # Prioritize orderbook fields if they exist
+        orderbook_m = all_orderbooks.get(ticker, {})
+        ob_ask = orderbook_m.get("top_yes_ask_dollars")
+        ob_bid = orderbook_m.get("top_yes_bid_dollars")
+        ob_last = orderbook_m.get("last_price_dollars")
+
+        if ob_ask is not None: ask = float(ob_ask)
+        if ob_bid is not None: bid = float(ob_bid)
+        if ob_last is not None: last = float(ob_last)
 
         executable_price = select_executable_price(ask, last)
         

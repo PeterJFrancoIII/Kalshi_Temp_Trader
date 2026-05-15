@@ -39,6 +39,30 @@ def normalize_orderbook(raw: Dict[str, Any]) -> Dict[str, Any]:
         "warnings": warnings
     }
 
+def get_top_of_book(normalized_ob: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract top-of-book prices (in dollars) from normalized orderbook."""
+    res = {
+        "yes_bid": None,
+        "yes_ask": None,
+        "no_bid": None,
+        "no_ask": None
+    }
+    
+    y_bids = normalized_ob.get("yes_bids", [])
+    n_bids = normalized_ob.get("no_bids", [])
+    
+    if y_bids:
+        res["yes_bid"] = y_bids[0][0] / 100.0
+        # NO ask is 100 - YES bid
+        res["no_ask"] = (100 - y_bids[0][0]) / 100.0
+        
+    if n_bids:
+        res["no_bid"] = n_bids[0][0] / 100.0
+        # YES ask is 100 - NO bid
+        res["yes_ask"] = (100 - n_bids[0][0]) / 100.0
+        
+    return res
+
 def main():
     print("--- Kalshi Public Market Data Updater ---")
     print("Mode: READ-ONLY / PAPER EVALUATION")
@@ -184,6 +208,18 @@ def main():
                         "warnings": [str(e)]
                     }
                     orderbook_warnings.append(f"Failed to fetch orderbook for {ticker}")
+                
+                # MERGE: Update the market object with fresh orderbook prices if available
+                ob = orderbooks[ticker]
+                tob = get_top_of_book(ob)
+                if tob["yes_bid"] is not None:
+                    m["yes_bid_dollars"] = tob["yes_bid"]
+                if tob["yes_ask"] is not None:
+                    m["yes_ask_dollars"] = tob["yes_ask"]
+                if tob["no_bid"] is not None:
+                    m["no_bid_dollars"] = tob["no_bid"]
+                if tob["no_ask"] is not None:
+                    m["no_ask_dollars"] = tob["no_ask"]
                     
                 # Fallback logic if orderbook depth is empty
                 ob = orderbooks[ticker]
