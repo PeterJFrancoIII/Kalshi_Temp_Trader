@@ -33,10 +33,9 @@ STREAMLIT_PORT="${STREAMLIT_PORT:-8501}"
 # Check if socket binding is permitted
 echo "Verifying socket binding permission..."
 if ! python3 -c "import socket; s = socket.socket(); s.bind(('$STREAMLIT_ADDRESS', int('$STREAMLIT_PORT'))); s.close()" 2>/dev/null; then
-    echo "ERROR: Cannot bind to $STREAMLIT_ADDRESS:$STREAMLIT_PORT."
-    echo "This environment may restrict socket binding, or the port may be in use."
-    echo "Please try another port using: STREAMLIT_PORT=8502 bash scripts/run_web_console.sh"
-    exit 1
+    echo "WARNING: Cannot bind to $STREAMLIT_ADDRESS:$STREAMLIT_PORT in pre-flight check."
+    echo "This environment may restrict manual socket binding. Attempting to start Streamlit anyway..."
+    # We don't exit 1 here anymore to support restricted sandboxes.
 fi
 
 export PYTHONPATH="${PYTHONPATH:-}:$PROJECT_ROOT/backend/src"

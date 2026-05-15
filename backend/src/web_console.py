@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import re
 from typing import Optional, Tuple
+from shared.timestamp_utils import parse_ticker_date
 
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
@@ -66,6 +67,22 @@ def format_probability(value, show_plus=False):
         return f"{prefix}{float(value) * 100:.1f}%"
     except (TypeError, ValueError):
         return "N/A"
+
+def extract_bin_from_market(mkt: dict) -> Optional[str]:
+    """Extracts a forecast-style bin label from market metadata."""
+    if not isinstance(mkt, dict):
+        return None
+    strike_type = mkt.get("strike_type")
+    floor = mkt.get("floor_strike")
+    cap = mkt.get("cap_strike")
+    
+    if strike_type == "greater":
+        return f">{int(floor)}" if floor is not None else None
+    elif strike_type == "less":
+        return f"<{int(cap)}" if cap is not None else None
+    elif floor is not None and cap is not None:
+        return f"{int(floor)}-{int(cap)}"
+    return None
 
 def format_temp(val):
     if val is None or val == "N/A":
@@ -308,37 +325,45 @@ def extract_market_rows(markets: list, paper_signals: dict, orderbooks: dict) ->
     signals = paper_signals.get("signals", []) if isinstance(paper_signals, dict) else []
     signal_map = {sig.get("market_ticker"): sig for sig in signals if sig.get("market_ticker")}
     
+    # Extract signal date from forecast source filename for mismatch detection
+    signal_date = None
+    forecast_source = paper_signals.get("forecast_source", "") if isinstance(paper_signals, dict) else ""
+    if forecast_source:
+        date_match = re.search(r"(\d{4}-\d{2}-\d{2})", forecast_source)
+        if date_match:
+            signal_date = date_match.group(1)
+
     obs_dict = orderbooks.get("orderbooks", {}) if isinstance(orderbooks, dict) else {}
     
     for mkt in markets:
-        ticker = mkt.get("ticker")
+        ticker = mkt.get("ticker", "")
+        ticker_date = parse_ticker_date(ticker)
         sig = signal_map.get(ticker, {})
         ob = obs_dict.get(ticker, {})
         
         prices = derive_orderbook_prices(ob)
+        bin_label = mkt.get("contract_bin") or extract_bin_from_market(mkt) or ticker
+        
+        model_prob = sig.get("model_probability")
+        # Fallback for model_probability from dynamic_contract_probabilities if dates match
+        if model_prob is None and ticker_date == signal_date and paper_signals and "dynamic_contract_probabilities" in paper_signals:
+            if bin_label in paper_signals["dynamic_contract_probabilities"]:
+                model_prob = paper_signals["dynamic_contract_probabilities"][bin_label]
         
         row = {
+            "date": ticker_date,
             "ticker": ticker,
-            "bin": mkt.get("contract_bin") or mkt.get("ticker"),
+            "bin": bin_label,
             "title": mkt.get("title", ""),
-            "subtitle": mkt.get("subtitle", ""),
             "yes_bid": prices["top_yes_bid"] if prices["top_yes_bid"] is not None else mkt.get("yes_bid"),
             "yes_ask": prices["derived_yes_ask"] if prices["derived_yes_ask"] is not None else mkt.get("yes_ask"),
-            "last_price": mkt.get("last_price"),
-            "model_probability": sig.get("model_probability"),
+            "model_probability": model_prob,
             "market_probability": sig.get("market_probability"),
             "edge": sig.get("edge"),
-            "expected_value": sig.get("expected_value"),
-            "paper_action": sig.get("paper_action"),
-            "warnings": ", ".join(mkt.get("warnings", [])) if mkt.get("warnings") else ""
+            "action": sig.get("paper_action", "N/A" if ticker_date == signal_date else "DATE MISMATCH"),
+            "stale": mkt.get("stale", False)
         }
         
-        # Fallback for model_probability from dynamic_contract_probabilities
-        if row["model_probability"] is None and paper_signals and "dynamic_contract_probabilities" in paper_signals:
-            bin_label = row["bin"]
-            if bin_label in paper_signals["dynamic_contract_probabilities"]:
-                row["model_probability"] = paper_signals["dynamic_contract_probabilities"][bin_label]
-
         rows.append(row)
     return rows
 
@@ -539,7 +564,40 @@ def render_kalshi_market_console(m_data, o_data, s_data):
     rows = extract_market_rows(markets, s_data, o_data)
     if rows:
         st.subheader("Active Contracts")
-        st.dataframe(rows)
+        
+        # Detect date mismatch for the whole table
+        signal_date = None
+        if s_data and "forecast_source" in s_data:
+            dm = re.search(r"(\d{4}-\d{2}-\d{2})", s_data["forecast_source"])
+            if dm: signal_date = dm.group(1)
+        
+        df_active = pd.DataFrame(rows)
+        if signal_date:
+            mismatched = df_active[df_active["date"] != signal_date]
+            if not mismatched.empty:
+                st.warning(f"⚠️ **Date Mismatch Detected:** Signal date is {signal_date}, but some contracts are for other dates. Probabilities for mismatched dates will show as N/A.")
+
+        # Display with proper formatting
+        col_config = {
+            "date": "Date",
+            "ticker": "Ticker",
+            "bin": "Bin",
+            "title": "Title",
+            "yes_bid": "YES Bid",
+            "yes_ask": "YES Ask",
+            "model_probability": st.column_config.NumberColumn("Model %", format="%.1f%%"),
+            "market_probability": st.column_config.NumberColumn("Market %", format="%.1f%%"),
+            "edge": st.column_config.NumberColumn("Edge", format="%+.1f%%"),
+            "action": "Action"
+        }
+        
+        # Scale probabilities for NumberColumn format (0.85 -> 85.0)
+        df_active["model_probability"] = df_active["model_probability"].apply(lambda x: x * 100 if x is not None else None)
+        df_active["market_probability"] = df_active["market_probability"].apply(lambda x: x * 100 if x is not None else None)
+        df_active["edge"] = df_active["edge"].apply(lambda x: x * 100 if x is not None else None)
+        
+        display_cols = [c for c in col_config.keys() if c in df_active.columns]
+        st.dataframe(df_active[display_cols].rename(columns=col_config), use_container_width=True, hide_index=True)
         
         # 5. Selected contract control
         tickers = [r["ticker"] for r in rows]

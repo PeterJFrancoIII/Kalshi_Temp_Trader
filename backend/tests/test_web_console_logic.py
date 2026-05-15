@@ -177,13 +177,13 @@ def test_extract_market_rows():
     rows = extract_market_rows(markets, paper_signals, orderbooks)
     assert len(rows) == 1
     assert rows[0]["ticker"] == "T1"
-    assert rows[0]["paper_action"] == "BUY_YES"
+    assert rows[0]["action"] == "BUY_YES"
     assert rows[0]["yes_ask"] == 70
     
     # Test with no signals/orderbooks
     rows = extract_market_rows(markets, {}, {})
     assert len(rows) == 1
-    assert rows[0]["paper_action"] is None
+    assert rows[0]["action"] == "N/A"
     assert rows[0]["yes_ask"] == 70
 
 def test_is_signal_stale_or_mismatched():
@@ -232,3 +232,45 @@ def test_format_temp():
     assert format_temp(82.55) == "82.5"
     assert format_temp("82.55") == "82.5"
     assert format_temp("abc") == "abc"
+
+def test_extract_market_rows_logic():
+    from src.web_console import extract_market_rows
+    markets = [
+        {
+            "ticker": "KXHIGHMIA-26MAY14-T93",
+            "strike_type": "greater",
+            "floor_strike": 93,
+            "title": "Miami High 94+"
+        },
+        {
+            "ticker": "KXHIGHMIA-26MAY15-T93",
+            "strike_type": "greater",
+            "floor_strike": 93,
+            "title": "Miami High 94+ NEXT DAY"
+        }
+    ]
+    paper_signals = {
+        "forecast_source": "kmia_forecast_2026-05-14_rules.json",
+        "dynamic_contract_probabilities": {
+            ">93": 0.852
+        },
+        "signals": []
+    }
+    orderbooks = {}
+    
+    rows = extract_market_rows(markets, paper_signals, orderbooks)
+    
+    assert len(rows) == 2
+    
+    # Row 0 (Match date)
+    assert rows[0]["ticker"] == "KXHIGHMIA-26MAY14-T93"
+    assert rows[0]["date"] == "2026-05-14"
+    assert rows[0]["bin"] == ">93"
+    assert rows[0]["model_probability"] == 0.852
+    assert rows[0]["action"] == "N/A"
+    
+    # Row 1 (Mismatch date)
+    assert rows[1]["ticker"] == "KXHIGHMIA-26MAY15-T93"
+    assert rows[1]["date"] == "2026-05-15"
+    assert rows[1]["model_probability"] is None
+    assert rows[1]["action"] == "DATE MISMATCH"
