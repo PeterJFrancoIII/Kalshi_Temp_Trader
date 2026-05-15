@@ -218,7 +218,9 @@ from test_web_console_logic import (
     test_aggregate_warnings,
     test_derive_orderbook_prices,
     test_calculate_hypothetical_costs,
-    test_extract_market_rows
+    test_extract_market_rows,
+    test_format_temp,
+    test_format_num
 )
 
 from test_weather_ingestion import (
@@ -463,6 +465,8 @@ tests = [
     test_derive_orderbook_prices,
     test_calculate_hypothetical_costs,
     test_extract_market_rows,
+    test_format_temp,
+    test_format_num,
     test_weather_status_serialization,
     test_stale_data_flag,
     test_observed_max_so_far,

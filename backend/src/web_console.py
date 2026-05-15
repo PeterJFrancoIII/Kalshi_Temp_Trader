@@ -99,11 +99,24 @@ def pretty_format_bin(label: str) -> str:
             res += "°F"
     return res
 
-def format_temp(val):
-    if val is None or val == "N/A":
-        return "N/A"
+def format_num(val, unit=""):
+    """Formats a number to 1 decimal place with an optional unit."""
+    if val is None or val == "N/A" or val == "":
+        return "—"
     try:
-        return f"{float(val):.1f}"
+        res = f"{float(val):.1f}"
+        if unit:
+            res += f" {unit}"
+        return res
+    except (ValueError, TypeError):
+        return str(val)
+
+def format_temp(val):
+    """Formats a temperature to 1 decimal place with °F."""
+    if val is None or val == "N/A" or val == "":
+        return "—"
+    try:
+        return f"{float(val):.1f}°F"
     except (ValueError, TypeError):
         return str(val)
 
@@ -428,10 +441,10 @@ def render_command_center(app_state, p_data, mkts):
     n_data = app_state.get("n_data", {})
     if n_data:
         wc1, wc2, wc3, wc4 = st.columns(4)
-        wc1.metric("Current Temp", f"{format_temp(n_data.get('current_temp_f'))}°F")
-        wc2.metric("Observed Max Today", f"{format_temp(n_data.get('observed_max_so_far_f'))}°F")
-        wc3.metric("Latest Obs Time", n_data.get("latest_observation_time", "N/A"))
-        wc4.metric("Source", n_data.get("observation_source", "N/A"))
+        wc1.metric("Current Temp", format_temp(n_data.get('current_temp_f')))
+        wc2.metric("Observed Max Today", format_temp(n_data.get('observed_max_so_far_f')))
+        wc3.metric("Latest Obs Time", n_data.get("latest_observation_time", "—"))
+        wc4.metric("Source", n_data.get("observation_source", "—"))
         
         if n_data.get("stale_data"):
             st.warning("⚠️ Weather data is stale!")
@@ -724,14 +737,14 @@ def render_active_forecasts(p_data):
             st.divider()
             st.subheader("🤖 Model Insights")
             mi_c1, mi_c2, mi_c3, mi_c4 = st.columns(4)
-            mi_c1.metric("Deterministic Anchor", f"{format_temp(f_data.get('deterministic_anchor_f'))}°F")
-            mi_c2.metric("Distribution Mean", f"{format_temp(f_data.get('final_distribution_mean_f'))}°F")
-            mi_c3.metric("Distribution Mode", f"{format_temp(f_data.get('final_distribution_mode_f'))}°F")
-            mi_c4.metric("Suppression Shift", f"{format_temp(f_data.get('weather_suppression_shift_f'))}°F")
+            mi_c1.metric("Deterministic Anchor", format_temp(f_data.get('deterministic_anchor_f')))
+            mi_c2.metric("Distribution Mean", format_temp(f_data.get('final_distribution_mean_f')))
+            mi_c3.metric("Distribution Mode", format_temp(f_data.get('final_distribution_mode_f')))
+            mi_c4.metric("Suppression Shift", format_temp(f_data.get('weather_suppression_shift_f')))
             
             wi_c1, wi_c2, wi_c3, wi_c4 = st.columns(4)
-            wi_c1.metric("Observed Max", f"{format_temp(f_data.get('observed_max_so_far_f'))}°F")
-            wi_c2.metric("Current Temp", f"{format_temp(f_data.get('current_temp_f'))}°F")
+            wi_c1.metric("Observed Max", format_temp(f_data.get('observed_max_so_far_f')))
+            wi_c2.metric("Current Temp", format_temp(f_data.get('current_temp_f')))
             wi_c3.metric("Forecast Weight", f"{f_data.get('forecast_weight', 'N/A')}")
             wi_c4.metric("Climatology Weight", f"{f_data.get('climatology_weight', 'N/A')}")
 
@@ -750,9 +763,9 @@ def render_active_forecasts(p_data):
                     p_gt_105 = 1.0 - float(dist_cdf["105"])
                 
                 ds_c1, ds_c2, ds_c3, ds_c4 = st.columns(4)
-                ds_c1.metric("Support Min", f"{support_min}°F")
-                ds_c2.metric("Support Max", f"{support_max}°F")
-                ds_c3.metric("P(>105°F)", f"{p_gt_105*100:.2f}%")
+                ds_c1.metric("Support Min", format_temp(support_min))
+                ds_c2.metric("Support Max", format_temp(support_max))
+                ds_c3.metric("P(>105°F)", f"{p_gt_105*100:.1f}%")
                 ds_c4.metric("Dist Sum", f"{dist_sum:.4f}")
 
         st.divider()
@@ -778,10 +791,10 @@ def render_active_forecasts(p_data):
                 df_display_sig["model_probability"] = df_display_sig["model_probability"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
             if "market_probability" in df_display_sig.columns:
                 df_display_sig["market_probability"] = df_display_sig["market_probability"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
-            if "edge" in df_display_sig.columns:
-                df_display_sig["edge"] = df_display_sig["edge"].apply(lambda x: f"{x*100:+.1f}%" if pd.notnull(x) else "N/A")
+            if "threshold_f" in df_display_sig.columns:
+                df_display_sig["threshold_f"] = df_display_sig["threshold_f"].apply(lambda x: f"{x:.1f}°F" if pd.notnull(x) else "—")
             if "time_to_close_minutes" in df_display_sig.columns:
-                df_display_sig["time_to_close_minutes"] = df_display_sig["time_to_close_minutes"].apply(lambda x: f"{x:.1f}m" if pd.notnull(x) else "N/A")
+                df_display_sig["time_to_close_minutes"] = df_display_sig["time_to_close_minutes"].apply(lambda x: f"{x:.1f}m" if pd.notnull(x) else "—")
             
             existing_cols_sig = [c for c in col_map_sig.keys() if c in df_display_sig.columns]
             df_final = df_display_sig[existing_cols_sig].rename(columns=col_map_sig)
@@ -837,7 +850,13 @@ def render_paper_trading(perf, settlements, trades):
         df_settle = pd.DataFrame(settlements)
         s_cols = ["trade_date", "market_ticker", "actual_max_temp_f", "actual_bin", "result", "simulated_pnl"]
         existing_s_cols = [c for c in s_cols if c in df_settle.columns]
-        st.dataframe(df_settle[existing_s_cols].iloc[::-1], use_container_width=True, hide_index=True)
+        
+        # Format actual_max_temp_f in settlement table
+        df_display_settle = df_settle[existing_s_cols].copy()
+        if "actual_max_temp_f" in df_display_settle.columns:
+            df_display_settle["actual_max_temp_f"] = df_display_settle["actual_max_temp_f"].apply(lambda x: f"{x:.1f}°F" if pd.notnull(x) else "—")
+            
+        st.dataframe(df_display_settle.iloc[::-1], use_container_width=True, hide_index=True)
 
     st.divider()
     st.header("Ledger")
@@ -863,9 +882,9 @@ def render_weather_nws(w_data, n_data):
         st.subheader(f"NWS Status: {status_text}")
         
         nc1, nc2, nc3, nc4 = st.columns(4)
-        nc1.metric("Current Temp", f"{format_temp(n_data.get('current_temp_f'))}°F")
-        nc2.metric("Observed Max Today", f"{format_temp(n_data.get('observed_max_so_far_f'))}°F")
-        nc3.metric("Wind", f"{n_data.get('wind_direction_compass', 'N/A')} {format_temp(n_data.get('wind_speed_mph'))} mph")
+        nc1.metric("Current Temp", format_temp(n_data.get('current_temp_f')))
+        nc2.metric("Observed Max Today", format_temp(n_data.get('observed_max_so_far_f')))
+        nc3.metric("Wind", f"{n_data.get('wind_direction_compass', '—')} {format_num(n_data.get('wind_speed_mph'), unit='mph')}")
         nc4.metric("Stale Data", "Yes" if n_data.get("stale_data") else "No")
         
         st.write(f"**Latest Observation Time:** {n_data.get('latest_observation_time', 'N/A')} (UTC)")
@@ -897,14 +916,14 @@ def render_weather_nws(w_data, n_data):
             
             # Format decimals for numeric columns
             format_dict = {
-                "temperature_f": "{:.1f}",
-                "dewpoint_f": "{:.1f}",
-                "relative_humidity_pct": "{:.1f}",
-                "wind_speed_mph": "{:.1f}",
-                "wind_gust_mph": "{:.1f}",
-                "sea_level_pressure_mb": "{:.1f}",
-                "barometric_pressure_mb": "{:.1f}",
-                "precipitation_last_hour_in": "{:.2f}"
+                "temperature_f": "{:.1f}°F",
+                "dewpoint_f": "{:.1f}°F",
+                "relative_humidity_pct": "{:.1f}%",
+                "wind_speed_mph": "{:.1f} mph",
+                "wind_gust_mph": "{:.1f} mph",
+                "sea_level_pressure_mb": "{:.1f} mb",
+                "barometric_pressure_mb": "{:.1f} mb",
+                "precipitation_last_hour_in": "{:.2f} in"
             }
             valid_formats = {k: v for k, v in format_dict.items() if k in df_display.columns}
             

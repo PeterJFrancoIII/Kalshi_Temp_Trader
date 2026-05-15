@@ -226,12 +226,19 @@ def test_format_probability():
 
 def test_format_temp():
     from src.web_console import format_temp
-    assert format_temp(None) == "N/A"
-    assert format_temp("N/A") == "N/A"
-    assert format_temp(82) == "82.0"
-    assert format_temp(82.55) == "82.5"
-    assert format_temp("82.55") == "82.5"
+    assert format_temp(None) == "—"
+    assert format_temp("N/A") == "—"
+    assert format_temp(93) == "93.0°F"
+    assert format_temp(93.2) == "93.2°F"
+    assert format_temp(82.55) == "82.5°F"
     assert format_temp("abc") == "abc"
+
+def test_format_num():
+    from src.web_console import format_num
+    assert format_num(None) == "—"
+    assert format_num(5) == "5.0"
+    assert format_num(5.23, unit="mph") == "5.2 mph"
+    assert format_num("5.23", unit="mph") == "5.2 mph"
 
 def test_extract_market_rows_logic():
     from src.web_console import extract_market_rows
@@ -252,7 +259,7 @@ def test_extract_market_rows_logic():
     paper_signals = {
         "forecast_source": "kmia_forecast_2026-05-14_rules.json",
         "dynamic_contract_probabilities": {
-            ">93": 0.852
+            ">=94": 0.852
         },
         "signals": []
     }
@@ -265,7 +272,7 @@ def test_extract_market_rows_logic():
     # Row 0 (Match date)
     assert rows[0]["ticker"] == "KXHIGHMIA-26MAY14-T93"
     assert rows[0]["date"] == "2026-05-14"
-    assert rows[0]["bin"] == ">93"
+    assert rows[0]["bin"] == "≥94°F"
     assert rows[0]["model_probability"] == 0.852
     assert rows[0]["action"] == "N/A"
     
