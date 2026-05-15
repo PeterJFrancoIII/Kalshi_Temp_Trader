@@ -223,3 +223,12 @@ def test_format_probability():
     assert format_probability(-0.5, show_plus=True) == "-50.0%"
     assert format_probability(0.0, show_plus=True) == "0.0%"
     assert format_probability("abc") == "N/A"
+
+def test_format_temp():
+    from src.web_console import format_temp
+    assert format_temp(None) == "N/A"
+    assert format_temp("N/A") == "N/A"
+    assert format_temp(82) == "82.0"
+    assert format_temp(82.55) == "82.5"
+    assert format_temp("82.55") == "82.5"
+    assert format_temp("abc") == "abc"

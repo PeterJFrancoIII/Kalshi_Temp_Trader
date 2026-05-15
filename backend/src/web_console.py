@@ -67,6 +67,26 @@ def format_probability(value, show_plus=False):
     except (TypeError, ValueError):
         return "N/A"
 
+def format_temp(val):
+    if val is None or val == "N/A":
+        return "N/A"
+    try:
+        return f"{float(val):.1f}"
+    except (ValueError, TypeError):
+        return str(val)
+
+def load_forecast_data(forecast_filename):
+    if not forecast_filename:
+        return None
+    # Check REPORTS_DIR first
+    path = REPORTS_DIR / forecast_filename
+    if path.exists():
+        return load_json(path)
+    # Fallback to direct path if it's absolute
+    if os.path.isabs(forecast_filename) and os.path.exists(forecast_filename):
+        return load_json(Path(forecast_filename))
+    return None
+
 def normalize_signal_df(df):
     """Normalize aliases for signal dataframes."""
     if "forecast_bin" not in df.columns and "bin" in df.columns:
@@ -312,6 +332,13 @@ def extract_market_rows(markets: list, paper_signals: dict, orderbooks: dict) ->
             "paper_action": sig.get("paper_action"),
             "warnings": ", ".join(mkt.get("warnings", [])) if mkt.get("warnings") else ""
         }
+        
+        # Fallback for model_probability from dynamic_contract_probabilities
+        if row["model_probability"] is None and paper_signals and "dynamic_contract_probabilities" in paper_signals:
+            bin_label = row["bin"]
+            if bin_label in paper_signals["dynamic_contract_probabilities"]:
+                row["model_probability"] = paper_signals["dynamic_contract_probabilities"][bin_label]
+
         rows.append(row)
     return rows
 
@@ -353,8 +380,8 @@ def render_command_center(app_state, p_data, mkts):
     n_data = app_state.get("n_data", {})
     if n_data:
         wc1, wc2, wc3, wc4 = st.columns(4)
-        wc1.metric("Current Temp", f"{n_data.get('current_temp_f', 'N/A')}°F")
-        wc2.metric("Observed Max Today", f"{n_data.get('observed_max_so_far_f', 'N/A')}°F")
+        wc1.metric("Current Temp", f"{format_temp(n_data.get('current_temp_f'))}°F")
+        wc2.metric("Observed Max Today", f"{format_temp(n_data.get('observed_max_so_far_f'))}°F")
         wc3.metric("Latest Obs Time", n_data.get("latest_observation_time", "N/A"))
         wc4.metric("Source", n_data.get("observation_source", "N/A"))
         
@@ -409,6 +436,14 @@ def render_command_center(app_state, p_data, mkts):
                 risk_passed = risk.get("passed", risk.get("all_passed"))
                 risk_color = "✅" if risk_passed else "🚫"
                 st.write(f"**Risk Gate:** {risk_color} {'PASS' if risk_passed else 'BLOCKED'}")
+                
+                gate_id = risk.get("failed_gate_id")
+                gate_name = risk.get("failed_gate_name")
+                if gate_id:
+                    st.write(f"**Failed Gate ID:** `{gate_id}`")
+                if gate_name:
+                    st.write(f"**Failed Gate Name:** {gate_name}")
+
                 no_trade = risk.get("no_trade_reason") or risk.get("blocking_reason")
                 if no_trade:
                     st.warning(f"No-Trade Reason: {no_trade}")
@@ -417,9 +452,12 @@ def render_command_center(app_state, p_data, mkts):
             if best_sig.get("warnings"):
                 st.warning(" | ".join(best_sig["warnings"]))
     else:
-        st.error("### NO SIGNAL")
+        st.error(f"### STATUS: {p_data.get('status', 'NO_SIGNAL')}")
+        st.write(f"**Forecast Source:** `{p_data.get('forecast_source', 'N/A')}`")
+        st.write(f"**Market Snapshot:** `{p_data.get('market_snapshot_source', 'N/A')}`")
         if p_data.get("warnings"):
-            st.warning(" | ".join(p_data["warnings"]))
+            for w in p_data["warnings"]:
+                st.warning(w)
 
     st.divider()
 
@@ -599,6 +637,43 @@ def render_active_forecasts(p_data):
             bs_c3.metric("Edge", format_probability(best_sig.get('edge'), show_plus=True))
             bs_c4.metric("Confidence", best_sig.get("confidence", "N/A").upper())
 
+        # Load Forecast Metadata
+        f_data = load_forecast_data(p_data.get("forecast_source"))
+        if f_data:
+            st.divider()
+            st.subheader("🤖 Model Insights")
+            mi_c1, mi_c2, mi_c3, mi_c4 = st.columns(4)
+            mi_c1.metric("Deterministic Anchor", f"{format_temp(f_data.get('deterministic_anchor_f'))}°F")
+            mi_c2.metric("Distribution Mean", f"{format_temp(f_data.get('final_distribution_mean_f'))}°F")
+            mi_c3.metric("Distribution Mode", f"{format_temp(f_data.get('final_distribution_mode_f'))}°F")
+            mi_c4.metric("Suppression Shift", f"{format_temp(f_data.get('weather_suppression_shift_f'))}°F")
+            
+            wi_c1, wi_c2, wi_c3, wi_c4 = st.columns(4)
+            wi_c1.metric("Observed Max", f"{format_temp(f_data.get('observed_max_so_far_f'))}°F")
+            wi_c2.metric("Current Temp", f"{format_temp(f_data.get('current_temp_f'))}°F")
+            wi_c3.metric("Forecast Weight", f"{f_data.get('forecast_weight', 'N/A')}")
+            wi_c4.metric("Climatology Weight", f"{f_data.get('climatology_weight', 'N/A')}")
+
+            st.subheader("📈 Distribution Support")
+            dist = f_data.get("integer_distribution", {})
+            dist_cdf = f_data.get("integer_distribution_cdf", {})
+            if dist:
+                support = [int(k) for k, v in dist.items() if float(v) > 0]
+                support_min = min(support) if support else "N/A"
+                support_max = max(support) if support else "N/A"
+                dist_sum = sum(float(v) for v in dist.values())
+                
+                # Probability of > 105
+                p_gt_105 = 0.0
+                if "105" in dist_cdf:
+                    p_gt_105 = 1.0 - float(dist_cdf["105"])
+                
+                ds_c1, ds_c2, ds_c3, ds_c4 = st.columns(4)
+                ds_c1.metric("Support Min", f"{support_min}°F")
+                ds_c2.metric("Support Max", f"{support_max}°F")
+                ds_c3.metric("P(>105°F)", f"{p_gt_105*100:.2f}%")
+                ds_c4.metric("Dist Sum", f"{dist_sum:.4f}")
+
         st.divider()
         signals = p_data.get("signals", [])
         if signals:
@@ -640,6 +715,12 @@ def render_active_forecasts(p_data):
                     reason = rd.get("no_trade_reason") or rd.get("blocking_reason") or "Risk gate blocked"
                     st.error(f"**{s.get('market_ticker', 'N/A')}**: {reason}")
         else:
+            st.error(f"### STATUS: {p_data.get('status', 'NO_SIGNAL')}")
+            st.write(f"**Forecast Source:** `{p_data.get('forecast_source', 'N/A')}`")
+            st.write(f"**Market Snapshot:** `{p_data.get('market_snapshot_source', 'N/A')}`")
+            if p_data.get("warnings"):
+                for w in p_data["warnings"]:
+                    st.warning(w)
             st.info("No active contract forecasts found in latest signal data.")
     else:
         st.warning("No active contract forecasts found. Run:")
@@ -701,9 +782,9 @@ def render_weather_nws(w_data, n_data):
         st.subheader(f"NWS Status: {status_text}")
         
         nc1, nc2, nc3, nc4 = st.columns(4)
-        nc1.metric("Current Temp", f"{n_data.get('current_temp_f', 'N/A')}°F")
-        nc2.metric("Observed Max Today", f"{n_data.get('observed_max_so_far_f', 'N/A')}°F")
-        nc3.metric("Wind", f"{n_data.get('wind_direction_compass', 'N/A')} {n_data.get('wind_speed_mph', 'N/A')} mph")
+        nc1.metric("Current Temp", f"{format_temp(n_data.get('current_temp_f'))}°F")
+        nc2.metric("Observed Max Today", f"{format_temp(n_data.get('observed_max_so_far_f'))}°F")
+        nc3.metric("Wind", f"{n_data.get('wind_direction_compass', 'N/A')} {format_temp(n_data.get('wind_speed_mph'))} mph")
         nc4.metric("Stale Data", "Yes" if n_data.get("stale_data") else "No")
         
         st.write(f"**Latest Observation Time:** {n_data.get('latest_observation_time', 'N/A')} (UTC)")
@@ -731,7 +812,22 @@ def render_weather_nws(w_data, n_data):
                 "clouds_x100ft",
             ]
             available_columns = [c for c in display_columns if c in df_obs.columns]
-            st.dataframe(df_obs[available_columns] if available_columns else df_obs, use_container_width=True, hide_index=True)
+            df_display = df_obs[available_columns] if available_columns else df_obs
+            
+            # Format decimals for numeric columns
+            format_dict = {
+                "temperature_f": "{:.1f}",
+                "dewpoint_f": "{:.1f}",
+                "relative_humidity_pct": "{:.1f}",
+                "wind_speed_mph": "{:.1f}",
+                "wind_gust_mph": "{:.1f}",
+                "sea_level_pressure_mb": "{:.1f}",
+                "barometric_pressure_mb": "{:.1f}",
+                "precipitation_last_hour_in": "{:.2f}"
+            }
+            valid_formats = {k: v for k, v in format_dict.items() if k in df_display.columns}
+            
+            st.dataframe(df_display.style.format(valid_formats), use_container_width=True, hide_index=True)
         else:
             st.warning("NWS snapshot loaded, but no parsed observation rows were found.")
             if isinstance(n_data, dict):

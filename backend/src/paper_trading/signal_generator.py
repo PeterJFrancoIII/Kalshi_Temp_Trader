@@ -3,6 +3,7 @@ import json
 import re
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -329,7 +330,10 @@ def generate_paper_signal(
     # 3. Process markets
     if prediction_timestamp is None:
         prediction_timestamp = datetime.now(timezone.utc)
-    now_date_str = prediction_timestamp.strftime("%Y-%m-%d")
+    
+    # Use US/Eastern local date for staleness checks to avoid UTC rollover issues.
+    # Converting prediction_timestamp to Eastern ensures the correct local calendar date.
+    now_date_str = prediction_timestamp.astimezone(ZoneInfo("US/Eastern")).strftime("%Y-%m-%d")
 
     # C1-B Fix: Validate forecast date against active contract dates.
     # If the forecast target date doesn't match any active contract's date,

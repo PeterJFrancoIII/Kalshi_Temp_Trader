@@ -453,6 +453,81 @@ class TestPaperSignalGenerator(unittest.TestCase):
         self.assertEqual(report["status"], "NO_SIGNAL",
             "Forecast from May 7 must NOT produce active signals for May 8 contracts")
 
+    def test_evening_rollover_does_not_mark_same_day_stale(self):
+        """Verify that UTC rollover doesn't mark ET same-day contracts as stale."""
+        import paper_trading.signal_generator as sg
+        from zoneinfo import ZoneInfo
+        
+        # Simulate: 
+        # UTC: 2026-05-15 01:00:00 (May 15)
+        # ET: 2026-05-14 21:00:00 (May 14)
+        # Forecast is for May 14
+        forecast_path = self.temp_dir / "kmia_forecast_2026-05-14_rules_v2_climatology_210000.json"
+        forecast_data = {
+            "date": "2026-05-14",
+            "probability_bins": {">=87": 0.50, "85-86": 0.50},
+            "integer_distribution": {str(t): 0.02 for t in range(60, 110)},
+            "forecast_high_f": 87,
+            "generated_at_utc": "2026-05-14T21:00:00Z"
+        }
+        with open(forecast_path, "w") as f:
+            json.dump(forecast_data, f)
+            
+        # Snapshot has May 14 contract
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_data = {
+            "generated_at_utc": "2026-05-15T01:00:00Z",
+            "selected_temperature_markets": [
+                {
+                    "ticker": "KXHIGHMIA-26MAY14-B86.5",
+                    "yes_ask_dollars": "0.10",
+                    "status": "active"
+                }
+            ]
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot_data, f)
+            
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        with open(nws_path, "w") as f:
+            json.dump({"latest_observation_time": "2026-05-14T21:00:00Z"}, f)
+        sg.NWS_SNAPSHOT_FILE = nws_path
+        
+        # Prediction timestamp is May 15 01:00 UTC
+        test_now = datetime(2026, 5, 15, 1, 0, 0, tzinfo=timezone.utc)
+        
+        # We need to patch datetime.now in signal_generator because it's called with ZoneInfo
+        with patch('paper_trading.signal_generator.datetime') as mock_datetime:
+            # Set up mock_now to return correct values based on tz
+            def mock_now(tz=None):
+                if tz and "Eastern" in str(tz):
+                    return datetime(2026, 5, 14, 21, 0, 0, tzinfo=tz)
+                # For default now(), return the UTC mock time
+                return datetime(2026, 5, 15, 1, 0, 0, tzinfo=tz if tz else timezone.utc)
+            
+            mock_datetime.now.side_effect = mock_now
+            # Mock other used datetime methods
+            mock_datetime.fromisoformat = datetime.fromisoformat
+            mock_datetime.strptime = datetime.strptime
+            
+            latest_path = self.temp_dir / "latest_paper_signal.json"
+            report_path = generate_paper_signal(
+                forecast_path=forecast_path,
+                snapshot_path=snapshot_path,
+                prediction_timestamp=test_now,
+                output_dir=self.temp_dir,
+                latest_path_override=str(latest_path)
+            )
+            
+            with open(report_path, "r") as f:
+                report = json.load(f)
+                
+            # VERIFY: status is OK and signals are generated (not stale)
+            self.assertEqual(report["status"], "OK")
+            self.assertTrue(len(report["signals"]) > 0)
+            self.assertFalse(report["signals"][0].get("stale", True), "Signal should NOT be stale")
+            self.assertEqual(report["signals"][0]["market_ticker"], "KXHIGHMIA-26MAY14-B86.5")
+
     def test_forecast_date_mismatch_warning(self):
         """C1-B regression: forecast date field doesn't match any active contract date.
         The signal generator must emit a warning about the mismatch."""
