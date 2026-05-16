@@ -126,6 +126,21 @@ def format_temp(val):
     except (ValueError, TypeError):
         return str(val)
 
+def format_pnl(val):
+    """Formats PnL with $ and +/- prefix, using em-dash for None."""
+    if val is None or val == "N/A" or val == "" or pd.isna(val):
+        return "—"
+    try:
+        val_f = float(val)
+        if val_f > 0:
+            return f"+${val_f:.2f}"
+        elif val_f < 0:
+            return f"-${abs(val_f):.2f}"
+        else:
+            return f"$0.00"
+    except (ValueError, TypeError):
+        return str(val)
+
 def load_forecast_data(forecast_filename):
     if not forecast_filename:
         return None
@@ -155,18 +170,24 @@ def normalize_signal_df(df):
     return df
 
 def safe_dataframe(df, display_columns, fallback_message="No displayable columns found.", formatters=None):
-    """Safely render a DataFrame ignoring missing columns."""
+    """Safely render a DataFrame ignoring missing columns and using scalar formatting."""
     available_columns = [c for c in display_columns if c in df.columns]
     if available_columns:
-        df_display = df[available_columns]
+        df_display = df[available_columns].copy()
         if formatters:
-            valid_formatters = {k: v for k, v in formatters.items() if k in available_columns}
-            st.dataframe(df_display.style.format(valid_formatters), use_container_width=True)
-        else:
-            st.dataframe(df_display, use_container_width=True)
+            for col, fmt in formatters.items():
+                if col in df_display.columns:
+                    if callable(fmt):
+                        df_display[col] = df_display[col].apply(fmt)
+                    else:
+                        # Handle string formatters like "{:.1f}"
+                        df_display[col] = df_display[col].apply(
+                            lambda x: fmt.format(x) if x is not None and not pd.isna(x) else "—"
+                        )
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
     else:
         st.info(fallback_message)
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
 def load_latest_forecast_summary(report_path):
     """
@@ -871,7 +892,7 @@ def render_paper_trading(perf, settlements, trades):
         df_open = pd.DataFrame(open_trades)
         display_cols = ["timestamp_utc", "market_ticker", "target_date", "forecast_bin", "execution_price"]
         available = [c for c in display_cols if c in df_open.columns]
-        st.dataframe(df_open[available].iloc[::-1], use_container_width=True, hide_index=True)
+        st.dataframe(df_open[available].iloc[::-1], width="stretch", hide_index=True)
     else:
         st.info("No active open paper trades.")
 
@@ -885,19 +906,14 @@ def render_paper_trading(perf, settlements, trades):
         display_cols = ["target_date", "market_ticker", "status", "pnl", "settled_at_utc"]
         available = [c for c in display_cols if c in df_history.columns]
         
-        # Color coding for PnL
-        def color_pnl(val):
-            try:
-                val_f = float(val)
-                color = 'green' if val_f > 0 else 'red' if val_f < 0 else 'gray'
-                return f'color: {color}'
-            except:
-                return 'color: black'
+        # Safe pre-formatting for PnL and status
+        df_display = df_history[available].copy()
+        if "pnl" in df_display.columns:
+            df_display["pnl"] = df_display["pnl"].apply(format_pnl)
+        if "status" in df_display.columns:
+            df_display["status"] = df_display["status"].apply(lambda x: str(x).upper() if x else "—")
             
-        if "pnl" in df_history.columns:
-            st.dataframe(df_history[available].iloc[::-1].style.applymap(color_pnl, subset=['pnl']), use_container_width=True, hide_index=True)
-        else:
-            st.dataframe(df_history[available].iloc[::-1], use_container_width=True, hide_index=True)
+        st.dataframe(df_display.iloc[::-1], width="stretch", hide_index=True)
     else:
         st.write("No settled trades in history.")
 
