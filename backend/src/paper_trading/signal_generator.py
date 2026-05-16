@@ -18,12 +18,14 @@ except ImportError:
     def get_market_open_time_et(date_str): return None
 
 
-from market_data.kalshi_contract_mapper import parse_kalshi_markets
+from market_data.kalshi_contract_mapper import parse_kalshi_markets, mapping_to_bin_string
 from shared.artifact_paths import (
     LATEST_KALSHI_MARKET_SNAPSHOT,
     LATEST_KALSHI_ORDERBOOKS,
     LATEST_NWS_KMIA_SNAPSHOT,
     LATEST_PAPER_SIGNAL,
+    REPORTS_DIR,
+    PAPER_TRADING_DIR
 )
 from shared.timestamp_utils import extract_embedded_timestamp, parse_ticker_date
 from shared.normalization import normalize_contract_key
@@ -33,10 +35,9 @@ from paper_trading.paper_ledger import PaperLedger
 
 # Resolve ROOT
 ROOT = Path(__file__).resolve().parents[3]
-REPORTS_DIR = ROOT / "backend" / "data" / "processed" / "reports"
 SNAPSHOT_FILE = LATEST_KALSHI_MARKET_SNAPSHOT
 NWS_SNAPSHOT_FILE = LATEST_NWS_KMIA_SNAPSHOT   # override in tests via sg.NWS_SNAPSHOT_FILE
-OUTPUT_DIR = ROOT / "backend" / "data" / "processed" / "paper_trading"
+OUTPUT_DIR = PAPER_TRADING_DIR
 
 
 def get_latest_file(directory: Path, pattern: str) -> Optional[Path]:
@@ -77,6 +78,22 @@ def parse_timestamp_from_filename(filename: str) -> Optional[datetime]:
     return None
 
 # _normalize_contract_key was moved to shared.normalization.normalize_contract_key
+
+def find_forecast_for_date(target_date_str: str) -> Optional[Path]:
+    """Finds the most recent forecast JSON or MD for a specific target date."""
+    # JSON preferred
+    json_pat = f"kmia_forecast_{target_date_str}_rules_v2_climatology_*.json"
+    try:
+        f = get_latest_file(REPORTS_DIR, json_pat)
+        if f: return f
+    except ValueError:
+        pass
+
+    md_pat = f"kmia_forecast_{target_date_str}_rules_v2_climatology_*.md"
+    try:
+        return get_latest_file(REPORTS_DIR, md_pat)
+    except ValueError:
+        return None
 
 def parse_forecast_bins_from_md(md_path: Path) -> Dict[str, float]:
     """Parses probability bins from a forecast markdown report."""
@@ -220,176 +237,25 @@ def generate_paper_signal(
     out_dir = output_dir if output_dir else OUTPUT_DIR
     os.makedirs(out_dir, exist_ok=True)
     
-    # 1. Load Forecast
-    if forecast_path:
-        forecast_file = forecast_path
-    else:
-        forecast_file = get_latest_file(REPORTS_DIR, "kmia_forecast_*rules_v2_climatology*.json")
-        if not forecast_file:
-            forecast_file = get_latest_file(REPORTS_DIR, "kmia_forecast_*rules_v2_climatology*.md")
-        
-    # Validation
-    if forecast_file and prediction_timestamp:
-        file_ts = parse_timestamp_from_filename(forecast_file.name)
-        if file_ts and file_ts > prediction_timestamp:
-            raise ValueError(f"Forecast file {forecast_file.name} is from the future relative to prediction timestamp {prediction_timestamp}")
-            
-    model_bins = {}
-    integer_dist = {}
-    forecast_data_obj = {}
-    if forecast_file:
-        if forecast_file.suffix == ".md":
-            model_bins = parse_forecast_bins_from_md(forecast_file)
-            forecast_data_obj = {"probability_bins": model_bins}
-        else:
-            with open(forecast_file, "r") as f:
-                forecast_data_obj = json.load(f)
-                model_bins = forecast_data_obj.get("probability_bins", {})
-                # Load integer distribution if available (keys are strings in JSON, convert to int)
-                raw_int_dist = forecast_data_obj.get("integer_distribution", {})
-                integer_dist = {int(k): v for k, v in raw_int_dist.items()}
+    if prediction_timestamp is None:
+        prediction_timestamp = datetime.now(timezone.utc)
     
-    # Extract forecast date — prefer the embedded JSON "date" field over filename parsing.
-    # The JSON field is the canonical target date the forecast was built for.
-    forecast_date_str = None
-    forecast_target_date = forecast_data_obj.get("date")  # e.g. "2026-05-13"
-    if forecast_target_date:
-        forecast_date_str = forecast_target_date
-    elif forecast_file:
-        file_ts = parse_timestamp_from_filename(forecast_file.name)
-        if file_ts:
-            forecast_date_str = file_ts.strftime("%Y-%m-%d")
-            
-    # 2. Load and Map Active Markets
-    snapshot_to_use = snapshot_path if snapshot_path else SNAPSHOT_FILE
-    
-    # Validation for snapshot — use embedded JSON timestamp, never filesystem mtime.
-    if snapshot_path and prediction_timestamp:
-        embedded_ts = _read_embedded_snapshot_timestamp(snapshot_path)
-        if embedded_ts is None:
-            logger.warning(
-                f"Snapshot {snapshot_path.name}: no embedded timestamp found; "
-                f"skipping future-check (mtime fallback forbidden)."
-            )
-        elif embedded_ts > prediction_timestamp:
-            raise ValueError(
-                f"Snapshot file {snapshot_path.name} has embedded timestamp "
-                f"{embedded_ts.isoformat()} which is after prediction_timestamp "
-                f"{prediction_timestamp.isoformat()}"
-            )
+    # Use US/Eastern local date for staleness checks to avoid UTC rollover issues.
+    now_date_str = prediction_timestamp.astimezone(ZoneInfo("US/Eastern")).strftime("%Y-%m-%d")
 
-    # F2: Load NWS snapshot to extract the real observation timestamp for Gate 2.
-    # If the observation time is missing or unavailable, Gate 2 fails closed (blocks).
-    # Passing datetime.now() here would permanently bypass Gate 2 — never do that.
-    # NWS_SNAPSHOT_FILE is a module-level variable so tests can inject a temp path.
+    # 1. Load NWS snapshot for Gate 2 check
     latest_obs_time_iso: Optional[str] = None
     try:
         if NWS_SNAPSHOT_FILE.exists():
             with open(NWS_SNAPSHOT_FILE, "r") as _f:
                 _nws_data = json.load(_f)
             latest_obs_time_iso = _nws_data.get("latest_observation_time")
-            if latest_obs_time_iso is None:
-                logger.warning(
-                    "NWS snapshot loaded but 'latest_observation_time' field is missing. "
-                    "Gate 2 (weather freshness) will block."
-                )
         else:
-            logger.warning(
-                f"NWS snapshot not found at {NWS_SNAPSHOT_FILE}. "
-                "Gate 2 (weather freshness) will block."
-            )
+            logger.warning(f"NWS snapshot not found at {NWS_SNAPSHOT_FILE}.")
     except Exception as _e:
-        logger.warning(f"Could not load NWS snapshot for Gate 2 check: {_e}. Gate 2 will block.")
+        logger.warning(f"Could not load NWS snapshot for Gate 2 check: {_e}.")
 
-    from market_data.kalshi_contract_mapper import parse_kalshi_markets, mapping_to_bin_string
-    all_discovered_markets = parse_kalshi_markets(snapshot_to_use)
-    
-    # HARDENING: Filter strictly for the forecast target date.
-    # This prevents stale contracts (e.g. May 13) from leaking into a May 14 signal.
-    markets = []
-    if forecast_date_str:
-        for m in all_discovered_markets:
-            ticker_date = parse_ticker_date(m.get("ticker"))
-            if ticker_date == forecast_date_str:
-                markets.append(m)
-    else:
-        markets = all_discovered_markets
-
-    signals = []
-    global_warnings = []
-    status = "OK"
-    dynamic_contract_probabilities = {}
-    
-    if not model_bins:
-        global_warnings.append("No forecast bins available. Ensure daily workflow ran.")
-        status = "NO_SIGNAL"
-        
-    if not markets:
-        global_warnings.append("No active KXHIGHMIA markets available in current market snapshot.")
-        status = "NO_SIGNAL"
-
-    # 3. Process markets
-    if prediction_timestamp is None:
-        prediction_timestamp = datetime.now(timezone.utc)
-    
-    # Use US/Eastern local date for staleness checks to avoid UTC rollover issues.
-    # Converting prediction_timestamp to Eastern ensures the correct local calendar date.
-    now_date_str = prediction_timestamp.astimezone(ZoneInfo("US/Eastern")).strftime("%Y-%m-%d")
-
-    # C1-B Fix: Validate forecast date against active contract dates.
-    # If the forecast target date doesn't match any active contract's date,
-    # emit a warning so operators know the signal may be unreliable.
-    if forecast_date_str and all_discovered_markets:
-        contract_dates = {parse_ticker_date(m.get("ticker")) for m in all_discovered_markets}
-        contract_dates.discard(None)
-        if contract_dates and forecast_date_str not in contract_dates:
-            global_warnings.append(
-                f"Forecast date {forecast_date_str} does not match any active contract dates: {sorted(list(contract_dates))}. "
-                f"Signals may be unreliable due to date mismatch."
-            )
-            logger.warning(
-                f"Forecast-contract date mismatch: forecast={forecast_date_str}, contracts={sorted(list(contract_dates))}"
-            )
-
-    # Pre-compute dynamic contract probabilities for all discovered contracts
-    for m in markets:
-        ticker = m.get("ticker")
-        mapping = m.get("contract_mapping", {})
-        contract_bin_data = m.get("contract_bin")
-        
-        ticker_date = parse_ticker_date(ticker)
-        is_stale = False
-        if ticker_date:
-            if forecast_date_str and ticker_date < forecast_date_str:
-                is_stale = True
-            # C1-B Fix: Also mark stale if forecast is OLDER than the contract.
-            # A May 13 forecast must not drive May 14 contract signals.
-            elif forecast_date_str and ticker_date > forecast_date_str:
-                is_stale = True
-            elif ticker_date < now_date_str:
-                is_stale = True
-                
-        if contract_bin_data:
-            bin_str = contract_bin_data.get("label")
-        else:
-            bin_str = mapping_to_bin_string(mapping)
-            
-        prob = None
-        if bin_str:
-            if is_stale:
-                prob = 0.0
-            else:
-                prob = model_bins.get(bin_str)
-                
-            if prob is None and integer_dist and not is_stale:
-                from forecasting.contract_probability_mapper import map_distribution_to_contracts
-                results = map_distribution_to_contracts(integer_dist, [mapping])
-                prob = results.get(ticker, {}).get("probability")
-
-            if prob is not None:
-                norm_key = normalize_contract_key(bin_str)
-                dynamic_contract_probabilities[norm_key] = prob
-
+    # 2. Load Orderbooks
     all_orderbooks = {}
     if os.path.exists(LATEST_KALSHI_ORDERBOOKS):
         try:
@@ -399,219 +265,267 @@ def generate_paper_signal(
         except Exception as e:
             logger.warning(f"Could not load orderbook artifact: {e}")
 
-    for m in markets:
-        ticker = m.get("ticker")
-        mapping = m.get("contract_mapping", {})
-        contract_bin_data = m.get("contract_bin")
-        
-        # Extract Market Price first so we can use it in fallback signals
-        # EXPLICITLY IGNORE ANY KEYS STARTING WITH 'previous_'
-        ask = m.get("yes_ask_dollars")
-        bid = m.get("yes_bid_dollars")
-        last = m.get("last_price_dollars")
-        
-        # Fallback to cents
-        if ask is None and m.get("yes_ask") is not None: ask = m.get("yes_ask") / 100.0
-        else: ask = float(ask) if ask is not None else None
-            
-        if bid is None and m.get("yes_bid") is not None: bid = m.get("yes_bid") / 100.0
-        else: bid = float(bid) if bid is not None else None
+    # 3. Load and Group Markets
+    snapshot_to_use = snapshot_path if snapshot_path else SNAPSHOT_FILE
+    if snapshot_path and prediction_timestamp:
+        embedded_ts = _read_embedded_snapshot_timestamp(snapshot_path)
+        if embedded_ts and embedded_ts > prediction_timestamp:
+            raise ValueError(f"Snapshot file {snapshot_path.name} is from the future.")
 
-        if last is None and m.get("last_price") is not None: last = m.get("last_price") / 100.0
-        else: last = float(last) if last is not None else None
-
-        # Prioritize orderbook fields if they exist
-        orderbook_m = all_orderbooks.get(ticker, {})
-        ob_ask = orderbook_m.get("top_yes_ask_dollars")
-        ob_bid = orderbook_m.get("top_yes_bid_dollars")
-        ob_last = orderbook_m.get("last_price_dollars")
-
-        if ob_ask is not None: ask = float(ob_ask)
-        if ob_bid is not None: bid = float(ob_bid)
-        if ob_last is not None: last = float(ob_last)
-
-        executable_price = select_executable_price(ask, last)
-        
-        if executable_price is None or executable_price == 0:
-            global_warnings.append(f"{ticker}: No usable price data. Skipping.")
-            continue
-            
-        ticker_date = parse_ticker_date(ticker)
-        is_stale = False
+    all_discovered_markets = parse_kalshi_markets(snapshot_to_use)
+    markets_by_date = {}
+    for m in all_discovered_markets:
+        ticker_date = parse_ticker_date(m.get("ticker"))
         if ticker_date:
-            if forecast_date_str and ticker_date < forecast_date_str:
-                is_stale = True
-            # C1-B Fix: Also mark stale if forecast is OLDER than the contract.
-            elif forecast_date_str and ticker_date > forecast_date_str:
-                is_stale = True
-            elif ticker_date < now_date_str:
-                is_stale = True
-                
-        if contract_bin_data:
-            bin_str = contract_bin_data.get("label")
-        else:
-            bin_str = mapping_to_bin_string(mapping)
-            
-        if not bin_str:
-            global_warnings.append(f"{ticker}: Could not convert contract mapping to bin string.")
-            if mapping:
-                norm_label = normalize_contract_key(bin_str)
-                row_prob = dynamic_contract_probabilities.get(norm_label)
-            continue
-            
-        norm_key = normalize_contract_key(bin_str)
-        prob = dynamic_contract_probabilities.get(norm_key)
-        
-        if is_stale:
-            prob = 0.0
-            
-        if prob is None and not is_stale:
-            global_warnings.append(f"{ticker}: Probability for bin {bin_str} not found in forecast.")
-            # Requirement 5: Generate Dashboard-Compatible Signal Rows even if mapping fails
-            signals.append({
-                "market_ticker": ticker,
-                "event_ticker": m.get("event_ticker"),
-                "market_title": m.get("title"),
-                "status": m.get("status"),
-                "condition_type": mapping.get("condition_type"),
-                "threshold_f": mapping.get("threshold_f"),
-                "contract_range": mapping.get("contract_range"),
-                "model_probability": None,
-                "market_probability": round(executable_price, 4) if executable_price else None,
-                "raw_edge": None,
-                "edge": None,
-                "breakeven_probability": None,
-                "expected_value": None,
-                "paper_action": "NO SIGNAL",
-                "confidence": "low",
-                "yes_ask": ask,
-                "yes_bid": bid,
-                "last_price": last,
-                "warnings": [f"Probability for bin {bin_str} not found in forecast"],
-                "market_open_time_et": get_market_open_time_et(ticker_date) if ticker_date else None,
-                "stale": is_stale
-            })
-            continue
-        # Use Edge Engine for math
-        edge, raw_edge, final_breakeven = calculate_edge(prob, executable_price, slippage=0.0)
-        ev = calculate_expected_value(prob, final_breakeven)
-        speed_score, mins_to_close = calculate_speed_to_roi(ev, m.get("close_time"))
+            markets_by_date.setdefault(ticker_date, []).append(m)
 
-        # Evaluate Risk Gates
-        if ledger_path_override:
-            ledger = PaperLedger(ledger_path=ledger_path_override)
-        else:
-            ledger = PaperLedger()
-
-        ledger_summary = ledger.get_summary()
-
-        forecast_data_for_risk = dict(forecast_data_obj)
-        if global_warnings:
-            forecast_data_for_risk.setdefault("warnings", []).extend(global_warnings)
-        forecast_data_for_risk["dynamic_contract_probabilities"] = dynamic_contract_probabilities
-
-        risk_decision = evaluate_risk_gates(
-            forecast_data=forecast_data_for_risk,
-            # F2: Pass the real NWS observation timestamp (loaded above before this loop).
-            # latest_obs_time_iso is None when the snapshot is missing or lacks the field,
-            # which causes Gate 2 to fail closed — that is the correct safe behavior.
-            latest_obs_time_iso=latest_obs_time_iso,
-            model_prob=prob,
-            executable_price=executable_price,
-            yes_ask=ask,
-            yes_bid=bid,
-            edge=edge,
-            raw_edge=raw_edge,
-            ledger_summary=ledger_summary,
-            target_date_str=ticker_date if ticker_date else "unknown",
-            best_high_f=forecast_data_obj.get("best_single_number_f"),
-            bin_label=bin_str,
-            contract_bins=markets
-        )
-        
-        # Action logic
-        action = "NO EDGE"
-        confidence = "low"
-        
-        if is_stale:
-            action = "NO SIGNAL"
-            edge = -999.0
-            ev = -999.0
-            risk_decision.passed = False
-            risk_decision.reason = "Stale ticker or missing forecast mapping."
-        elif not risk_decision.passed:
-            action = "BLOCKED BY RISK ENGINE"
-        elif edge > 0.05:
-            action = "PAPER BUY CANDIDATE"
-            confidence = "medium"
-            if edge > 0.15: confidence = "high"
-        elif edge > 0:
-            action = "WATCH"
-        
-        signals.append({
-            "market_ticker": ticker,
-            "event_ticker": m.get("event_ticker"),
-            "market_title": m.get("title"),
-            "status": m.get("status"),
-            "condition_type": mapping.get("condition_type"),
-            "threshold_f": mapping.get("threshold_f"),
-            "range_high_f": mapping.get("range_high_f"),
-            "contract_range": mapping.get("contract_range"),
-            # F3: forecast_bin_label is the actual Kalshi contract range string used
-            # for probability lookup (e.g. ">=87", "<=84", "91-92").  Coordinator and
-            # other callers must store THIS field as forecast_bin in the ledger — NOT
-            # condition_type ("above"/"below"/"between") which settlement cannot match.
-            "forecast_bin_label": bin_str,
-            "model_probability": round(prob, 4) if prob is not None else None,
-            "market_probability": round(executable_price, 4),
-            "raw_edge": round(raw_edge, 4),
-            "edge": round(edge, 4),
-            "breakeven_probability": round(final_breakeven, 4),
-            "expected_value": round(ev, 4),
-            "speed_to_roi_score": speed_score,
-            "time_to_close_minutes": mins_to_close,
-            "paper_action": action,
-            "confidence": confidence,
-            "risk_decision": {
-                "passed": risk_decision.passed,
-                "reason": risk_decision.reason,
-                "failed_gate_id": risk_decision.failed_gate_id,
-                "failed_gate_name": risk_decision.failed_gate_name,
-                "no_trade_reason": risk_decision.no_trade_reason
-            },
-            "yes_ask": ask,
-            "yes_bid": bid,
-            "last_price": last,
-            "market_open_time_et": get_market_open_time_et(ticker_date) if ticker_date else None,
-            "stale": is_stale
-        })
-
-    # Check if all signals are stale
-    all_stale = True
-    if signals:
-        for s in signals:
-            if not s.get("stale"):
-                all_stale = False
-                break
-                
-    if signals and all_stale:
-        signals = []
-        status = "NO_SIGNAL"
-        global_warnings.append("Preserved Kalshi snapshot is stale or event-date mismatched; no actionable signal generated.")
-
-    signals.sort(key=lambda x: x["edge"] if x["edge"] is not None else -999.0, reverse=True)
+    # 4. Process each event date
+    events_by_date = {}
+    all_signals = []
+    global_warnings = []
     
-    # If best signal has edge -999 or is None, it means all are stale or no edge!
-    best_signal = signals[0] if signals and signals[0]["edge"] is not None and signals[0]["edge"] > -900 else None
+    # Sort dates so we process today then tomorrow
+    target_dates = sorted(list(markets_by_date.keys()))
+    
+    # If a specific forecast_path was passed, identify its date
+    override_forecast_date = None
+    if forecast_path:
+        with open(forecast_path, "r") as f:
+            if forecast_path.suffix == ".json":
+                f_data = json.load(f)
+                override_forecast_date = f_data.get("date")
+            if not override_forecast_date:
+                # Fallback to filename
+                f_ts = parse_timestamp_from_filename(forecast_path.name)
+                if f_ts: override_forecast_date = f_ts.strftime("%Y-%m-%d")
+        
+        # C1-B Regression: If provided forecast date doesn't match ANY market date, emit mismatch warning
+        if override_forecast_date and override_forecast_date not in target_dates:
+            global_warnings.append(
+                f"Forecast date {override_forecast_date} does not match any active contract dates: {target_dates}. "
+                f"Signals may be unreliable due to date mismatch."
+            )
+
+    for event_date in target_dates:
+        markets = markets_by_date[event_date]
+        event_ticker = markets[0].get("event_ticker")
+        
+        # Find matching forecast
+        f_file = None
+        if forecast_path and event_date == override_forecast_date:
+            f_file = forecast_path
+        else:
+            f_file = find_forecast_for_date(event_date)
+            
+        event_status = "OK"
+        event_warnings = []
+        event_signals = []
+        event_probs = {}
+        forecast_data_obj = {}
+        model_bins = {}
+        integer_dist = {}
+
+        if not f_file:
+            event_status = "NO_SIGNAL"
+            event_warnings.append(f"No forecast artifact found for {event_date}.")
+        else:
+            # Load forecast data
+            try:
+                if f_file.suffix == ".md":
+                    model_bins = parse_forecast_bins_from_md(f_file)
+                    forecast_data_obj = {"probability_bins": model_bins, "date": event_date}
+                else:
+                    with open(f_file, "r") as f:
+                        forecast_data_obj = json.load(f)
+                        model_bins = forecast_data_obj.get("probability_bins", {})
+                        raw_int_dist = forecast_data_obj.get("integer_distribution", {})
+                        integer_dist = {int(k): v for k, v in raw_int_dist.items()}
+                
+                # Check for date mismatch between loaded forecast and target event_date
+                f_date = forecast_data_obj.get("date")
+                if f_date and f_date != event_date:
+                    event_warnings.append(
+                        f"Forecast date {f_date} does not match event date {event_date}. Signals may be unreliable."
+                    )
+            except Exception as e:
+                event_status = "ERROR_LOADING_FORECAST"
+                event_warnings.append(f"Error loading forecast {f_file.name}: {e}")
+
+        if not model_bins and event_status == "OK":
+            event_status = "NO_SIGNAL"
+            event_warnings.append(f"Forecast for {event_date} contains no probability bins.")
+
+        # Calculate probabilities and signals for this date
+        if model_bins:
+            # Pre-compute probabilities
+            for m in markets:
+                ticker = m.get("ticker")
+                mapping = m.get("contract_mapping", {})
+                contract_bin_data = m.get("contract_bin")
+                
+                is_stale = (event_date < now_date_str)
+                bin_str = contract_bin_data.get("label") if contract_bin_data else mapping_to_bin_string(mapping)
+                
+                prob = None
+                if bin_str:
+                    if is_stale: prob = 0.0
+                    else:
+                        prob = model_bins.get(bin_str)
+                        if prob is None and integer_dist:
+                            from forecasting.contract_probability_mapper import map_distribution_to_contracts
+                            res = map_distribution_to_contracts(integer_dist, [mapping])
+                            prob = res.get(ticker, {}).get("probability")
+
+                    if prob is not None:
+                        norm_key = normalize_contract_key(bin_str)
+                        event_probs[norm_key] = prob
+
+            # Generate signals
+            for m in markets:
+                ticker = m.get("ticker")
+                mapping = m.get("contract_mapping", {})
+                bin_str = m.get("contract_bin", {}).get("label") if m.get("contract_bin") else mapping_to_bin_string(mapping)
+                
+                # Pricing
+                ask = m.get("yes_ask_dollars")
+                bid = m.get("yes_bid_dollars")
+                last = m.get("last_price_dollars")
+                
+                # Cast to float if present
+                ask = float(ask) if ask is not None else None
+                bid = float(bid) if bid is not None else None
+                last = float(last) if last is not None else None
+                
+                # Cents fallback
+                if ask is None and m.get("yes_ask") is not None: ask = m.get("yes_ask") / 100.0
+                if bid is None and m.get("yes_bid") is not None: bid = m.get("yes_bid") / 100.0
+                if last is None and m.get("last_price") is not None: last = m.get("last_price") / 100.0
+
+                # Orderbook override
+                ob_m = all_orderbooks.get(ticker, {})
+                if ob_m.get("top_yes_ask_dollars") is not None: ask = float(ob_m["top_yes_ask_dollars"])
+                if ob_m.get("top_yes_bid_dollars") is not None: bid = float(ob_m["top_yes_bid_dollars"])
+                if ob_m.get("last_price_dollars") is not None: last = float(ob_m["last_price_dollars"])
+
+                executable_price = select_executable_price(ask, last)
+                if executable_price is None or executable_price == 0:
+                    event_warnings.append(f"{ticker}: No usable price data.")
+                    continue
+
+                is_stale = (event_date < now_date_str)
+                prob = event_probs.get(normalize_contract_key(bin_str)) if bin_str else None
+                
+                if prob is None:
+                    event_warnings.append(f"{ticker}: Probability for bin {bin_str} not found in forecast.")
+                    event_signals.append({
+                        "market_ticker": ticker,
+                        "event_ticker": m.get("event_ticker"),
+                        "market_title": m.get("title"),
+                        "status": m.get("status"),
+                        "condition_type": mapping.get("condition_type"),
+                        "threshold_f": mapping.get("threshold_f"),
+                        "contract_range": mapping.get("contract_range"),
+                        "model_probability": None,
+                        "market_probability": round(executable_price, 4),
+                        "paper_action": "NO SIGNAL",
+                        "yes_ask": ask, "yes_bid": bid, "last_price": last,
+                        "stale": is_stale,
+                        "warnings": [f"Probability for bin {bin_str} not found in forecast"]
+                    })
+                    continue
+
+                # Math and Risk
+                edge, raw_edge, fb = calculate_edge(prob, executable_price)
+                ev = calculate_expected_value(prob, fb)
+                speed, mins = calculate_speed_to_roi(ev, m.get("close_time"))
+
+                from paper_trading.paper_ledger import PaperLedger
+                if ledger_path_override:
+                    ledger_summary = PaperLedger(ledger_path=ledger_path_override).get_summary()
+                else:
+                    ledger_summary = PaperLedger().get_summary()
+
+                forecast_risk = dict(forecast_data_obj)
+                forecast_risk["dynamic_contract_probabilities"] = event_probs
+                
+                risk_decision = evaluate_risk_gates(
+                    forecast_data=forecast_risk,
+                    latest_obs_time_iso=latest_obs_time_iso,
+                    model_prob=prob,
+                    executable_price=executable_price,
+                    yes_ask=ask, yes_bid=bid,
+                    edge=edge, raw_edge=raw_edge,
+                    ledger_summary=ledger_summary,
+                    target_date_str=event_date,
+                    best_high_f=forecast_data_obj.get("best_single_number_f"),
+                    bin_label=bin_str,
+                    contract_bins=markets
+                )
+
+                action = "NO EDGE"
+                conf = "low"
+                if is_stale:
+                    action = "NO SIGNAL"; edge = -999.0; ev = -999.0; risk_decision.passed = False
+                elif not risk_decision.passed: action = "BLOCKED BY RISK ENGINE"
+                elif edge > 0.05:
+                    action = "PAPER BUY CANDIDATE"; conf = "medium"
+                    if edge > 0.15: conf = "high"
+                elif edge > 0: action = "WATCH"
+
+                event_signals.append({
+                    "market_ticker": ticker, "event_ticker": m.get("event_ticker"),
+                    "market_title": m.get("title"), "status": m.get("status"),
+                    "condition_type": mapping.get("condition_type"),
+                    "threshold_f": mapping.get("threshold_f"),
+                    "range_high_f": mapping.get("range_high_f"),
+                    "contract_range": mapping.get("contract_range"),
+                    "forecast_bin_label": bin_str,
+                    "model_probability": round(prob, 4),
+                    "market_probability": round(executable_price, 4),
+                    "raw_edge": round(raw_edge, 4), "edge": round(edge, 4),
+                    "breakeven_probability": round(fb, 4), "expected_value": round(ev, 4),
+                    "speed_to_roi_score": speed, "time_to_close_minutes": mins,
+                    "paper_action": action, "confidence": conf,
+                    "risk_decision": risk_decision.__dict__,
+                    "yes_ask": ask, "yes_bid": bid, "last_price": last,
+                    "market_open_time_et": get_market_open_time_et(event_date),
+                    "stale": is_stale
+                })
+
+        event_signals.sort(key=lambda x: x["edge"] if x.get("edge") is not None else -999.0, reverse=True)
+        
+        events_by_date[event_date] = {
+            "event_ticker": event_ticker,
+            "forecast_source": str(f_file.name) if f_file else None,
+            "signals": event_signals,
+            "dynamic_contract_probabilities": event_probs,
+            "status": event_status,
+            "warnings": event_warnings
+        }
+        all_signals.extend(event_signals)
+        global_warnings.extend(event_warnings)
+
+    # 5. Consolidation for Backwards Compatibility
+    all_signals.sort(key=lambda x: x["edge"] if x.get("edge") is not None else -999.0, reverse=True)
+    best_sig = all_signals[0] if all_signals and all_signals[0].get("edge") is not None and all_signals[0]["edge"] > -900 else None
+    
+    # Identify primary date (the one we want to show in legacy UI)
+    primary_date = now_date_str
+    if primary_date not in events_by_date and target_dates:
+        primary_date = target_dates[0]
+        
+    primary_event = events_by_date.get(primary_date, {})
     
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "status": status,
-        "forecast_source": str(forecast_file.name) if forecast_file else None,
+        "primary_event_date": primary_date,
+        "status": primary_event.get("status", "NO_SIGNAL"),
+        "forecast_source": primary_event.get("forecast_source"),
         "market_snapshot_source": str(snapshot_to_use.name) if snapshot_to_use else None,
-        "dynamic_contract_probabilities": dynamic_contract_probabilities,
-        "signals": signals,
-        "best_signal": best_signal,
+        "dynamic_contract_probabilities": primary_event.get("dynamic_contract_probabilities", {}),
+        "signals": all_signals,
+        "best_signal": best_sig,
+        "events_by_date": events_by_date,
         "warnings": list(set(global_warnings)),
         "safety": {
             "no_real_trading": True,
