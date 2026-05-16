@@ -52,7 +52,7 @@ class PaperLedger:
                 
                 trade_date = trade.get("target_date")
                 pnl = trade.get("pnl", 0.0)
-                status = trade.get("status", "closed")
+                status = str(trade.get("status", "closed")).lower()
                 
                 # Time deltas (24h and 7d)
                 if (now - window_ts).total_seconds() <= 24 * 3600:
@@ -72,6 +72,32 @@ class PaperLedger:
             "weekly_pnl": weekly_pnl,
             "active_trades_by_date": active_trades_by_date
         }
+
+    def update_trade_status(
+        self, 
+        market_ticker: str, 
+        target_date: str, 
+        status: str, 
+        pnl: float = 0.0,
+        settled_at_utc: Optional[str] = None
+    ):
+        """Updates the status and PnL of an existing trade."""
+        changed = False
+        for trade in self.ledger_data.get("trades", []):
+            if trade.get("market_ticker") == market_ticker and trade.get("target_date") == target_date:
+                trade["status"] = status
+                trade["pnl"] = pnl
+                if settled_at_utc:
+                    trade["settled_at_utc"] = settled_at_utc
+                elif status.lower() == "settled" and "settled_at_utc" not in trade:
+                    trade["settled_at_utc"] = datetime.now(timezone.utc).isoformat()
+                changed = True
+        
+        if changed:
+            self._save_ledger()
+            logger.info(f"Updated status for {market_ticker} ({target_date}) to {status}")
+        else:
+            logger.warning(f"No trade found to update: {market_ticker} for {target_date}")
 
     def record_trade(
         self,

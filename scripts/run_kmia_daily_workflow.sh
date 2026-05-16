@@ -45,8 +45,12 @@ bash "$SCRIPT_DIR/generate_paper_signal.sh"
 echo "[5/6] Generating weekly/aggregate calibration report..."
 bash "$SCRIPT_DIR/generate_weekly_calibration.sh"
 
-# 6. Generate Daily Status Report
-echo "[6/6] Generating Daily Status Report..."
+# 6. Run paper signal recorder
+echo "[6/7] Recording paper trades from latest signals..."
+bash "$SCRIPT_DIR/record_paper_trade.sh"
+
+# 7. Generate Daily Status Report
+echo "[7/7] Generating Daily Status Report..."
 # Use venv if available
 if [ -x "$PROJECT_ROOT/.venv/bin/python3" ]; then
   PYTHON_BIN="$PROJECT_ROOT/.venv/bin/python3"

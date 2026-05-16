@@ -1,12 +1,15 @@
 import streamlit as st
 import json
 import os
+import logging
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
 import re
 from typing import Optional, Tuple
 from shared.timestamp_utils import parse_ticker_date
+
+logger = logging.getLogger(__name__)
 
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
@@ -839,7 +842,7 @@ def render_paper_trading(perf, settlements, trades):
     st.header("📈 Paper Trading Performance")
     st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
 
-    # Account balance from new JSON ledger
+    # Account balance from canonical JSON ledger
     if PAPER_LEDGER_FILE.exists():
         try:
             ledger_json = load_json(PAPER_LEDGER_FILE)
@@ -859,27 +862,52 @@ def render_paper_trading(perf, settlements, trades):
     else:
         st.info("No performance data available. Run `bash scripts/settle_paper_trades.sh`.")
 
-    if settlements:
-        st.subheader("Latest Settlement Results")
-        df_settle = pd.DataFrame(settlements)
-        s_cols = ["trade_date", "market_ticker", "actual_max_temp_f", "actual_bin", "result", "simulated_pnl"]
-        existing_s_cols = [c for c in s_cols if c in df_settle.columns]
-        
-        # Format actual_max_temp_f in settlement table
-        df_display_settle = df_settle[existing_s_cols].copy()
-        if "actual_max_temp_f" in df_display_settle.columns:
-            df_display_settle["actual_max_temp_f"] = df_display_settle["actual_max_temp_f"].apply(lambda x: f"{x:.1f}°F" if pd.notnull(x) else "—")
-            
-        st.dataframe(df_display_settle.iloc[::-1], use_container_width=True, hide_index=True)
+    st.divider()
+    
+    # 1. Open Positions
+    st.subheader("🏁 Open Positions")
+    open_trades = [t for t in trades if str(t.get("status", "")).lower() == "open"]
+    if open_trades:
+        df_open = pd.DataFrame(open_trades)
+        display_cols = ["timestamp_utc", "market_ticker", "target_date", "forecast_bin", "execution_price"]
+        available = [c for c in display_cols if c in df_open.columns]
+        st.dataframe(df_open[available].iloc[::-1], use_container_width=True, hide_index=True)
+    else:
+        st.info("No active open paper trades.")
 
     st.divider()
-    st.header("Ledger")
-    st.metric("Open Paper Trades", len(trades))
-    if trades:
-        df_trades = pd.DataFrame(trades)
-        st.dataframe(df_trades.iloc[::-1])
+
+    # 2. Settled History
+    st.subheader("📜 Trade History")
+    settled_trades = [t for t in trades if str(t.get("status", "")).lower() == "settled"]
+    if settled_trades:
+        df_history = pd.DataFrame(settled_trades)
+        display_cols = ["target_date", "market_ticker", "status", "pnl", "settled_at_utc"]
+        available = [c for c in display_cols if c in df_history.columns]
+        
+        # Color coding for PnL
+        def color_pnl(val):
+            try:
+                val_f = float(val)
+                color = 'green' if val_f > 0 else 'red' if val_f < 0 else 'gray'
+                return f'color: {color}'
+            except:
+                return 'color: black'
+            
+        if "pnl" in df_history.columns:
+            st.dataframe(df_history[available].iloc[::-1].style.applymap(color_pnl, subset=['pnl']), use_container_width=True, hide_index=True)
+        else:
+            st.dataframe(df_history[available].iloc[::-1], use_container_width=True, hide_index=True)
     else:
-        st.write("No paper trades recorded yet.")
+        st.write("No settled trades in history.")
+
+    st.divider()
+    with st.expander("Raw Ledger / Settlement Debug"):
+        st.subheader("Full Ledger (JSON)")
+        st.json(trades)
+        if settlements:
+            st.subheader("Legacy Settlement Log (JSONL)")
+            st.json(settlements)
 
 
 def render_weather_nws(w_data, n_data):
@@ -1242,7 +1270,7 @@ if __name__ == "__main__":
     PERF_FILE = PAPER_DIR / "latest_paper_trading_performance.json"
     perf = load_json(PERF_FILE) if PERF_FILE.exists() else {}
     
-    # Read from new JSON ledger (Phase 8+), falling back to legacy JSONL
+    # Read from canonical JSON ledger
     trades = []
     open_paper_trades = 0
     if PAPER_LEDGER_FILE.exists():
@@ -1250,21 +1278,13 @@ if __name__ == "__main__":
             ledger_json = load_json(PAPER_LEDGER_FILE)
             if ledger_json and isinstance(ledger_json.get("trades"), list):
                 trades = ledger_json["trades"]
-                open_paper_trades = len([t for t in trades if t.get("status") == "open"])
-        except Exception:
-            pass
-    if not trades:
-        # Fallback to legacy JSONL ledger
-        LEGACY_LEDGER = PAPER_DIR / "paper_trade_ledger.jsonl"
-        if LEGACY_LEDGER.exists():
-            with open(LEGACY_LEDGER, "r") as f:
-                for line in f:
-                    if line.strip():
-                        try:
-                            trades.append(json.loads(line))
-                            open_paper_trades += 1
-                        except Exception:
-                            continue
+                # Filter for case-insensitive 'open' status
+                open_paper_trades = len([
+                    t for t in trades 
+                    if str(t.get("status", "")).lower() == "open"
+                ])
+        except Exception as e:
+            logger.error(f"Error loading Paper Ledger: {e}")
 
     SETTLE_FILE = PAPER_DIR / "paper_trade_settlements.jsonl"
     settlements = []

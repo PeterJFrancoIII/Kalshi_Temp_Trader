@@ -28,12 +28,15 @@ except ImportError:
     def get_correction_for_date(date_str): return {}
     def is_excluded_from_learning(date_str): return False
 
+from shared.artifact_paths import PAPER_LEDGER_FILE, PAPER_TRADING_DIR
+from paper_trading.paper_ledger import PaperLedger
+
 logger = logging.getLogger(__name__)
 
 # Paths
 ROOT = Path(__file__).resolve().parents[3]
-PAPER_DIR = ROOT / "backend" / "data" / "processed" / "paper_trading"
-LEDGER_FILE = PAPER_DIR / "paper_trade_ledger.jsonl"
+PAPER_DIR = PAPER_TRADING_DIR
+LEDGER_FILE = PAPER_LEDGER_FILE
 SETTLEMENTS_FILE = PAPER_DIR / "paper_trade_settlements.jsonl"
 PERFORMANCE_FILE = PAPER_DIR / "latest_paper_trading_performance.json"
 HISTORY_FILE = ROOT / "backend" / "data" / "processed" / "history" / "kmia_daily_history.jsonl"
@@ -158,43 +161,19 @@ def _update_json_ledger_pnl(
     settlements_by_key: Dict[Tuple[str, str], Dict[str, Any]],
 ) -> None:
     """
-    Writes realized PnL and ``status="settled"`` back into a JSON-object-format
-    PaperLedger for each trade key in *settlements_by_key*.
-
-    This is the F1 fix: makes daily_pnl / weekly_pnl in PaperLedger.get_summary()
-    reflect actual settled outcomes so that risk Gates 7 and 8 can fire.
-
-    No-op if the ledger is not in JSON object format (e.g. legacy JSONL).
+    Writes realized PnL and status back into the PaperLedger.
     """
     if not settlements_by_key:
         return
-    try:
-        with open(ledger_path, "r") as f:
-            data = json.load(f)
-        if not isinstance(data, dict) or "trades" not in data:
-            return  # Not JSON object format — skip silently
-
-        changed = False
-        for trade in data["trades"]:
-            key = (trade.get("market_ticker"), trade.get("target_date"))
-            if key in settlements_by_key:
-                val = settlements_by_key[key]
-                trade["pnl"] = val["pnl"]
-                trade["settled_at_utc"] = val["settled_at_utc"]
-                trade["status"] = "settled"
-                changed = True
-
-        if changed:
-            with open(ledger_path, "w") as f:
-                json.dump(data, f, indent=2)
-            logger.debug(
-                f"Wrote realized PnL for {len(settlements_by_key)} trade(s) "
-                f"back into JSON ledger {ledger_path.name}."
-            )
-    except Exception as e:
-        logger.warning(
-            f"Could not write settlement PnL back to JSON ledger "
-            f"{ledger_path.name}: {e}"
+    
+    ledger = PaperLedger(ledger_path=ledger_path)
+    for (ticker, target_date), val in settlements_by_key.items():
+        ledger.update_trade_status(
+            market_ticker=ticker,
+            target_date=target_date,
+            status="settled",
+            pnl=val["pnl"],
+            settled_at_utc=val["settled_at_utc"]
         )
 
 
@@ -264,10 +243,10 @@ def settle_paper_trades(
                 continue
 
             ticker = trade.get("market_ticker")
-            trade_date = parse_ticker_date(ticker)
+            trade_date = trade.get("target_date") or parse_ticker_date(ticker)
 
             if not trade_date:
-                logger.warning(f"Could not parse date from ticker: {ticker}")
+                logger.warning(f"Could not parse date from ticker: {ticker} and no target_date in trade record.")
                 continue
 
             # Settlement availability guard

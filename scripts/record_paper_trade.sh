@@ -19,10 +19,10 @@ cd "$ROOT/backend"
 PYTHONPATH="$PYTHONPATH" "$PYTHON_BIN" src/paper_trading/ledger.py
 
 echo "----------------------------------------------------"
-if [ -f "data/processed/paper_trading/paper_trade_ledger.jsonl" ]; then
-    echo "LATEST RECORDED TRADE:"
-    tail -n 1 "data/processed/paper_trading/paper_trade_ledger.jsonl"
+if [ -f "data/processed/paper_trading/ledger.json" ]; then
+    echo "LATEST LEDGER STATE (last 10 lines):"
+    tail -n 10 "data/processed/paper_trading/ledger.json"
 else
-    echo "No trades recorded."
+    echo "No ledger.json found."
 fi
 echo "===================================================="

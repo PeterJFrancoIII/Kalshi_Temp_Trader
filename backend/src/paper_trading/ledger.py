@@ -10,18 +10,20 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+from paper_trading.paper_ledger import PaperLedger
+from paper_trading.settlement import parse_ticker_date
+
+# NO REAL TRADING EXECUTION
+# DRY-RUN / PAPER EVALUATION ONLY
+
+logger = logging.getLogger(__name__)
+
 # Resolve ROOT
 ROOT = Path(__file__).resolve().parents[3]
 SIGNAL_FILE = ROOT / "backend" / "data" / "processed" / "paper_trading" / "latest_paper_signal.json"
-LEDGER_FILE = ROOT / "backend" / "data" / "processed" / "paper_trading" / "paper_trade_ledger.jsonl"
 
 def signal_market_probability(best_signal: Dict[str, Any]) -> Any:
-    """Return the market probability using the current field name first.
-
-    Older signal payloads used market_implied_probability. Current signal payloads
-    use market_probability. Keep both aliases so historical/paper data remains
-    readable while avoiding None entries for new signals.
-    """
+    """Return the market probability using the current field name first."""
     current = best_signal.get("market_probability")
     if current is not None:
         return current
@@ -37,6 +39,7 @@ def signal_entry_price(best_signal: Dict[str, Any]) -> Any:
 def record_paper_trade():
     """
     Reads the latest paper signal and records a trade in the ledger if an edge is found.
+    Uses the canonical PaperLedger (ledger.json).
     """
     if not SIGNAL_FILE.exists():
         logger.warning(f"No signal file found at {SIGNAL_FILE}")
@@ -64,40 +67,32 @@ def record_paper_trade():
         logger.warning("Signal missing market_ticker.")
         return
 
-    # Check for duplicates (same ticker on same day)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    if LEDGER_FILE.exists():
-        with open(LEDGER_FILE, "r") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    if entry.get("market_ticker") == ticker and entry.get("timestamp_utc", "").startswith(today):
-                        logger.info(f"Trade for {ticker} already recorded today.")
-                        return
-                except json.JSONDecodeError:
-                    continue
+    target_date = best_signal.get("target_date") or parse_ticker_date(ticker)
+    if not target_date:
+        logger.warning(f"Could not determine target date for ticker {ticker}")
+        return
+
+    ledger = PaperLedger()
+    summary = ledger.get_summary()
+    
+    # Check for duplicates
+    for trade in ledger.ledger_data.get("trades", []):
+        if trade.get("market_ticker") == ticker and trade.get("target_date") == target_date:
+            logger.info(f"Trade for {ticker} ({target_date}) already recorded in ledger.")
+            return
 
     # Record simulated trade
-    trade = {
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-        "market_ticker": ticker,
-        "forecast_bin": best_signal.get("forecast_bin"),
-        "model_probability": best_signal.get("model_probability"),
-        "market_probability": signal_market_probability(best_signal),
-        "edge": best_signal.get("edge"),
-        "simulated_entry_price": signal_entry_price(best_signal),
-        "paper_action": action,
-        "market_open_time_et": best_signal.get("market_open_time_et"),
-        "status": "OPEN",
-        "safety": "NO REAL TRADING EXECUTION"
-    }
+    ledger.record_trade(
+        market_ticker=ticker,
+        target_date=target_date,
+        execution_price=signal_entry_price(best_signal),
+        quantity=1, # Default paper quantity
+        model_probability=best_signal.get("model_probability"),
+        forecast_bin=best_signal.get("forecast_bin_label") or best_signal.get("forecast_bin")
+    )
 
-    os.makedirs(LEDGER_FILE.parent, exist_ok=True)
-    with open(LEDGER_FILE, "a") as f:
-        f.write(json.dumps(trade) + "\n")
-    
-    logger.info(f"Recorded paper trade for {ticker}")
-    return trade
+    logger.info(f"Recorded paper trade for {ticker} in ledger.json")
+    return True
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
