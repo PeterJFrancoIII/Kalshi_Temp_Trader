@@ -56,6 +56,7 @@ class TestMultiEventSignal(unittest.TestCase):
         with open(f15_path, "w") as f:
             json.dump({
                 "date": "2026-05-15",
+                "generated_at_utc": "2026-05-15T00:00:00Z",
                 "probability_bins": {">=93": 0.8}
             }, f)
             
@@ -64,6 +65,7 @@ class TestMultiEventSignal(unittest.TestCase):
         with open(f16_path, "w") as f:
             json.dump({
                 "date": "2026-05-16",
+                "generated_at_utc": "2026-05-16T00:00:00Z",
                 "probability_bins": {">=93": 0.2}
             }, f)
             
@@ -128,6 +130,62 @@ class TestMultiEventSignal(unittest.TestCase):
             
             # Verify primary_event_date
             self.assertEqual(report["primary_event_date"], "2026-05-15")
+
+    def test_missing_future_forecast(self):
+        """Verify that May 16 correctly reports NO_SIGNAL if its forecast is missing while May 15 works."""
+        reports_dir = self.temp_dir / "reports_missing"
+        reports_dir.mkdir()
+        
+        # Forecast ONLY for May 15
+        f15_path = reports_dir / "kmia_forecast_2026-05-15_rules_v2_climatology_000000.json"
+        with open(f15_path, "w") as f:
+            json.dump({
+                "date": "2026-05-15",
+                "generated_at_utc": "2026-05-15T00:00:00Z",
+                "probability_bins": {">=93": 0.8}
+            }, f)
+            
+        # Mock snapshot with both dates
+        snapshot_path = self.temp_dir / "snapshot_missing.json"
+        with open(snapshot_path, "w") as f:
+            json.dump({
+                "generated_at_utc": "2026-05-15T12:00:00Z",
+                "selected_temperature_markets": [
+                    {
+                        "ticker": "KXHIGHMIA-26MAY15-T92",
+                        "event_ticker": "KXHIGHMIA-26MAY15",
+                        "status": "open"
+                    },
+                    {
+                        "ticker": "KXHIGHMIA-26MAY16-T92",
+                        "event_ticker": "KXHIGHMIA-26MAY16",
+                        "status": "open"
+                    }
+                ]
+            }, f)
+            
+        with patch("paper_trading.signal_generator.REPORTS_DIR", reports_dir), \
+             patch("paper_trading.signal_generator.SNAPSHOT_FILE", snapshot_path), \
+             patch("paper_trading.signal_generator.OUTPUT_DIR", self.temp_dir), \
+             patch("paper_trading.signal_generator.LATEST_KALSHI_ORDERBOOKS", str(self.temp_dir / "nonexistent.json")), \
+             patch("paper_trading.signal_generator.NWS_SNAPSHOT_FILE", self.temp_dir / "nws.json"):
+            
+            with open(self.temp_dir / "nws.json", "w") as f:
+                json.dump({"latest_observation_time": "2026-05-15T11:00:00Z"}, f)
+
+            from paper_trading.signal_generator import generate_paper_signal
+            now = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
+            signal_path = generate_paper_signal(
+                prediction_timestamp=now,
+                latest_path_override=str(self.temp_dir / "latest_signal_missing.json")
+            )
+            
+            with open(signal_path, "r") as f:
+                report = json.load(f)
+                
+            self.assertEqual(report["events_by_date"]["2026-05-15"]["status"], "OK")
+            self.assertEqual(report["events_by_date"]["2026-05-16"]["status"], "NO_SIGNAL")
+            self.assertIn("No forecast artifact found for 2026-05-16", report["events_by_date"]["2026-05-16"]["warnings"][0])
 
 if __name__ == "__main__":
     unittest.main()

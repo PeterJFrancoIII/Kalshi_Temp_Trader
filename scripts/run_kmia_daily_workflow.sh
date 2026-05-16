@@ -25,12 +25,53 @@ echo "Project Root: $PROJECT_ROOT"
 echo "NO REAL TRADING EXECUTION"
 echo "========================================================================"
 
-# 1. Run daily v2 dry-run forecast
-echo "[1/4] Running daily v2 dry-run forecast..."
-bash "$SCRIPT_DIR/run_daily_prediction.sh" --dry-run --model rules_v2_climatology
+# 1. Identify target dates from Kalshi snapshot
+echo "Identifying target dates from Kalshi snapshot..."
+if [ -x "$PROJECT_ROOT/.venv/bin/python3" ]; then
+  PYTHON_BIN="$PROJECT_ROOT/.venv/bin/python3"
+else
+  PYTHON_BIN="python3"
+fi
 
-# 2. Run compare-models dry-run
-echo "[2/4] Running model comparison dry-run..."
+SNAPSHOT_PATH="$BACKEND_DIR/data/processed/kalshi_market_snapshots/latest_kalshi_market_snapshot.json"
+TARGET_DATES=$("$PYTHON_BIN" -c "
+import json
+import os
+import re
+from datetime import datetime
+
+def parse_ticker_date(ticker):
+    if not ticker: return None
+    match = re.search(r'([0-9]{2})([A-Z]{3})([0-9]{2})', ticker)
+    if not match: return None
+    yy, mon_str, dd = match.groups()
+    months = {'JAN':'01','FEB':'02','MAR':'03','APR':'04','MAY':'05','JUN':'06','JUL':'07','AUG':'08','SEP':'09','OCT':'10','NOV':'11','DEC':'12'}
+    mm = months.get(mon_str.upper())
+    return f'20{yy}-{mm}-{dd}' if mm else None
+
+snapshot_path = '$SNAPSHOT_PATH'
+if not os.path.exists(snapshot_path):
+    print(datetime.now().strftime('%Y-%m-%d'))
+    exit()
+
+with open(snapshot_path, 'r') as f:
+    data = json.load(f)
+markets = data.get('markets', []) or data.get('selected_temperature_markets', [])
+dates = sorted(list(set(filter(None, [parse_ticker_date(m.get('ticker')) for m in markets]))))
+print(' '.join(dates) if dates else datetime.now().strftime('%Y-%m-%d'))
+")
+
+echo "Found target dates: $TARGET_DATES"
+
+# 2. Run daily v2 dry-run forecast for each date
+echo "[1/4] Running daily v2 dry-run forecast for active dates..."
+for TARGET_DATE in $TARGET_DATES; do
+    echo "  Generating forecast for $TARGET_DATE..."
+    bash "$SCRIPT_DIR/run_daily_prediction.sh" --dry-run --model rules_v2_climatology --date "$TARGET_DATE"
+done
+
+# 3. Run compare-models dry-run (Legacy: today only)
+echo "[2/4] Running model comparison dry-run for today..."
 bash "$SCRIPT_DIR/run_daily_prediction.sh" --dry-run --compare-models
 
 # 3. Run settlement check
