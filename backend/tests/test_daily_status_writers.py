@@ -53,12 +53,11 @@ class TestDailyStatusWriters(unittest.TestCase):
         with open(path, 'r') as f:
             content = f.read()
         
-        self.assertIn("# KMIA Daily Status Report", content)
-        self.assertIn("Date**: 2026-05-03", content)
-        self.assertIn("Overall**: OK", content)
-        self.assertIn("V2 Win Rate (Brier)**: 70.0%", content)
+        self.assertIn("# KMIA Daily Status Report - 2026-05-03", content)
+        self.assertIn("System Status:** ✅ OK", content)
+        self.assertIn("V2 Win Rate:** 0.7", content)
         self.assertIn("No real trading execution is implemented.", content)
-        self.assertIn("⚠️ Test warning", content)
+        self.assertIn("Test warning", content)
 
 if __name__ == "__main__":
     unittest.main()

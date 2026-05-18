@@ -243,17 +243,20 @@ def generate_paper_signal(
     # Use US/Eastern local date for staleness checks to avoid UTC rollover issues.
     now_date_str = prediction_timestamp.astimezone(ZoneInfo("US/Eastern")).strftime("%Y-%m-%d")
 
-    # 1. Load NWS snapshot for Gate 2 check
-    latest_obs_time_iso: Optional[str] = None
+    # 1. Load NWS snapshot and assess freshness gate
+    nws_snapshot = None
     try:
         if NWS_SNAPSHOT_FILE.exists():
             with open(NWS_SNAPSHOT_FILE, "r") as _f:
-                _nws_data = json.load(_f)
-            latest_obs_time_iso = _nws_data.get("latest_observation_time")
+                nws_snapshot = json.load(_f)
         else:
             logger.warning(f"NWS snapshot not found at {NWS_SNAPSHOT_FILE}.")
     except Exception as _e:
-        logger.warning(f"Could not load NWS snapshot for Gate 2 check: {_e}.")
+        logger.warning(f"Could not load NWS snapshot for freshness gate check: {_e}.")
+
+    from weather.nws_snapshot_contract import assess_nws_snapshot
+    weather_gate = assess_nws_snapshot(nws_snapshot, now_utc=prediction_timestamp)
+    latest_obs_time_iso = nws_snapshot.get("latest_observation_time") if nws_snapshot else None
 
     # 2. Load Orderbooks
     all_orderbooks = {}
@@ -417,6 +420,15 @@ def generate_paper_signal(
                 
                 if prob is None:
                     event_warnings.append(f"{ticker}: Probability for bin {bin_str} not found in forecast.")
+                    if not weather_gate.get("allow_paper_recommendations", False):
+                        p_action = "NO TRADE"
+                        p_risk_dec = "BLOCK"
+                        p_no_trade_reason = weather_gate.get("no_trade_reason")
+                    else:
+                        p_action = "NO SIGNAL"
+                        p_risk_dec = None
+                        p_no_trade_reason = f"Probability for bin {bin_str} not found in forecast"
+
                     event_signals.append({
                         "market_ticker": ticker,
                         "event_ticker": m.get("event_ticker"),
@@ -427,7 +439,10 @@ def generate_paper_signal(
                         "contract_range": mapping.get("contract_range"),
                         "model_probability": None,
                         "market_probability": round(executable_price, 4),
-                        "paper_action": "NO SIGNAL",
+                        "paper_action": p_action,
+                        "risk_decision": p_risk_dec,
+                        "no_trade_reason": p_no_trade_reason,
+                        "weather_gate_status": weather_gate.get("status"),
                         "yes_ask": ask, "yes_bid": bid, "last_price": last,
                         "stale": is_stale,
                         "warnings": [f"Probability for bin {bin_str} not found in forecast"]
@@ -472,6 +487,14 @@ def generate_paper_signal(
                     if edge > 0.15: conf = "high"
                 elif edge > 0: action = "WATCH"
 
+                if not weather_gate.get("allow_paper_recommendations", False):
+                    action = "NO TRADE"
+                    risk_decision_val = "BLOCK"
+                    no_trade_reason_val = weather_gate.get("no_trade_reason")
+                else:
+                    risk_decision_val = risk_decision.__dict__
+                    no_trade_reason_val = risk_decision.no_trade_reason
+
                 event_signals.append({
                     "market_ticker": ticker, "event_ticker": m.get("event_ticker"),
                     "market_title": m.get("title"), "status": m.get("status"),
@@ -486,7 +509,9 @@ def generate_paper_signal(
                     "breakeven_probability": round(fb, 4), "expected_value": round(ev, 4),
                     "speed_to_roi_score": speed, "time_to_close_minutes": mins,
                     "paper_action": action, "confidence": conf,
-                    "risk_decision": risk_decision.__dict__,
+                    "risk_decision": risk_decision_val,
+                    "no_trade_reason": no_trade_reason_val,
+                    "weather_gate_status": weather_gate.get("status"),
                     "yes_ask": ask, "yes_bid": bid, "last_price": last,
                     "market_open_time_et": get_market_open_time_et(event_date),
                     "stale": is_stale
@@ -527,8 +552,12 @@ def generate_paper_signal(
         "best_signal": best_sig,
         "events_by_date": events_by_date,
         "warnings": list(set(global_warnings)),
+        "weather_gate": weather_gate,
+        "allow_paper_recommendations": weather_gate.get("allow_paper_recommendations", False),
+        "no_trade_reason": weather_gate.get("no_trade_reason"),
         "safety": {
             "no_real_trading": True,
+            "no_order_execution": True,
             "disclaimer": "NO REAL TRADING EXECUTION - PAPER ONLY"
         }
     }

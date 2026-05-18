@@ -463,20 +463,35 @@ def render_command_center(app_state, p_data, mkts):
 
     st.divider()
 
-    # 3. Weather status cards
-    st.subheader("🌦️ Weather Status (NWS KMIA)")
+    # 3. Weather status cards (NWS Gate Freshness)
+    st.subheader("🌦️ Weather Freshness (NWS Gate)")
     n_data = app_state.get("n_data", {})
-    if n_data:
-        wc1, wc2, wc3, wc4 = st.columns(4)
-        wc1.metric("Current Temp", format_temp(n_data.get('current_temp_f')))
-        wc2.metric("Observed Max Today", format_temp(n_data.get('observed_max_so_far_f')))
-        wc3.metric("Latest Obs Time", n_data.get("latest_observation_time", "—"))
-        wc4.metric("Source", n_data.get("observation_source", "—"))
-        
-        if n_data.get("stale_data"):
-            st.warning("⚠️ Weather data is stale!")
+    gate = app_state.get("weather_gate", {})
+    gate_status = gate.get("status", "UNKNOWN") if isinstance(gate, dict) else "UNKNOWN"
+    gate_emoji = {"OK": "🟢", "STALE": "🟡", "ERROR": "🔴", "MISSING": "⚪"}.get(gate_status, "❓")
+    allow_recommendations = gate.get("allow_paper_recommendations", False) if isinstance(gate, dict) else False
+    allow_emoji = "✅ ALLOWED" if allow_recommendations else "❌ BLOCKED"
+    
+    col_g1, col_g2, col_g3, col_g4 = st.columns(4)
+    with col_g1:
+        st.metric("NWS Gate Status", f"{gate_emoji} {gate_status}")
+    with col_g2:
+        st.metric("Trading Allowance", allow_emoji)
+    with col_g3:
+        age = gate.get("observation_age_minutes") if isinstance(gate, dict) else None
+        age_str = f"{age:.1f}m" if age is not None else "—"
+        st.metric("Observation Age", age_str)
+    with col_g4:
+        st.metric("Current Temp", format_temp(n_data.get('current_temp_f') if n_data else None))
+
+    if isinstance(gate, dict):
+        if not allow_recommendations:
+            st.error(f"⚠️ **Paper Recommendations Blocked:** {gate.get('no_trade_reason') or 'No-trade reason unspecified.'}")
+        elif gate.get("warnings"):
+            for warning in gate["warnings"]:
+                st.warning(f"⚠️ {warning}")
     else:
-        st.warning("No live NWS snapshot found.")
+        st.warning("No weather gate status found.")
 
     st.divider()
 
@@ -859,9 +874,35 @@ def render_active_forecasts(p_data):
         st.code("bash scripts/update_kalshi_market_data.sh\nbash scripts/generate_paper_signal.sh")
 
 
-def render_paper_trading(perf, settlements, trades):
+def render_paper_trading(perf, settlements, trades, app_state=None):
     st.header("📈 Paper Trading Performance")
     st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
+
+    # Render NWS Weather Freshness Gate Summary
+    gate = app_state.get("weather_gate", {}) if app_state else {}
+    if gate:
+        gate_status = gate.get("status", "UNKNOWN")
+        gate_emoji = {"OK": "🟢", "STALE": "🟡", "ERROR": "🔴", "MISSING": "⚪"}.get(gate_status, "❓")
+        allow_recommendations = gate.get("allow_paper_recommendations", False)
+        allow_emoji = "✅ ALLOWED" if allow_recommendations else "❌ BLOCKED"
+        age = gate.get("observation_age_minutes")
+        age_str = f"{age:.1f} minutes" if age is not None else "N/A"
+        
+        st.subheader("🌤️ Weather Freshness (NWS Gate)")
+        gcol1, gcol2, gcol3 = st.columns(3)
+        with gcol1:
+            st.metric("Gate Status", f"{gate_emoji} {gate_status}")
+        with gcol2:
+            st.metric("Trading Recommendations", allow_emoji)
+        with gcol3:
+            st.metric("Observation Age", age_str)
+            
+        if not allow_recommendations:
+            st.error(f"⚠️ **Gate Blocking Reason:** {gate.get('no_trade_reason') or 'No-trade reason unspecified.'}")
+        elif gate.get("warnings"):
+            for warning in gate["warnings"]:
+                st.warning(f"⚠️ {warning}")
+        st.divider()
 
     # Account balance from canonical JSON ledger
     if PAPER_LEDGER_FILE.exists():
@@ -930,20 +971,54 @@ def render_weather_nws(w_data, n_data):
     st.header("🌦️ Weather / NWS Live Data")
     st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
     
-    if n_data:
-        status_text = "🟢 CONNECTED"
-        if n_data.get("stale_data"):
-            status_text = "🟡 STALE"
-        if n_data.get("endpoint_status") == "ERROR":
-            status_text = "🔴 ERROR"
+    # Render detailed NWS Gate Status Card
+    from weather.nws_snapshot_contract import assess_nws_snapshot
+    try:
+        gate = assess_nws_snapshot(n_data)
+    except Exception as e:
+        gate = {
+            "available": False,
+            "allow_paper_recommendations": False,
+            "status": "ERROR",
+            "no_trade_reason": f"Assessment failed: {e}",
+            "warnings": [f"Assessment failed: {e}"],
+            "latest_observation_time": None,
+            "fetched_at_utc": None,
+            "observation_age_minutes": None
+        }
+        
+    gate_status = gate.get("status", "UNKNOWN")
+    gate_emoji = {"OK": "🟢", "STALE": "🟡", "ERROR": "🔴", "MISSING": "⚪"}.get(gate_status, "❓")
+    allow_recommendations = gate.get("allow_paper_recommendations", False)
+    allow_emoji = "✅ ALLOWED" if allow_recommendations else "❌ BLOCKED"
+    age = gate.get("observation_age_minutes")
+    age_str = f"{age:.1f} minutes" if age is not None else "N/A"
+    
+    st.subheader("🌤️ Weather Freshness (NWS Gate)")
+    gcol1, gcol2, gcol3 = st.columns(3)
+    with gcol1:
+        st.metric("Gate Status", f"{gate_emoji} {gate_status}")
+    with gcol2:
+        st.metric("Trading Recommendations", allow_emoji)
+    with gcol3:
+        st.metric("Observation Age", age_str)
+        
+    if not allow_recommendations:
+        st.error(f"⚠️ **Gate Blocking Reason:** {gate.get('no_trade_reason') or 'No-trade reason unspecified.'}")
+    elif gate.get("warnings"):
+        for warning in gate["warnings"]:
+            st.warning(f"⚠️ {warning}")
             
-        st.subheader(f"NWS Status: {status_text}")
+    st.divider()
+    
+    if n_data:
+        st.subheader("NWS Live Snapshot Metrics")
         
         nc1, nc2, nc3, nc4 = st.columns(4)
         nc1.metric("Current Temp", format_temp(n_data.get('current_temp_f')))
         nc2.metric("Observed Max Today", format_temp(n_data.get('observed_max_so_far_f')))
         nc3.metric("Wind", f"{n_data.get('wind_direction_compass', '—')} {format_num(n_data.get('wind_speed_mph'), unit='mph')}")
-        nc4.metric("Stale Data", "Yes" if n_data.get("stale_data") else "No")
+        nc4.metric("Stale Data Indicator", "Yes" if n_data.get("stale_data") else "No")
         
         st.write(f"**Latest Observation Time:** {n_data.get('latest_observation_time', 'N/A')} (UTC)")
         if n_data.get("wind_gust_mph"):
@@ -1188,6 +1263,30 @@ def render_backtesting():
 def render_system_health(app_state):
     st.header("⚙️ System Health & Raw Data")
     
+    # Render detailed NWS Weather Gate telemetry at the top of System Health
+    gate = app_state.get("weather_gate", {})
+    if gate:
+        status_val = gate.get("status", "UNKNOWN")
+        allow_paper = gate.get("allow_paper_recommendations", False)
+        status_emoji = {"OK": "🟢 OK", "STALE": "🟡 STALE", "ERROR": "🔴 ERROR", "MISSING": "⚪ MISSING"}.get(status_val, "❓ UNKNOWN")
+        
+        st.subheader("🌤️ NWS Weather Gate Telemetry")
+        sgcol1, sgcol2, sgcol3 = st.columns(3)
+        with sgcol1:
+            st.metric("Freshness Gate Status", status_emoji)
+        with sgcol2:
+            st.metric("Trading Allowance", "✅ ALLOWED" if allow_paper else "❌ BLOCKED")
+        with sgcol3:
+            age = gate.get("observation_age_minutes")
+            st.metric("Observation Age", f"{age:.1f} minutes" if age is not None else "N/A")
+            
+        if not allow_paper:
+            st.error(f"⚠️ **Fail-Closed Gate Active:** Trading is blocked because: {gate.get('no_trade_reason') or 'No-trade reason unspecified.'}")
+            if gate.get("warnings"):
+                for w in gate["warnings"]:
+                    st.warning(f"Warning detail: {w}")
+        st.divider()
+
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Latest System Status")
@@ -1324,6 +1423,30 @@ if __name__ == "__main__":
         md_path = LEARNING_DIR / f"prediction_quality_report_{pq_data['trade_date']}.md"
         pq_md = load_text(md_path)
 
+    # Assess Weather Gate Freshness
+    from weather.nws_snapshot_contract import assess_nws_snapshot
+    weather_gate = None
+    if isinstance(w_data_status, dict) and "weather_gate" in w_data_status:
+        weather_gate = w_data_status["weather_gate"]
+    else:
+        try:
+            weather_gate = assess_nws_snapshot(n_data)
+        except Exception as e:
+            weather_gate = {
+                "available": False,
+                "allow_paper_recommendations": False,
+                "status": "ERROR",
+                "no_trade_reason": f"Assessment failed: {e}",
+                "warnings": [f"Assessment failed: {e}"],
+                "latest_observation_time": None,
+                "fetched_at_utc": None,
+                "observation_age_minutes": None
+            }
+
+    # Render prominent top-level error/warning banner if recommendations are blocked
+    if weather_gate and not weather_gate.get("allow_paper_recommendations", True):
+        st.error(f"🔴 **CRITICAL SAFETY GATING ACTIVE:** Trading recommendations are actively blocked because the NWS weather snapshot is invalid, stale, or missing.\n\n**Reason:** {weather_gate.get('no_trade_reason') or 'No-trade reason unspecified.'}")
+
     # --- STATE DERIVATION ---
     app_state = {
         "system_status": "GREEN",
@@ -1335,6 +1458,7 @@ if __name__ == "__main__":
         "nws_live": "❌ MISSING",
         "latest_nws_path": latest_nws_path,
         "n_data": n_data,
+        "weather_gate": weather_gate,
         "kalshi_status": "MISSING",
         "kalshi_last_upd": "N/A",
         "paper_loop_status": "Active" if p_data else "Missing Data",
@@ -1381,9 +1505,12 @@ if __name__ == "__main__":
         app_state["action_needed"] = "Run: bash scripts/update_kalshi_market_data.sh"
 
     # Evaluate System Health combined
-    if not latest_status_json or not latest_forecast_md or (w_data_status and w_data_status.get("is_stale")) or (n_data and n_data.get("stale_data")):
+    if not latest_status_json or not latest_forecast_md or (w_data_status and w_data_status.get("is_stale")) or (n_data and n_data.get("stale_data")) or (weather_gate and not weather_gate.get("allow_paper_recommendations", True)):
         app_state["system_status"] = "YELLOW"
-        app_state["action_needed"] = "Review missing files or stale weather data."
+        reason = "Review missing files or stale weather data."
+        if weather_gate and not weather_gate.get("allow_paper_recommendations", True):
+            reason = f"NWS Weather Gate blocked recommendations: {weather_gate.get('no_trade_reason')}"
+        app_state["action_needed"] = reason
 
     # Forecast extraction
     status_data = load_json(latest_status_json) if latest_status_json else None
@@ -1429,6 +1556,27 @@ if __name__ == "__main__":
     st.sidebar.metric("Station", "KMIA")
     st.sidebar.metric("Mode", "Paper Evaluation")
 
+    st.sidebar.subheader("🔌 Data Ingestion & Gates")
+    if weather_gate:
+        g_status = weather_gate.get("status", "UNKNOWN")
+        g_emoji = {"OK": "🟢", "STALE": "🟡", "ERROR": "🔴", "MISSING": "⚪"}.get(g_status, "❓")
+        st.sidebar.markdown(f"**NWS Gate Status:** {g_emoji} `{g_status}`")
+        
+        allow_recommendations = weather_gate.get("allow_paper_recommendations", False)
+        allow_str = "✅ ALLOWED" if allow_recommendations else "❌ BLOCKED"
+        st.sidebar.markdown(f"**Trading:** `{allow_str}`")
+        
+        age = weather_gate.get("observation_age_minutes")
+        age_str = f"{age:.1f}m" if age is not None else "N/A"
+        st.sidebar.markdown(f"**Obs Age:** `{age_str}`")
+        
+        if weather_gate.get("warnings"):
+            st.sidebar.warning(f"⚠️ {len(weather_gate['warnings'])} warnings active.")
+    else:
+        st.sidebar.markdown("**NWS Gate Status:** ⚪ `UNKNOWN`")
+    
+    st.sidebar.divider()
+
     if latest_status_json:
         st.sidebar.success("✅ Status File Found")
     else:
@@ -1465,7 +1613,7 @@ if __name__ == "__main__":
         render_active_forecasts(p_data)
         
     with tabs[3]:
-        render_paper_trading(perf, settlements, trades)
+        render_paper_trading(perf, settlements, trades, app_state=app_state)
         
     with tabs[4]:
         render_weather_nws(w_data, n_data)

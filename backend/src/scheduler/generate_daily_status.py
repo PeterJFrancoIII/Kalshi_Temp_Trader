@@ -12,7 +12,8 @@ from shared.artifact_paths import (
     PAPER_TRADING_DIR,
     LATEST_PAPER_SIGNAL,
     PAPER_LEDGER_FILE,
-    AGGREGATE_CALIBRATION_JSON
+    AGGREGATE_CALIBRATION_JSON,
+    LATEST_NWS_KMIA_SNAPSHOT
 )
 
 def get_latest_file(pattern: str) -> Optional[str]:
@@ -67,7 +68,37 @@ def get_daily_status():
     if os.path.exists(AGGREGATE_CALIBRATION_JSON):
         with open(AGGREGATE_CALIBRATION_JSON, 'r') as f:
             status["calibration"] = json.load(f)
+
+    # 3b. Load and assess NWS snapshot
+    from weather.nws_snapshot_contract import assess_nws_snapshot
+    nws_data = None
+    if os.path.exists(LATEST_NWS_KMIA_SNAPSHOT):
+        try:
+            with open(LATEST_NWS_KMIA_SNAPSHOT, 'r') as f:
+                nws_data = json.load(f)
+        except Exception as e:
+            status["warnings"].append(f"Failed to load NWS snapshot JSON from {LATEST_NWS_KMIA_SNAPSHOT}: {e}")
             
+    try:
+        weather_gate = assess_nws_snapshot(nws_data)
+    except Exception as e:
+        status["warnings"].append(f"Failed to assess NWS snapshot: {e}")
+        weather_gate = {
+            "available": False,
+            "allow_paper_recommendations": False,
+            "status": "ERROR",
+            "no_trade_reason": f"Assessment failed: {e}",
+            "warnings": [f"Assessment failed: {e}"],
+            "latest_observation_time": None,
+            "fetched_at_utc": None,
+            "observation_age_minutes": None
+        }
+
+    status["weather_gate"] = weather_gate
+    
+    if weather_gate.get("warnings"):
+        status["warnings"].extend(weather_gate["warnings"])
+        
     # 4. Workflow Log
     log_pattern = os.path.join(LOGS_DIR, f"kmia_daily_workflow_{today}.log")
     latest_log = get_latest_file(log_pattern)
@@ -117,6 +148,16 @@ def write_markdown_status(status: Dict):
     v2_brier = cal.get("v2_avg_brier", "N/A")
     settled = cal.get("settled_days", 0)
     
+    # Weather freshness details
+    gate = status.get("weather_gate", {})
+    gate_status = gate.get("status", "UNKNOWN")
+    gate_emoji = {"OK": "🟢", "STALE": "🟡", "ERROR": "🔴", "MISSING": "⚪"}.get(gate_status, "❓")
+    allow_recommendations = gate.get("allow_paper_recommendations", False)
+    allow_emoji = "✅ ALLOWED" if allow_recommendations else "❌ BLOCKED"
+    
+    age = gate.get("observation_age_minutes")
+    age_str = f"{age:.1f} minutes" if age is not None else "N/A"
+    
     md = [
         f"# KMIA Daily Status Report - {today}",
         f"**Generated:** {status['timestamp']}",
@@ -126,6 +167,22 @@ def write_markdown_status(status: Dict):
         "- Read-only Kalshi integration verified.",
         "- No real trading execution code found.",
         "- No real trading execution is implemented.",
+        "",
+        "### 🌤️ Weather Freshness (NWS Gate)",
+        f"- **Gate Status:** {gate_emoji} {gate_status}",
+        f"- **Allowance Status:** {allow_emoji}",
+        f"- **No-Trade Reason:** {gate.get('no_trade_reason') or 'None'}",
+        f"- **Observation Age:** {age_str}",
+        f"- **Latest Observation Time:** {gate.get('latest_observation_time') or 'N/A'}",
+        f"- **Fetched At Time (UTC):** {gate.get('fetched_at_utc') or 'N/A'}"
+    ]
+    
+    if gate.get("warnings"):
+        md.append("- **Gate Warnings:**")
+        for w in gate["warnings"]:
+            md.append(f"  - {w}")
+            
+    md.extend([
         "",
         "## 📈 Latest Outputs",
         f"- **Rules V1 Forecast:** {status['forecasts'].get('v1', 'None')}",
@@ -143,7 +200,7 @@ def write_markdown_status(status: Dict):
         f"- **Paper Trading Available:** {status['paper_trading']['available']}",
         f"- **Paper Trading Records:** {status['paper_trading']['record_count']}",
         ""
-    ]
+    ])
     
     if status["warnings"]:
         md.append("## ⚠️ Warnings")

@@ -120,7 +120,7 @@ class TestKalshiContractMapper(unittest.TestCase):
         from pathlib import Path
 
         # We need a dummy snapshot file
-        snapshot_path = Path("backend/tests/dummy_snapshot.json")
+        snapshot_path = Path(__file__).parent / "dummy_snapshot.json"
         with open(snapshot_path, "w") as f:
             json.dump({"markets": [m1, m2]}, f)
             

@@ -64,6 +64,31 @@ class TestPaperSignalGenerator(unittest.TestCase):
         if self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
 
+    def _create_valid_nws_snapshot(self, path, date_str, obs_time_str="11:30:00+00:00", fetched_time_str="12:00:00+00:00"):
+        nws_data = {
+            "station": "KMIA",
+            "fetched_at_utc": f"{date_str}T{fetched_time_str}",
+            "latest_observation_time": f"{date_str}T{obs_time_str}",
+            "current_temp_f": 85.0,
+            "observed_max_so_far_f": 85.0,
+            "forecast_high_f": 85.0,
+            "recent_observations_table": [
+                {
+                    "timestamp_utc": f"{date_str}T{obs_time_str}",
+                    "temperature_f": 85.0
+                }
+            ],
+            "stale_data": False,
+            "stale_fallback": False,
+            "endpoint_status": "OK",
+            "safety": {
+                "no_real_trading": True
+            }
+        }
+        with open(path, "w") as f:
+            json.dump(nws_data, f)
+        return nws_data
+
     def test_parse_forecast_bins(self):
         temp_md = self.temp_dir / "test_forecast.md"
         temp_md.write_text("""
@@ -110,11 +135,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
 
         # 3. Create fresh NWS snapshot
         nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
-        nws_data = {
-            "latest_observation_time": "2026-05-07T11:00:00Z"
-        }
-        with open(nws_path, "w") as f:
-            json.dump(nws_data, f)
+        self._create_valid_nws_snapshot(nws_path, "2026-05-07")
         sg.NWS_SNAPSHOT_FILE = nws_path
 
         # Mock prediction date to May 7
@@ -164,8 +185,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
 
         # 3. Create NWS snapshot
         nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
-        with open(nws_path, "w") as f:
-            json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
+        self._create_valid_nws_snapshot(nws_path, "2026-05-07")
         sg.NWS_SNAPSHOT_FILE = nws_path
         
         # Mock prediction date to May 7
@@ -271,8 +291,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
             json.dump(snapshot_data, f)
 
         nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
-        with open(nws_path, "w") as f:
-            json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
+        self._create_valid_nws_snapshot(nws_path, "2026-05-07")
         sg.NWS_SNAPSHOT_FILE = nws_path
         
         # Mock prediction date to May 7
@@ -316,8 +335,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
             json.dump(snapshot_data, f)
 
         nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
-        with open(nws_path, "w") as f:
-            json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
+        self._create_valid_nws_snapshot(nws_path, "2026-05-07")
         sg.NWS_SNAPSHOT_FILE = nws_path
         
         # Mock prediction date to May 7
@@ -373,8 +391,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
             json.dump(snapshot_data, f)
     
         nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
-        with open(nws_path, "w") as f:
-            json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
+        self._create_valid_nws_snapshot(nws_path, "2026-05-07")
         sg.NWS_SNAPSHOT_FILE = nws_path
     
         # Mock prediction date to May 7
@@ -437,8 +454,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
             json.dump(snapshot_data, f)
 
         nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
-        with open(nws_path, "w") as f:
-            json.dump({"latest_observation_time": "2026-05-08T12:00:00Z"}, f)
+        self._create_valid_nws_snapshot(nws_path, "2026-05-08")
         sg.NWS_SNAPSHOT_FILE = nws_path
 
         test_now = datetime(2026, 5, 8, 12, 0, 0, tzinfo=timezone.utc)
@@ -493,8 +509,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
             json.dump(snapshot_data, f)
             
         nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
-        with open(nws_path, "w") as f:
-            json.dump({"latest_observation_time": "2026-05-14T21:00:00Z"}, f)
+        self._create_valid_nws_snapshot(nws_path, "2026-05-15", obs_time_str="00:30:00+00:00", fetched_time_str="01:00:00+00:00")
         sg.NWS_SNAPSHOT_FILE = nws_path
         
         # Prediction timestamp is May 15 01:00 UTC
@@ -569,8 +584,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
             json.dump(snapshot_data, f)
 
         nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
-        with open(nws_path, "w") as f:
-            json.dump({"latest_observation_time": "2026-05-09T12:00:00Z"}, f)
+        self._create_valid_nws_snapshot(nws_path, "2026-05-09")
         sg.NWS_SNAPSHOT_FILE = nws_path
 
         test_now = datetime(2026, 5, 9, 12, 0, 0, tzinfo=timezone.utc)
@@ -625,8 +639,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
             json.dump(snapshot_data, f)
 
         nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
-        with open(nws_path, "w") as f:
-            json.dump({"latest_observation_time": "2026-05-07T12:00:00Z"}, f)
+        self._create_valid_nws_snapshot(nws_path, "2026-05-07")
         sg.NWS_SNAPSHOT_FILE = nws_path
 
         test_now = datetime(2026, 5, 7, 12, 0, 0, tzinfo=timezone.utc)
@@ -701,8 +714,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
 
         # 4. Mock NWS
         nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
-        with open(nws_path, "w") as f:
-            json.dump({"latest_observation_time": "2026-05-15T12:00:00Z"}, f)
+        self._create_valid_nws_snapshot(nws_path, "2026-05-15")
         sg.NWS_SNAPSHOT_FILE = nws_path
         
         test_now = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
@@ -757,8 +769,7 @@ class TestPaperSignalGenerator(unittest.TestCase):
         sg.LATEST_KALSHI_ORDERBOOKS = self.temp_dir / "non_existent_ob.json"
 
         nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
-        with open(nws_path, "w") as f:
-            json.dump({"latest_observation_time": "2026-05-15T12:00:00Z"}, f)
+        self._create_valid_nws_snapshot(nws_path, "2026-05-15")
         sg.NWS_SNAPSHOT_FILE = nws_path
         
         test_now = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
@@ -777,6 +788,136 @@ class TestPaperSignalGenerator(unittest.TestCase):
             
         # ASSERT: Used snapshot price 0.45
         self.assertEqual(report["signals"][0]["yes_ask"], 0.45)
+
+    def test_missing_nws_snapshot_blocks_recommendations(self):
+        """Verify that a missing NWS snapshot file completely blocks paper recommendations."""
+        import paper_trading.signal_generator as sg
+        
+        forecast_path = self.temp_dir / "kmia_forecast_2026-05-15_rules_v2_climatology_120000.json"
+        forecast_data = {
+            "date": "2026-05-15",
+            "probability_bins": {">=93": 0.95},
+            "generated_at_utc": "2026-05-15T12:00:00Z"
+        }
+        with open(forecast_path, "w") as f:
+            json.dump(forecast_data, f)
+            
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_data = {
+            "generated_at_utc": "2026-05-15T12:00:00Z",
+            "selected_temperature_markets": [
+                {
+                    "ticker": "KXHIGHMIA-26MAY15-T93",
+                    "title": "Will KMIA reach 93 or above?",
+                    "subtitle": "93 degrees or above",
+                    "yes_ask_dollars": 0.45,
+                    "status": "active"
+                }
+            ]
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot_data, f)
+            
+        # Point to a non-existent NWS snapshot
+        sg.NWS_SNAPSHOT_FILE = self.temp_dir / "does_not_exist_nws.json"
+        
+        test_now = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        
+        generate_paper_signal(
+            forecast_path=forecast_path,
+            snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        
+        with open(latest_path, "r") as f:
+            report = json.load(f)
+            
+        # Top-level fields
+        self.assertFalse(report["allow_paper_recommendations"])
+        self.assertEqual(report["weather_gate"]["allow_paper_recommendations"], False)
+        self.assertIn("missing or None", report["no_trade_reason"])
+        
+        # Per-signal fields
+        self.assertEqual(len(report["signals"]), 1)
+        sig = report["signals"][0]
+        self.assertEqual(sig["weather_gate_status"], "MISSING")
+        self.assertEqual(sig["risk_decision"], "BLOCK")
+        self.assertEqual(sig["paper_action"], "NO TRADE")
+        self.assertIn("missing or None", sig["no_trade_reason"])
+        
+        # Diagnostic fields preserved
+        self.assertEqual(sig["model_probability"], 0.95)
+        self.assertEqual(sig["yes_ask"], 0.45)
+        self.assertAlmostEqual(sig["edge"], 0.4827, places=4)
+
+    def test_stale_nws_snapshot_blocks_recommendations(self):
+        """Verify that a stale NWS snapshot file completely blocks paper recommendations."""
+        import paper_trading.signal_generator as sg
+        
+        forecast_path = self.temp_dir / "kmia_forecast_2026-05-15_rules_v2_climatology_120000.json"
+        forecast_data = {
+            "date": "2026-05-15",
+            "probability_bins": {">=93": 0.95},
+            "generated_at_utc": "2026-05-15T12:00:00Z"
+        }
+        with open(forecast_path, "w") as f:
+            json.dump(forecast_data, f)
+            
+        snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
+        snapshot_data = {
+            "generated_at_utc": "2026-05-15T12:00:00Z",
+            "selected_temperature_markets": [
+                {
+                    "ticker": "KXHIGHMIA-26MAY15-T93",
+                    "title": "Will KMIA reach 93 or above?",
+                    "subtitle": "93 degrees or above",
+                    "yes_ask_dollars": 0.45,
+                    "status": "active"
+                }
+            ]
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot_data, f)
+            
+        # Point to a STALE NWS snapshot (e.g. 3 hours old observation, past the limit)
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        self._create_valid_nws_snapshot(
+            nws_path, 
+            "2026-05-15", 
+            obs_time_str="09:00:00+00:00", 
+            fetched_time_str="09:05:00+00:00"
+        )
+        sg.NWS_SNAPSHOT_FILE = nws_path
+        
+        test_now = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        
+        generate_paper_signal(
+            forecast_path=forecast_path,
+            snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        
+        with open(latest_path, "r") as f:
+            report = json.load(f)
+            
+        # Top-level fields
+        self.assertFalse(report["allow_paper_recommendations"])
+        self.assertEqual(report["weather_gate"]["allow_paper_recommendations"], False)
+        self.assertIn("stale", report["no_trade_reason"].lower())
+        
+        # Per-signal fields
+        self.assertEqual(len(report["signals"]), 1)
+        sig = report["signals"][0]
+        self.assertEqual(sig["weather_gate_status"], "STALE")
+        self.assertEqual(sig["risk_decision"], "BLOCK")
+        self.assertEqual(sig["paper_action"], "NO TRADE")
+        self.assertIn("stale", sig["no_trade_reason"].lower())
 
 if __name__ == "__main__":
     unittest.main()
