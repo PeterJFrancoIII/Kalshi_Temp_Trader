@@ -121,6 +121,46 @@ def build_daily_status(
     elif gate_status in ("STALE", "MISSING") and system_status != "ERROR":
         system_status = "WARN"
 
+    # Extract paper trading signal details
+    paper_signal_path = None
+    try:
+        from shared.artifact_paths import LATEST_PAPER_SIGNAL
+        paper_signal_path = str(LATEST_PAPER_SIGNAL)
+    except ImportError:
+        pass
+
+    if not paper_signal_path:
+        pt_dir = paper_trading_dir or "backend/data/processed/paper_trading"
+        paper_signal_path = os.path.join(pt_dir, "latest_paper_signal.json")
+
+    best_sig_decision = "N/A"
+    best_sig_reason = "None"
+    best_sig_edge = "N/A"
+    has_paper_signal = False
+
+    if paper_signal_path and os.path.exists(paper_signal_path):
+        try:
+            with open(paper_signal_path, 'r') as f:
+                sig_data = json.load(f)
+                has_paper_signal = True
+                best_sig = sig_data.get("best_signal")
+                if best_sig:
+                    rd = best_sig.get("risk_decision")
+                    if isinstance(rd, dict):
+                        best_sig_decision = "PASS" if rd.get("passed", True) else "BLOCK"
+                        best_sig_reason = rd.get("no_trade_reason") or rd.get("reason") or "None"
+                    else:
+                        best_sig_decision = str(rd) if rd else "N/A"
+                        best_sig_reason = best_sig.get("no_trade_reason") or "None"
+                    
+                    edge_val = best_sig.get("edge")
+                    if edge_val is None:
+                        edge_val = best_sig.get("executable_edge")
+                    if edge_val is not None:
+                        best_sig_edge = f"{edge_val*100:.1f}%" if isinstance(edge_val, (int, float)) else str(edge_val)
+        except Exception as e:
+            warnings.append(f"Failed to parse latest paper signal: {e}")
+
     # Assemble status dictionary
     status = {
         "date": target_date,
@@ -144,8 +184,11 @@ def build_daily_status(
         },
         "workflow_log": log_info,
         "paper_trading": {
-            "available": False,
-            "summary": "not implemented or no records found"
+            "available": has_paper_signal,
+            "summary": "Paper signal generated successfully" if has_paper_signal else "no records found",
+            "best_signal_risk_decision": best_sig_decision,
+            "best_signal_no_trade_reason": best_sig_reason,
+            "best_signal_executable_edge": best_sig_edge
         },
         "safety": {
             "real_trading_enabled": False,
@@ -225,6 +268,9 @@ def format_status_as_markdown(status: dict) -> str:
         "## 🧪 Paper Trading",
         f"- **Available:** {status.get('paper_trading', {}).get('available', False)}",
         f"- **Summary:** {status.get('paper_trading', {}).get('summary', 'N/A')}",
+        f"- **Best Signal Risk Decision:** {status.get('paper_trading', {}).get('best_signal_risk_decision', 'N/A')}",
+        f"- **Best Signal No-Trade Reason:** {status.get('paper_trading', {}).get('best_signal_no_trade_reason', 'None')}",
+        f"- **Best Signal Executable Edge:** {status.get('paper_trading', {}).get('best_signal_executable_edge', 'N/A')}",
         ""
     ])
     

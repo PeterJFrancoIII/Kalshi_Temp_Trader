@@ -1,15 +1,69 @@
 import unittest
 from datetime import datetime, timezone, timedelta
-from src.trading.edge_engine import (
+from trading.edge_engine import (
     calculate_fee_adjusted_breakeven,
     calculate_slippage_adjusted_breakeven,
     calculate_expected_value,
     calculate_speed_to_roi,
-    calculate_edge
+    calculate_edge,
+    compute_edge
 )
 
 class TestEdgeEngine(unittest.TestCase):
     
+    def test_compute_edge_standard(self):
+        # model_probability = 0.60
+        # yes_ask = 0.50
+        # fee = 0.07 * 0.5 * 0.5 = 0.0175
+        # slippage = 0.01
+        # breakeven = 0.5275
+        # raw_edge = 0.60 - 0.50 = 0.10
+        # executable_edge = 0.60 - 0.5275 = 0.0725
+        res = compute_edge(
+            model_probability=0.60,
+            yes_ask=0.50,
+            yes_bid=0.48,
+            slippage_buffer=0.01
+        )
+        self.assertTrue(res["tradable"])
+        self.assertAlmostEqual(res["executable_price"], 0.50)
+        self.assertAlmostEqual(res["breakeven_probability"], 0.5275)
+        self.assertAlmostEqual(res["raw_edge"], 0.10)
+        self.assertAlmostEqual(res["executable_edge"], 0.0725)
+        self.assertAlmostEqual(res["fee_buffer"], 0.0175)
+        self.assertEqual(res["yes_bid"], 0.48)
+        self.assertEqual(res["warnings"], [])
+
+    def test_compute_edge_fallback(self):
+        # yes_ask is missing, last_price is 0.50
+        # should mark tradable = False
+        res = compute_edge(
+            model_probability=0.60,
+            last_price=0.50,
+            slippage_buffer=0.01
+        )
+        self.assertFalse(res["tradable"])
+        self.assertAlmostEqual(res["executable_price"], 0.50)
+        self.assertTrue(any("diagnostic" in w for w in res["warnings"]))
+
+    def test_compute_edge_missing_inputs(self):
+        # model_probability is None
+        res = compute_edge(
+            model_probability=None,
+            yes_ask=0.50
+        )
+        self.assertFalse(res["tradable"])
+        self.assertTrue(any("model_probability is None" in w for w in res["warnings"]))
+
+    def test_compute_edge_invalid_bounds(self):
+        # model_probability is out of bounds
+        res = compute_edge(
+            model_probability=1.5,
+            yes_ask=0.50
+        )
+        self.assertFalse(res["tradable"])
+        self.assertTrue(any("Invalid model_probability" in w for w in res["warnings"]))
+
     def test_calculate_fee_adjusted_breakeven(self):
         # Fee = 0.07 * p * (1 - p)
         # p = 0.50 => 0.07 * 0.5 * 0.5 = 0.0175

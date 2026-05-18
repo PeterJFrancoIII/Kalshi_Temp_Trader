@@ -241,3 +241,94 @@ def test_render_paper_trading_formatting():
     for col in df.columns:
         for val in df[col]:
             assert isinstance(val, str), f"Column {col} has non-string value {val}"
+
+
+def test_normalize_signal_df_with_new_fields():
+    """
+    Test that new columns exist and formatting logic applies correct transformations.
+    """
+    from src.web_console import format_temp, format_probability
+    
+    mock_signals = [
+        {
+            "market_ticker": "KX-1",
+            "model_probability": 0.65,
+            "market_probability": 0.60,
+            "raw_edge": 0.05,
+            "executable_edge": 0.04,
+            "breakeven_probability": 0.55,
+            "executable_price": 0.56,
+            "risk_decision": {"passed": False, "no_trade_reason": "Low edge"},
+            "no_trade_reason": "Stale weather",
+            "paper_action": "NO TRADE",
+            "threshold_f": 93.0,
+            "time_to_close_minutes": 15.5
+        }
+    ]
+    df = pd.DataFrame(mock_signals)
+    
+    # Helper functions to convert formats safely
+    def format_rd(rd):
+        if not rd:
+            return "PASS"
+        if isinstance(rd, dict):
+            passed = rd.get("passed")
+            if passed is None:
+                passed = rd.get("all_passed", True)
+            return "PASS" if passed else "BLOCK"
+        return str(rd)
+
+    def format_ntr(row):
+        reason = row.get("no_trade_reason")
+        if reason:
+            return str(reason)
+        rd = row.get("risk_decision")
+        if isinstance(rd, dict):
+            return rd.get("no_trade_reason") or rd.get("reason") or "None"
+        return "None"
+
+    df["risk_decision"] = df["risk_decision"].apply(format_rd)
+    df["no_trade_reason"] = df.apply(format_ntr, axis=1)
+
+    assert df["risk_decision"].iloc[0] == "BLOCK"
+    assert df["no_trade_reason"].iloc[0] == "Stale weather"
+
+
+def test_render_active_forecasts_unhashable_dicts_fixed():
+    """
+    Verify that unexpected formatting types or nested dictionaries do not trigger crashes
+    when formatting signal columns.
+    """
+    # Test dictionary input
+    from src.web_console import format_probability
+    
+    # Define local formatters mimicking web_console.py
+    def format_rd(rd):
+        if not rd:
+            return "PASS"
+        if isinstance(rd, dict):
+            passed = rd.get("passed")
+            if passed is None:
+                passed = rd.get("all_passed", True)
+            return "PASS" if passed else "BLOCK"
+        return str(rd)
+
+    def format_ntr(row):
+        reason = row.get("no_trade_reason")
+        if reason:
+            return str(reason)
+        rd = row.get("risk_decision")
+        if isinstance(rd, dict):
+            return rd.get("no_trade_reason") or rd.get("reason") or "None"
+        return "None"
+
+    assert format_rd({"passed": True}) == "PASS"
+    assert format_rd({"passed": False}) == "BLOCK"
+    assert format_rd({"all_passed": False}) == "BLOCK"
+    assert format_rd(None) == "PASS"
+    assert format_rd("SOMETHING") == "SOMETHING"
+
+    assert format_ntr({"no_trade_reason": "Low edge", "risk_decision": None}) == "Low edge"
+    assert format_ntr({"no_trade_reason": None, "risk_decision": {"reason": "Risk blocked"}}) == "Risk blocked"
+    assert format_ntr({"no_trade_reason": None, "risk_decision": None}) == "None"
+

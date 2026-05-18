@@ -346,3 +346,145 @@ def evaluate_risk_gates(
         return res
     
     return RiskDecision(True, "All risk gates passed.")
+
+def evaluate_risk_decision(
+    weather_gate: Optional[Dict[str, Any]] = None,
+    contract_probability: Optional[Dict[str, Any]] = None,
+    edge: Optional[Dict[str, Any]] = None,
+    manual_kill_switch: bool = False,
+    min_executable_edge: float = 0.05,
+    max_spread: float = 0.15,
+    near_boundary_risk: bool = False
+) -> dict:
+    """
+    Evaluates risk decisions using a fail-closed architecture.
+    """
+    gates_evaluated = {
+        "manual_kill_switch": "PASS",
+        "weather_gate": "PASS",
+        "contract_probability": "PASS",
+        "edge_tradable": "PASS",
+        "min_edge": "PASS",
+        "spread": "PASS",
+        "near_boundary_risk": "PASS"
+    }
+
+    # 1. Manual Kill Switch
+    if manual_kill_switch:
+        gates_evaluated["manual_kill_switch"] = "FAIL"
+        return {
+            "decision": "BLOCK",
+            "reason": "Manual kill switch activated",
+            "gates_evaluated": gates_evaluated
+        }
+
+    # 2. Weather Gate
+    if weather_gate is None:
+        gates_evaluated["weather_gate"] = "FAIL"
+        return {
+            "decision": "BLOCK",
+            "reason": "Weather gate data is missing",
+            "gates_evaluated": gates_evaluated
+        }
+    if not weather_gate.get("allow_paper_recommendations", False):
+        gates_evaluated["weather_gate"] = "FAIL"
+        reason = weather_gate.get("no_trade_reason") or "Weather gate does not allow paper recommendations"
+        return {
+            "decision": "BLOCK",
+            "reason": f"Blocked by weather gate: {reason}",
+            "gates_evaluated": gates_evaluated
+        }
+
+    # 3. Contract Probability
+    if contract_probability is None:
+        gates_evaluated["contract_probability"] = "FAIL"
+        return {
+            "decision": "BLOCK",
+            "reason": "Contract probability data is missing",
+            "gates_evaluated": gates_evaluated
+        }
+    if not contract_probability.get("tradable", False):
+        gates_evaluated["contract_probability"] = "FAIL"
+        return {
+            "decision": "BLOCK",
+            "reason": "Contract is marked not tradable in contract probability payload",
+            "gates_evaluated": gates_evaluated
+        }
+    if contract_probability.get("model_probability") is None:
+        gates_evaluated["contract_probability"] = "FAIL"
+        return {
+            "decision": "BLOCK",
+            "reason": "Model probability is missing in contract probability payload",
+            "gates_evaluated": gates_evaluated
+        }
+
+    # 4. Edge Existence and Tradability
+    if edge is None:
+        gates_evaluated["edge_tradable"] = "FAIL"
+        return {
+            "decision": "BLOCK",
+            "reason": "Edge payload is missing",
+            "gates_evaluated": gates_evaluated
+        }
+    if not edge.get("tradable", False):
+        gates_evaluated["edge_tradable"] = "FAIL"
+        reason = ", ".join(edge.get("warnings", [])) or "Edge is marked not tradable"
+        return {
+            "decision": "BLOCK",
+            "reason": f"Edge is not tradable: {reason}",
+            "gates_evaluated": gates_evaluated
+        }
+
+    # 5. Executable Edge Threshold
+    exec_edge = edge.get("executable_edge")
+    if exec_edge is None:
+        gates_evaluated["min_edge"] = "FAIL"
+        return {
+            "decision": "BLOCK",
+            "reason": "executable_edge missing from edge payload",
+            "gates_evaluated": gates_evaluated
+        }
+    if exec_edge < min_executable_edge:
+        gates_evaluated["min_edge"] = "FAIL"
+        return {
+            "decision": "BLOCK",
+            "reason": f"Executable edge ({exec_edge:.4f}) is below minimum threshold ({min_executable_edge:.4f})",
+            "gates_evaluated": gates_evaluated
+        }
+
+    # 6. Spread Too Wide or Crossed
+    yes_ask = edge.get("yes_ask") if edge.get("yes_ask") is not None else contract_probability.get("yes_ask")
+    yes_bid = edge.get("yes_bid") if edge.get("yes_bid") is not None else contract_probability.get("yes_bid")
+
+    if yes_ask is not None and yes_bid is not None:
+        if yes_bid >= yes_ask:
+            gates_evaluated["spread"] = "FAIL"
+            return {
+                "decision": "BLOCK",
+                "reason": f"Crossed or zero-spread market: bid ({yes_bid:.4f}) >= ask ({yes_ask:.4f})",
+                "gates_evaluated": gates_evaluated
+            }
+        spread = yes_ask - yes_bid
+        if spread > max_spread:
+            gates_evaluated["spread"] = "FAIL"
+            return {
+                "decision": "BLOCK",
+                "reason": f"Bid-ask spread too wide ({spread:.4f} > {max_spread:.4f})",
+                "gates_evaluated": gates_evaluated
+            }
+
+    # 7. Near Boundary Risk
+    if near_boundary_risk:
+        gates_evaluated["near_boundary_risk"] = "FAIL"
+        return {
+            "decision": "BLOCK",
+            "reason": "Blocked by near boundary risk",
+            "gates_evaluated": gates_evaluated
+        }
+
+    return {
+        "decision": "ALLOW",
+        "reason": "All risk gates passed.",
+        "gates_evaluated": gates_evaluated
+    }
+

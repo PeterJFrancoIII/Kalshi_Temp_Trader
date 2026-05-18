@@ -21,9 +21,11 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
     
     res = {
         "ticker": ticker,
+        "market_ticker": ticker,
         "event_ticker": market.get("event_ticker"),
         "condition_type": "unknown",
         "contract_range": None,
+        "contract_range_label": None,
         "lower_inclusive": None,
         "upper_inclusive": None,
         "threshold_f": None,
@@ -32,20 +34,39 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
         "yes_ask": market.get("yes_ask_dollars") or (market.get("yes_ask") / 100.0 if market.get("yes_ask") is not None else None),
         "close_time": market.get("close_time"),
         "fallback_used": False,
-        "parse_warnings": []
+        "uncertain": False,
+        "parse_warnings": [],
+        "warnings": []
     }
     
+    # 0. Extract threshold/type from ticker suffix if present
+    ticker_thresh = None
+    ticker_type = None  # "T" or "B"
+    if "-B" in ticker:
+        ticker_match = re.search(r"-B(\d+(?:\.\d+)?)", ticker)
+        if ticker_match:
+            ticker_thresh = float(ticker_match.group(1))
+            ticker_type = "B"
+    elif "-T" in ticker:
+        ticker_match = re.search(r"-T(\d+(?:\.\d+)?)", ticker)
+        if ticker_match:
+            ticker_thresh = float(ticker_match.group(1))
+            ticker_type = "T"
+            
     # 1. Use structured fields if available
+    structured_parsed = False
     if strike_type == "greater" and market.get("floor_strike") is not None:
         res["condition_type"] = "above"
         res["threshold_f"] = float(market["floor_strike"])
         res["lower_inclusive"] = False # Kalshi "greater" usually means strict >
         res["contract_range"] = f">{res['threshold_f']}"
+        structured_parsed = True
     elif strike_type == "less" and market.get("cap_strike") is not None:
         res["condition_type"] = "below"
         res["threshold_f"] = float(market["cap_strike"])
         res["upper_inclusive"] = False # Kalshi "less" usually means strict <
         res["contract_range"] = f"<{res['threshold_f']}"
+        structured_parsed = True
     elif strike_type == "between" and market.get("floor_strike") is not None and market.get("cap_strike") is not None:
         res["condition_type"] = "between"
         res["threshold_f"] = float(market["floor_strike"])
@@ -53,13 +74,23 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
         res["lower_inclusive"] = True
         res["upper_inclusive"] = True
         res["contract_range"] = f"{res['threshold_f']}-{res['range_high_f']}"
-    
-    # 2. Regex fallback if structured fields failed or for validation
+        structured_parsed = True
+        
+    # 2. Regex fallback if structured fields failed
     if res["condition_type"] == "unknown":
         text = f"{title} {subtitle}".strip().lower().replace("\u00b0", "deg")
         
-        # Range/Between: "90-91", "90 to 91"
-        range_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:to|-|and)\s*(\d+(?:\.\d+)?)", text)
+        # Range/Between: "90-91", "90 to 91", "90 and 91", "91 or 92", "91/92"
+        range_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:to|-|and|or|and/or|/)\s*(\d+(?:\.\d+)?)", text)
+        
+        above_match_1 = re.search(r"(\d+(?:\.\d+)?)\s*or\s*(?:above|greater)", text)
+        above_match_2 = re.search(r"(?:above|greater\s+than|>=|>)\s*(\d+(?:\.\d+)?)", text)
+        above_match = above_match_1 or above_match_2
+        
+        below_match_1 = re.search(r"(\d+(?:\.\d+)?)\s*or\s*(?:below|less)", text)
+        below_match_2 = re.search(r"(?:below|less\s+than|<=|<)\s*(\d+(?:\.\d+)?)", text)
+        below_match = below_match_1 or below_match_2
+        
         if range_match:
             res["condition_type"] = "between"
             res["threshold_f"] = float(range_match.group(1))
@@ -67,52 +98,116 @@ def extract_contract_thresholds(market: Dict[str, Any]) -> Dict[str, Any]:
             res["lower_inclusive"] = True
             res["upper_inclusive"] = True
             res["contract_range"] = f"{res['threshold_f']}-{res['range_high_f']}"
-        
-        # Above: ">91", "91 or above", "above 91", ">=95"
-        elif re.search(r"(\d+(?:\.\d+)?)\s*or\s*above", text) or re.search(r"(?:above\s+|>=|>|>\s*)(\d+(?:\.\d+)?)", text):
-            match = re.search(r"(\d+(?:\.\d+)?)\s*or\s*above", text) or re.search(r"(?:above\s+|>=|>|>\s*)(\d+(?:\.\d+)?)", text)
+        elif above_match and below_match:
+            res["condition_type"] = "unknown"
+            res["uncertain"] = True
+            res["parse_warnings"].append("Conflicting above and below patterns in text")
+        elif above_match:
             res["condition_type"] = "above"
-            val = float(match.group(1))
+            val = float(above_match.group(1))
             res["threshold_f"] = val
-            if "or above" in text or ">=" in text:
+            if "or above" in text or "or greater" in text or ">=" in text:
                 res["lower_inclusive"] = True
                 res["contract_range"] = f">={val}"
             else:
                 res["lower_inclusive"] = False
                 res["contract_range"] = f">{val}"
-                
-        # Below: "<84", "84 or below", "below 84", "<=89"
-        elif re.search(r"(\d+(?:\.\d+)?)\s*or\s*below", text) or re.search(r"(?:below\s+|<=|<|<\s*)(\d+(?:\.\d+)?)", text):
-            match = re.search(r"(\d+(?:\.\d+)?)\s*or\s*below", text) or re.search(r"(?:below\s+|<=|<|<\s*)(\d+(?:\.\d+)?)", text)
+        elif below_match:
             res["condition_type"] = "below"
-            val = float(match.group(1))
+            val = float(below_match.group(1))
             res["threshold_f"] = val
-            if "or below" in text or "<=" in text:
+            if "or below" in text or "or less" in text or "<=" in text:
                 res["upper_inclusive"] = True
                 res["contract_range"] = f"<={val}"
             else:
                 res["upper_inclusive"] = False
                 res["contract_range"] = f"<{val}"
+        else:
+            # Check if text contains any numbers
+            all_numbers = re.findall(r"\d+(?:\.\d+)?", text)
+            if all_numbers:
+                res["condition_type"] = "unknown"
+                res["uncertain"] = True
+                res["parse_warnings"].append(f"Numbers found in text ({all_numbers}) but no recognized condition pattern")
 
     # 3. Ticker fallback
-    if res["condition_type"] == "unknown":
-        if "-B" in ticker:
-            ticker_match = re.search(r"-B(\d+(?:\.\d+)?)", ticker)
-            if ticker_match:
-                res["condition_type"] = "above"
-                res["threshold_f"] = float(ticker_match.group(1))
-                res["lower_inclusive"] = False # Ticker B usually denotes boundary, assumed strict >
-                res["contract_range"] = f">{res['threshold_f']}"
-        elif "-T" in ticker:
-            ticker_match = re.search(r"-T(\d+(?:\.\d+)?)", ticker)
-            if ticker_match:
-                # Extract threshold but do NOT infer direction (above/below) from T suffix alone.
-                # Leave condition_type as "unknown" for second-pass fallback in parse_kalshi_markets.
-                res["threshold_f"] = float(ticker_match.group(1))
+    if res["condition_type"] == "unknown" and not res["uncertain"]:
+        if ticker_type == "B" and ticker_thresh is not None:
+            res["condition_type"] = "above"
+            res["threshold_f"] = ticker_thresh
+            res["lower_inclusive"] = False # Ticker B usually denotes boundary, assumed strict >
+            res["contract_range"] = f">{res['threshold_f']}"
+        elif ticker_type == "T" and ticker_thresh is not None:
+            # Extract threshold but do NOT infer direction (above/below) from T suffix alone.
+            # Leave condition_type as "unknown" for second-pass fallback in parse_kalshi_markets.
+            res["threshold_f"] = ticker_thresh
+
+    # 4. Validation / Conflict checking
+    if res["condition_type"] != "unknown":
+        text = f"{title} {subtitle}".strip().lower().replace("\u00b0", "deg")
+        range_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:to|-|and)\s*(\d+(?:\.\d+)?)", text)
+        above_match_1 = re.search(r"(\d+(?:\.\d+)?)\s*or\s*(?:above|greater)", text)
+        above_match_2 = re.search(r"(?:above|greater\s+than|>=|>)\s*(\d+(?:\.\d+)?)", text)
+        above_match = above_match_1 or above_match_2
+        below_match_1 = re.search(r"(\d+(?:\.\d+)?)\s*or\s*(?:below|less)", text)
+        below_match_2 = re.search(r"(?:below|less\s+than|<=|<)\s*(\d+(?:\.\d+)?)", text)
+        below_match = below_match_1 or below_match_2
+        
+        conflict = False
+        conflict_reason = ""
+        
+        # Check condition conflicts
+        if res["condition_type"] == "above":
+            if below_match and not above_match:
+                conflict = True
+                conflict_reason = "Parsed/structured says above, but text says below"
+            elif range_match:
+                conflict = True
+                conflict_reason = "Parsed/structured says above, but text says range/between"
+        elif res["condition_type"] == "below":
+            if above_match and not below_match:
+                conflict = True
+                conflict_reason = "Parsed/structured says below, but text says above"
+            elif range_match:
+                conflict = True
+                conflict_reason = "Parsed/structured says below, but text says range/between"
+        elif res["condition_type"] == "between":
+            if (above_match or below_match) and not range_match:
+                conflict = True
+                conflict_reason = "Parsed/structured says between, but text does not have a range/between pattern"
+                
+        # Check threshold conflicts if text has numbers
+        if not conflict and res["threshold_f"] is not None:
+            text_numbers = [float(n) for n in re.findall(r"\d+(?:\.\d+)?", text)]
+            if text_numbers:
+                if res["condition_type"] in ("above", "below"):
+                    if res["threshold_f"] not in text_numbers:
+                        if not any(abs(res["threshold_f"] - tn) < 0.01 for tn in text_numbers):
+                            conflict = True
+                            conflict_reason = f"Parsed threshold {res['threshold_f']} does not match any numbers in text {text_numbers}"
+                elif res["condition_type"] == "between" and res["range_high_f"] is not None:
+                    if res["threshold_f"] not in text_numbers or res["range_high_f"] not in text_numbers:
+                        if not (any(abs(res["threshold_f"] - tn) < 0.01 for tn in text_numbers) and any(abs(res["range_high_f"] - tn) < 0.01 for tn in text_numbers)):
+                            conflict = True
+                            conflict_reason = f"Parsed range {res['threshold_f']}-{res['range_high_f']} does not match numbers in text {text_numbers}"
+                            
+        # Check ticker conflicts
+        if not conflict and ticker_thresh is not None and res["condition_type"] in ("above", "below"):
+            if res["threshold_f"] is not None and abs(res["threshold_f"] - ticker_thresh) > 0.01:
+                conflict = True
+                conflict_reason = f"Parsed threshold {res['threshold_f']} does not match ticker threshold {ticker_thresh}"
+                
+        if conflict:
+            res["condition_type"] = "unknown"
+            res["uncertain"] = True
+            res["parse_warnings"].append(f"Ambiguous or conflicting contract data: {conflict_reason}")
 
     if res["condition_type"] == "unknown":
+        res["uncertain"] = True
         res["parse_warnings"].append(f"Could not determine condition for ticker {ticker}")
         
+    res["contract_range_label"] = mapping_to_bin_string(res) or "unknown"
+    res["warnings"] = res["parse_warnings"]
     return res
 
 def bin_string_to_range(bin_str: str) -> tuple[int, int]:
@@ -268,7 +363,10 @@ def apply_parsing_fallbacks(markets: List[Dict[str, Any]]) -> List[Dict[str, Any
         mapping_low["upper_inclusive"] = False
         mapping_low["contract_range"] = f"<{mapping_low['threshold_f']}"
         mapping_low["fallback_used"] = True
+        mapping_low["uncertain"] = False
         mapping_low["parse_warnings"].append(f"Inferred direction 'below' as lowest T-contract in event {et}")
+        mapping_low["contract_range_label"] = mapping_to_bin_string(mapping_low) or "unknown"
+        mapping_low["warnings"] = mapping_low["parse_warnings"]
         
         # Re-generate contract_bin for the market
         lowest["contract_bin"] = market_to_contract_bin(lowest).model_dump()
@@ -281,7 +379,10 @@ def apply_parsing_fallbacks(markets: List[Dict[str, Any]]) -> List[Dict[str, Any
             mapping_high["lower_inclusive"] = False
             mapping_high["contract_range"] = f">{mapping_high['threshold_f']}"
             mapping_high["fallback_used"] = True
+            mapping_high["uncertain"] = False
             mapping_high["parse_warnings"].append(f"Inferred direction 'above' as highest T-contract in event {et}")
+            mapping_high["contract_range_label"] = mapping_to_bin_string(mapping_high) or "unknown"
+            mapping_high["warnings"] = mapping_high["parse_warnings"]
             
             # Re-generate contract_bin for the market
             highest["contract_bin"] = market_to_contract_bin(highest).model_dump()

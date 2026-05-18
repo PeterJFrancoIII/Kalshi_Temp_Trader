@@ -16,7 +16,8 @@ from risk.risk_engine import (
     check_weekly_drawdown_limit,
     check_market_concentration,
     check_forecast_integrity,
-    evaluate_risk_gates
+    evaluate_risk_gates,
+    evaluate_risk_decision
 )
 
 class TestRiskEngine(unittest.TestCase):
@@ -206,6 +207,108 @@ class TestRiskEngine(unittest.TestCase):
             contract_bins=[{"label": "83-84"}, {"label": "<=78"}, {"label": "79-80"}, {"label": "81-82"}, {"label": "85-86"}, {"label": ">=87"}]
         )
         self.assertTrue(decision.passed, f"Should pass but failed: {decision.reason}")
+
+    def test_evaluate_risk_decision_scenarios(self):
+        # 1. Standard PASS scenario
+        weather_gate = {"allow_paper_recommendations": True}
+        contract_probability = {"tradable": True, "model_probability": 0.65}
+        edge = {"tradable": True, "executable_edge": 0.08}
+        
+        res = evaluate_risk_decision(
+            weather_gate=weather_gate,
+            contract_probability=contract_probability,
+            edge=edge,
+            manual_kill_switch=False,
+            min_executable_edge=0.05,
+            max_spread=0.15,
+            near_boundary_risk=False
+        )
+        self.assertEqual(res["decision"], "ALLOW")
+        self.assertEqual(res["gates_evaluated"]["manual_kill_switch"], "PASS")
+        self.assertEqual(res["gates_evaluated"]["weather_gate"], "PASS")
+
+        # 2. Kill switch blocks
+        res_kill = evaluate_risk_decision(
+            weather_gate=weather_gate,
+            contract_probability=contract_probability,
+            edge=edge,
+            manual_kill_switch=True
+        )
+        self.assertEqual(res_kill["decision"], "BLOCK")
+        self.assertEqual(res_kill["gates_evaluated"]["manual_kill_switch"], "FAIL")
+
+        # 3. Weather gate blocks
+        weather_gate_blocks = {"allow_paper_recommendations": False, "no_trade_reason": "Stale NWS"}
+        res_weather = evaluate_risk_decision(
+            weather_gate=weather_gate_blocks,
+            contract_probability=contract_probability,
+            edge=edge
+        )
+        self.assertEqual(res_weather["decision"], "BLOCK")
+        self.assertEqual(res_weather["gates_evaluated"]["weather_gate"], "FAIL")
+        self.assertIn("Stale NWS", res_weather["reason"])
+
+        # 4. Missing edge blocks
+        res_missing_edge = evaluate_risk_decision(
+            weather_gate=weather_gate,
+            contract_probability=contract_probability,
+            edge=None
+        )
+        self.assertEqual(res_missing_edge["decision"], "BLOCK")
+        self.assertEqual(res_missing_edge["gates_evaluated"]["edge_tradable"], "FAIL")
+
+        # 5. Non-tradable edge blocks
+        edge_non_tradable = {"tradable": False, "warnings": ["yes_ask missing"]}
+        res_non_tradable = evaluate_risk_decision(
+            weather_gate=weather_gate,
+            contract_probability=contract_probability,
+            edge=edge_non_tradable
+        )
+        self.assertEqual(res_non_tradable["decision"], "BLOCK")
+        self.assertEqual(res_non_tradable["gates_evaluated"]["edge_tradable"], "FAIL")
+        self.assertIn("yes_ask missing", res_non_tradable["reason"])
+
+        # 6. Edge below minimum blocks
+        edge_low = {"tradable": True, "executable_edge": 0.03}
+        res_low = evaluate_risk_decision(
+            weather_gate=weather_gate,
+            contract_probability=contract_probability,
+            edge=edge_low,
+            min_executable_edge=0.05
+        )
+        self.assertEqual(res_low["decision"], "BLOCK")
+        self.assertEqual(res_low["gates_evaluated"]["min_edge"], "FAIL")
+
+        # 7. Spread too wide blocks
+        edge_wide = {"tradable": True, "executable_edge": 0.08, "yes_ask": 0.50, "yes_bid": 0.30}
+        res_wide = evaluate_risk_decision(
+            weather_gate=weather_gate,
+            contract_probability=contract_probability,
+            edge=edge_wide,
+            max_spread=0.15
+        )
+        self.assertEqual(res_wide["decision"], "BLOCK")
+        self.assertEqual(res_wide["gates_evaluated"]["spread"], "FAIL")
+
+        # 8. Crossed spread blocks
+        edge_crossed = {"tradable": True, "executable_edge": 0.08, "yes_ask": 0.50, "yes_bid": 0.55}
+        res_crossed = evaluate_risk_decision(
+            weather_gate=weather_gate,
+            contract_probability=contract_probability,
+            edge=edge_crossed
+        )
+        self.assertEqual(res_crossed["decision"], "BLOCK")
+        self.assertEqual(res_crossed["gates_evaluated"]["spread"], "FAIL")
+
+        # 9. Near boundary risk blocks
+        res_boundary = evaluate_risk_decision(
+            weather_gate=weather_gate,
+            contract_probability=contract_probability,
+            edge=edge,
+            near_boundary_risk=True
+        )
+        self.assertEqual(res_boundary["decision"], "BLOCK")
+        self.assertEqual(res_boundary["gates_evaluated"]["near_boundary_risk"], "FAIL")
 
 if __name__ == "__main__":
     unittest.main()

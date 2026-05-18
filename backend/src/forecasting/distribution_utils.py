@@ -282,3 +282,190 @@ def integer_dist_to_fixed_bins(
                 bins[label] += prob
                 break
     return {label: round(p, 6) for label, p in bins.items()}
+
+
+# ---------------------------------------------------------------------------
+# Canonical TemperatureDistribution artifact builders & validators
+# ---------------------------------------------------------------------------
+
+def build_integer_distribution_from_bins(
+    probability_bins: Dict[str, float],
+    observed_max_so_far_f: Optional[float] = None,
+    station: str = "KMIA",
+    target_date: Optional[str] = None,
+    forecast_as_of_time: Optional[str] = None,
+    source: str = "rules_v2_climatology",
+    confidence: Optional[str] = None,
+    warnings: Optional[List[str]] = None
+) -> dict:
+    """
+    Converts a legacy fixed-bin probability distribution into a canonical
+    integer Fahrenheit temperature probability distribution.
+
+    Legacy bins mapping support:
+    - <=78 spreads over [72, 78] (7 buckets)
+    - 79-80 maps to [79, 80] (2 buckets)
+    - 81-82 maps to [81, 82] (2 buckets)
+    - 83-84 maps to [83, 84] (2 buckets)
+    - 85-86 maps to [85, 86] (2 buckets)
+    - >=87 spreads over [87, 96] (10 buckets)
+
+    Probabilities are split equally among integer Fahrenheit keys within each support,
+    truncated below math.ceil(observed_max_so_far_f) if present, and renormalized.
+    """
+    local_warnings = list(warnings) if warnings is not None else []
+    # Provenance disclaimer
+    local_warnings.append("This distribution is derived from legacy fixed-bin mappings and is not dynamically calibrated at the integer level.")
+
+    # Standard expected bins
+    expected_bins = {"<=78", "79-80", "81-82", "83-84", "85-86", ">=87"}
+    input_bins = set(probability_bins.keys())
+
+    # Check for invalid bins
+    invalid_bins = input_bins - expected_bins
+    if invalid_bins:
+        local_warnings.append(f"Invalid bins found in probability_bins: {list(invalid_bins)}")
+
+    # Check for missing standard bins
+    missing_bins = expected_bins - input_bins
+    if missing_bins:
+        local_warnings.append(f"Missing standard bins in probability_bins: {list(missing_bins)}")
+
+    # Define bounded supports for the bins
+    bin_supports = {
+        "<=78": list(range(72, 79)),  # 72..78
+        "79-80": list(range(79, 81)),  # 79..80
+        "81-82": list(range(81, 83)),  # 81..82
+        "83-84": list(range(83, 85)),  # 83..84
+        "85-86": list(range(85, 87)),  # 85..86
+        ">=87": list(range(87, 97)),  # 87..96
+    }
+
+    # Initialize raw integer probabilities
+    raw_dist: Dict[int, float] = {t: 0.0 for t in range(72, 97)}
+
+    # Map legacy bins into integer temperature probabilities
+    for bin_name, support in bin_supports.items():
+        prob = probability_bins.get(bin_name, 0.0)
+        if prob > 0.0:
+            share = prob / len(support)
+            for t in support:
+                raw_dist[t] = raw_dist.get(t, 0.0) + share
+
+    # Truncate strictly below observed_max_so_far_f if provided
+    if observed_max_so_far_f is not None:
+        cutoff = math.ceil(observed_max_so_far_f)
+        for t in list(raw_dist.keys()):
+            if t < cutoff:
+                raw_dist[t] = 0.0
+
+    # Renormalize remaining probability mass
+    total_prob = sum(raw_dist.values())
+    integer_distribution: Dict[str, float] = {}
+    sum_probability = 0.0
+
+    if total_prob <= 0.0:
+        local_warnings.append("Truncation removed all probability mass")
+        integer_distribution = {str(t): 0.0 for t in sorted(raw_dist.keys())}
+        sum_probability = 0.0
+    else:
+        integer_distribution = {
+            str(t): round(p / total_prob, 6) for t, p in sorted(raw_dist.items())
+        }
+        sum_probability = round(sum(integer_distribution.values()), 6)
+
+    return {
+        "station": station,
+        "target_date": target_date,
+        "forecast_as_of_time": forecast_as_of_time,
+        "metric": "daily_max_temperature_f",
+        "source": source,
+        "confidence": confidence,
+        "integer_distribution": integer_distribution,
+        "observed_max_so_far_f": observed_max_so_far_f,
+        "warnings": local_warnings,
+        "sum_probability": sum_probability,
+        "schema_version": "1.0.0"
+    }
+
+
+def validate_temperature_distribution(distribution: dict) -> List[str]:
+    """
+    Validates a canonical TemperatureDistribution dictionary.
+
+    Returns a list of warning/error strings. If valid, the list will be empty.
+    """
+    errors: List[str] = []
+
+    if not isinstance(distribution, dict):
+        return ["Distribution must be a dictionary"]
+
+    # Check required keys
+    required_keys = {
+        "station", "target_date", "forecast_as_of_time", "metric",
+        "source", "confidence", "integer_distribution",
+        "observed_max_so_far_f", "warnings", "sum_probability", "schema_version"
+    }
+    for rk in required_keys:
+        if rk not in distribution:
+            errors.append(f"Missing required key: {rk}")
+
+    # If key missing, exit early to prevent KeyErrors
+    if errors:
+        return errors
+
+    # Check metric
+    if distribution["metric"] != "daily_max_temperature_f":
+        errors.append(f"Invalid metric: {distribution['metric']}")
+
+    # Check integer_distribution
+    int_dist = distribution["integer_distribution"]
+    if not isinstance(int_dist, dict):
+        errors.append("integer_distribution must be a dictionary")
+        return errors
+
+    # Validate keys and values in integer_distribution
+    dist_sum = 0.0
+    observed_max = distribution["observed_max_so_far_f"]
+    cutoff = math.ceil(observed_max) if observed_max is not None else None
+
+    for t_str, prob in int_dist.items():
+        if not isinstance(t_str, str):
+            errors.append(f"integer_distribution key must be string, got: {type(t_str)}")
+            continue
+
+        try:
+            t_int = int(t_str)
+        except ValueError:
+            errors.append(f"integer_distribution key must represent an integer, got: {t_str}")
+            continue
+
+        if not isinstance(prob, (int, float)):
+            errors.append(f"probability value for temp {t_str} must be numeric, got: {type(prob)}")
+            continue
+
+        if prob < 0.0:
+            errors.append(f"probability value for temp {t_str} cannot be negative: {prob}")
+
+        dist_sum += prob
+
+        # Check observed max constraint
+        if cutoff is not None and t_int < cutoff and prob > 0.0:
+            errors.append(f"Non-zero probability {prob} found for temperature {t_str} below observed max cutoff {cutoff}")
+
+    # Check sum probability consistency
+    reported_sum = distribution["sum_probability"]
+    if abs(dist_sum - reported_sum) > 1e-5:
+        errors.append(f"sum_probability {reported_sum} does not match actual sum of integer_distribution {dist_sum}")
+
+    # Check if sum is ~1.0 unless truncation warning is present
+    has_truncation_empty_warning = any("Truncation removed all probability mass" in w for w in distribution.get("warnings", []))
+    if not has_truncation_empty_warning:
+        if not (0.99 <= dist_sum <= 1.01):
+            errors.append(f"Total probability mass {dist_sum} is not close to 1.0")
+    else:
+        if dist_sum > 0.0:
+            errors.append(f"Truncation warning present but total probability is non-zero: {dist_sum}")
+
+    return errors
+

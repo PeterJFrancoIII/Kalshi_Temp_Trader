@@ -39,11 +39,20 @@ class TestDailyStatus(unittest.TestCase):
             self.assertIn("# KMIA Daily Status Report - 2026-01-01", content)
             self.assertIn("Test warning", content)
             
-        # Cleanup
         if os.path.exists(json_path):
             os.remove(json_path)
         if os.path.exists(md_path):
             os.remove(md_path)
 
+    def test_daily_status_gating_fields(self):
+        """Verify that get_daily_status output includes critical gating and safety metadata fields."""
+        status = get_daily_status()
+        self.assertIn("weather_gate", status)
+        self.assertIn("allow_paper_recommendations", status["weather_gate"])
+        self.assertIn("no_trade_reason", status["weather_gate"])
+        self.assertIn("status", status["weather_gate"])
+
+
 if __name__ == "__main__":
     unittest.main()
+

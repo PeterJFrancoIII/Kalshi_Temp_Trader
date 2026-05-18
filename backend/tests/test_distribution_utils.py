@@ -8,6 +8,8 @@ from forecasting.distribution_utils import (
     normalize_probability_mass,
     build_cdf,
     compute_percentile,
+    build_integer_distribution_from_bins,
+    validate_temperature_distribution,
 )
 
 
@@ -226,6 +228,106 @@ class TestDistributionUtils(unittest.TestCase):
         peak_clear = max(res_clear["integer_distribution"], key=res_clear["integer_distribution"].get)
         peak_storm = max(res_storm["integer_distribution"], key=res_storm["integer_distribution"].get)
         self.assertLess(peak_storm, peak_clear, "Thunderstorm should cool the distribution peak")
+
+
+class TestCanonicalDistributionArtifact(unittest.TestCase):
+
+    def setUp(self):
+        self.standard_bins = {
+            "<=78": 0.10,
+            "79-80": 0.15,
+            "81-82": 0.20,
+            "83-84": 0.25,
+            "85-86": 0.20,
+            ">=87": 0.10,
+        }
+
+    def test_build_integer_distribution_from_bins_normal(self):
+        dist = build_integer_distribution_from_bins(
+            probability_bins=self.standard_bins,
+            station="KMIA",
+            target_date="2026-05-18",
+            forecast_as_of_time="2026-05-18T12:00:00Z",
+            confidence="medium"
+        )
+        self.assertEqual(dist["station"], "KMIA")
+        self.assertEqual(dist["target_date"], "2026-05-18")
+        self.assertEqual(dist["forecast_as_of_time"], "2026-05-18T12:00:00Z")
+        self.assertEqual(dist["metric"], "daily_max_temperature_f")
+        self.assertEqual(dist["source"], "rules_v2_climatology")
+        self.assertEqual(dist["confidence"], "medium")
+        self.assertEqual(dist["schema_version"], "1.0.0")
+
+        # Keys must be strings
+        int_dist = dist["integer_distribution"]
+        for k in int_dist.keys():
+            self.assertIsInstance(k, str)
+            # Should be convertable to int
+            t = int(k)
+            self.assertTrue(72 <= t <= 96)
+
+        # Total probability should be round to ~1.0
+        self.assertAlmostEqual(dist["sum_probability"], 1.0, places=5)
+
+        # Validate with validation helper
+        errors = validate_temperature_distribution(dist)
+        self.assertEqual(errors, [])
+
+    def test_build_integer_distribution_from_bins_with_observed_max_so_far(self):
+        # Truncate strictly below 84.5 (which means cutoff is ceil(84.5) = 85)
+        dist = build_integer_distribution_from_bins(
+            probability_bins=self.standard_bins,
+            observed_max_so_far_f=84.5,
+            station="KMIA",
+            target_date="2026-05-18"
+        )
+        int_dist = dist["integer_distribution"]
+        # Temperatures below 85 must be 0
+        for k, p in int_dist.items():
+            t = int(k)
+            if t < 85:
+                self.assertEqual(p, 0.0)
+
+        self.assertAlmostEqual(dist["sum_probability"], 1.0, places=5)
+        errors = validate_temperature_distribution(dist)
+        self.assertEqual(errors, [])
+
+    def test_build_integer_distribution_from_bins_observed_max_so_far_out_of_bounds(self):
+        # Truncate strictly below 98 (above support max 96)
+        dist = build_integer_distribution_from_bins(
+            probability_bins=self.standard_bins,
+            observed_max_so_far_f=98.0,
+            station="KMIA",
+            target_date="2026-05-18"
+        )
+        int_dist = dist["integer_distribution"]
+        for k, p in int_dist.items():
+            self.assertEqual(p, 0.0)
+
+        self.assertEqual(dist["sum_probability"], 0.0)
+        # Check warnings
+        self.assertTrue(any("Truncation removed all probability mass" in w for w in dist["warnings"]))
+
+        errors = validate_temperature_distribution(dist)
+        self.assertEqual(errors, [])
+
+    def test_validate_temperature_distribution_invalid_metric(self):
+        dist = build_integer_distribution_from_bins(self.standard_bins)
+        dist["metric"] = "invalid_metric"
+        errors = validate_temperature_distribution(dist)
+        self.assertTrue(any("Invalid metric" in err for err in errors))
+
+    def test_validate_temperature_distribution_negative_probability(self):
+        dist = build_integer_distribution_from_bins(self.standard_bins)
+        dist["integer_distribution"]["85"] = -0.05
+        errors = validate_temperature_distribution(dist)
+        self.assertTrue(any("cannot be negative" in err for err in errors))
+
+    def test_validate_temperature_distribution_missing_keys(self):
+        dist = build_integer_distribution_from_bins(self.standard_bins)
+        del dist["station"]
+        errors = validate_temperature_distribution(dist)
+        self.assertTrue(any("Missing required key: station" in err for err in errors))
 
 
 if __name__ == "__main__":

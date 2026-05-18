@@ -1,5 +1,6 @@
 """
 Centralized registry for critical runtime artifact paths.
+
 Phase 1 of V2 Hyper Refactor Plan.
 """
 

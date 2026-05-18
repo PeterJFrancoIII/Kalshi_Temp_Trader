@@ -121,6 +121,35 @@ def get_daily_status():
                 status["paper_trading"]["record_count"] = len(ledger_data.get("trades", []))
         except Exception:
             status["paper_trading"]["record_count"] = 0
+
+    best_sig_decision = "N/A"
+    best_sig_reason = "None"
+    best_sig_edge = "N/A"
+    if os.path.exists(LATEST_PAPER_SIGNAL):
+        try:
+            with open(LATEST_PAPER_SIGNAL, 'r') as f:
+                sig_data = json.load(f)
+                best_sig = sig_data.get("best_signal")
+                if best_sig:
+                    rd = best_sig.get("risk_decision")
+                    if isinstance(rd, dict):
+                        best_sig_decision = "PASS" if rd.get("passed", True) else "BLOCK"
+                        best_sig_reason = rd.get("no_trade_reason") or rd.get("reason") or "None"
+                    else:
+                        best_sig_decision = str(rd) if rd else "N/A"
+                        best_sig_reason = best_sig.get("no_trade_reason") or "None"
+                    
+                    edge_val = best_sig.get("edge")
+                    if edge_val is None:
+                        edge_val = best_sig.get("executable_edge")
+                    if edge_val is not None:
+                        best_sig_edge = f"{edge_val*100:.1f}%" if isinstance(edge_val, (int, float)) else str(edge_val)
+        except Exception:
+            pass
+
+    status["paper_trading"]["best_signal_risk_decision"] = best_sig_decision
+    status["paper_trading"]["best_signal_no_trade_reason"] = best_sig_reason
+    status["paper_trading"]["best_signal_executable_edge"] = best_sig_edge
             
     # 6. Warnings
     if not latest_v1 and not latest_v2:
@@ -199,6 +228,9 @@ def write_markdown_status(status: Dict):
         f"- **Latest Log:** {status['workflow']['last_log'] or 'None'}",
         f"- **Paper Trading Available:** {status['paper_trading']['available']}",
         f"- **Paper Trading Records:** {status['paper_trading']['record_count']}",
+        f"- **Best Signal Risk Decision:** {status['paper_trading'].get('best_signal_risk_decision', 'N/A')}",
+        f"- **Best Signal No-Trade Reason:** {status['paper_trading'].get('best_signal_no_trade_reason', 'None')}",
+        f"- **Best Signal Executable Edge:** {status['paper_trading'].get('best_signal_executable_edge', 'N/A')}",
         ""
     ])
     

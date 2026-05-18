@@ -168,5 +168,105 @@ class TestKalshiContractMapper(unittest.TestCase):
         res2 = extract_contract_thresholds(m2)
         self.assertEqual(mapping_to_bin_string(res2), "87-88")
 
+    def test_various_regex_formats(self):
+        # <=89
+        m1 = {"ticker": "KX-1", "title": "Will high be <=89?"}
+        res1 = extract_contract_thresholds(m1)
+        self.assertEqual(res1["condition_type"], "below")
+        self.assertEqual(res1["threshold_f"], 89.0)
+        self.assertTrue(res1["upper_inclusive"])
+        self.assertEqual(res1["contract_range_label"], "<=89")
+
+        # 90 or below
+        m2 = {"ticker": "KX-2", "title": "Will high be 90 or below?"}
+        res2 = extract_contract_thresholds(m2)
+        self.assertEqual(res2["condition_type"], "below")
+        self.assertEqual(res2["threshold_f"], 90.0)
+        self.assertTrue(res2["upper_inclusive"])
+        self.assertEqual(res2["contract_range_label"], "<=90")
+
+        # 91-92
+        m3 = {"ticker": "KX-3", "title": "Will high be 91-92?"}
+        res3 = extract_contract_thresholds(m3)
+        self.assertEqual(res3["condition_type"], "between")
+        self.assertEqual(res3["threshold_f"], 91.0)
+        self.assertEqual(res3["range_high_f"], 92.0)
+        self.assertEqual(res3["contract_range_label"], "91-92")
+
+        # 93 to 94
+        m4 = {"ticker": "KX-4", "title": "Will high be 93 to 94?"}
+        res4 = extract_contract_thresholds(m4)
+        self.assertEqual(res4["condition_type"], "between")
+        self.assertEqual(res4["threshold_f"], 93.0)
+        self.assertEqual(res4["range_high_f"], 94.0)
+        self.assertEqual(res4["contract_range_label"], "93-94")
+
+        # 91 or 92 (and/or range separators)
+        m5 = {"ticker": "KX-5", "title": "Will high be 91 or 92?"}
+        res5 = extract_contract_thresholds(m5)
+        self.assertEqual(res5["condition_type"], "between")
+        self.assertEqual(res5["threshold_f"], 91.0)
+        self.assertEqual(res5["range_high_f"], 92.0)
+        self.assertEqual(res5["contract_range_label"], "91-92")
+
+        # >=95
+        m6 = {"ticker": "KX-6", "title": "Will high be >=95?"}
+        res6 = extract_contract_thresholds(m6)
+        self.assertEqual(res6["condition_type"], "above")
+        self.assertEqual(res6["threshold_f"], 95.0)
+        self.assertTrue(res6["lower_inclusive"])
+        self.assertEqual(res6["contract_range_label"], ">=95")
+
+        # >95
+        m7 = {"ticker": "KX-7", "title": "Will high be >95?"}
+        res7 = extract_contract_thresholds(m7)
+        self.assertEqual(res7["condition_type"], "above")
+        self.assertEqual(res7["threshold_f"], 95.0)
+        self.assertFalse(res7["lower_inclusive"])
+        self.assertEqual(res7["contract_range_label"], ">=96")
+
+        # 95 or above
+        m8 = {"ticker": "KX-8", "title": "Will high be 95 or above?"}
+        res8 = extract_contract_thresholds(m8)
+        self.assertEqual(res8["condition_type"], "above")
+        self.assertEqual(res8["threshold_f"], 95.0)
+        self.assertTrue(res8["lower_inclusive"])
+        self.assertEqual(res8["contract_range_label"], ">=95")
+
+        # 86.5 or above
+        m9 = {"ticker": "KX-9", "title": "Will high be 86.5 or above?"}
+        res9 = extract_contract_thresholds(m9)
+        self.assertEqual(res9["condition_type"], "above")
+        self.assertEqual(res9["threshold_f"], 86.5)
+        self.assertTrue(res9["lower_inclusive"])
+        self.assertEqual(res9["contract_range_label"], ">=87")
+
+    def test_conflicts_and_ambiguity(self):
+        # Title with conflicting patterns
+        m1 = {"ticker": "KX-1", "title": "Will high be above 90 or below 85?"}
+        res1 = extract_contract_thresholds(m1)
+        self.assertEqual(res1["condition_type"], "unknown")
+        self.assertTrue(res1["uncertain"])
+        self.assertTrue(any("conflicting" in w.lower() for w in res1["parse_warnings"]))
+
+        # Numbers but no recognizable pattern
+        m2 = {"ticker": "KX-2", "title": "Miami High 92"}
+        res2 = extract_contract_thresholds(m2)
+        self.assertEqual(res2["condition_type"], "unknown")
+        self.assertTrue(res2["uncertain"])
+        self.assertTrue(any("no recognized" in w.lower() for w in res2["parse_warnings"]))
+
+        # Ticker / parsed threshold conflict (e.g. structured says 95, ticker has T92)
+        m3 = {
+            "ticker": "KXHIGHMIA-26MAY15-T92",
+            "strike_type": "greater",
+            "floor_strike": 95,
+            "title": "Will high be >95?"
+        }
+        res3 = extract_contract_thresholds(m3)
+        self.assertEqual(res3["condition_type"], "unknown")
+        self.assertTrue(res3["uncertain"])
+        self.assertTrue(any("ticker threshold" in w.lower() for w in res3["parse_warnings"]))
+
 if __name__ == "__main__":
     unittest.main()
