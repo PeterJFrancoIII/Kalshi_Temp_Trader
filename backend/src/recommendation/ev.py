@@ -1,37 +1,46 @@
-def calculate_implied_probability(yes_ask: int) -> float:
-    """
-    Calculates the implied probability from the yes_ask price (in cents).
-    """
-    return round(yes_ask / 100.0, 4)
+"""Edge / EV helpers for the recommendation pipeline.
+
+This module is a thin compatibility layer over the canonical math in
+:mod:`trading.edge_engine`. It exists so older imports keep working and so
+the ``recommendation.recommender`` module can continue using the names it
+has always used.
+
+New callers should import from :mod:`trading.edge_engine` directly.
+
+``calculate_edge`` is retained as a deprecated alias for
+:func:`trading.edge_engine.calculate_raw_edge`. It returns
+``model_prob - implied_prob`` (a scalar) — distinct from
+:func:`trading.edge_engine.calculate_edge` which is the fee+slippage-aware
+tuple-returning helper. The collision between those two names is exactly
+what motivated this consolidation.
+
+NO REAL TRADING EXECUTION.
+"""
+
+from trading.edge_engine import (
+    calculate_confidence_adjusted_edge,
+    calculate_edge_after_fees,
+    calculate_implied_probability,
+    calculate_kalshi_fee,
+    calculate_raw_edge,
+)
+
 
 def calculate_edge(model_prob: float, implied_prob: float) -> float:
-    """
-    Calculates the raw edge before fees.
-    """
-    return round(model_prob - implied_prob, 4)
+    """Deprecated alias for :func:`trading.edge_engine.calculate_raw_edge`.
 
-def calculate_kalshi_fee(price: float) -> float:
+    Retained because ``recommendation.recommender`` (and its tests) call
+    ``ev.calculate_edge(model_prob, implied_prob)``. The signature differs
+    from :func:`trading.edge_engine.calculate_edge`, hence the
+    consolidation behind one canonical name in ``trading.edge_engine``.
     """
-    Calculates the Kalshi taker fee in probability terms (0 to 1).
-    Formula: 0.07 * price * (1 - price)
-    """
-    return round(0.07 * price * (1.0 - price), 4)
+    return calculate_raw_edge(model_prob, implied_prob)
 
-def calculate_edge_after_fees(edge: float, fee: float) -> float:
-    """
-    Calculates the edge after deducting fees.
-    """
-    return round(edge - fee, 4)
 
-def calculate_confidence_adjusted_edge(edge: float, confidence: str) -> float:
-    """
-    Adjusts the edge based on model confidence.
-    """
-    confidence = confidence.lower()
-    if confidence == "high":
-        return round(edge * 1.0, 4)
-    elif confidence == "medium":
-        return round(edge * 0.5, 4)
-    elif confidence == "low":
-        return round(edge * 0.1, 4)
-    return 0.0
+__all__ = [
+    "calculate_confidence_adjusted_edge",
+    "calculate_edge",
+    "calculate_edge_after_fees",
+    "calculate_implied_probability",
+    "calculate_kalshi_fee",
+]

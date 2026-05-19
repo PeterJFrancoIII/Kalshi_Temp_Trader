@@ -45,6 +45,9 @@ from test_refactor_invariants import (
     test_no_src_dot_imports_in_backend_tests,
     test_no_sys_path_insert_in_backend_src,
     test_single_kalshi_public_client_definition,
+    test_no_paper_trade_ledger_jsonl_reference_in_paper_trading,
+    test_single_kalshi_fee_formula_definition,
+    test_orm_models_use_record_suffix,
 )
 from test_pipeline_inputs import (
     test_climatological_defaults_match_documented_values,
@@ -604,6 +607,9 @@ tests = [
     test_no_sys_path_insert_in_backend_src,
     # Phase 2 refactor guardrails
     test_single_kalshi_public_client_definition,
+    test_no_paper_trade_ledger_jsonl_reference_in_paper_trading,
+    test_single_kalshi_fee_formula_definition,
+    test_orm_models_use_record_suffix,
     # Phase 2.5 — features.pipeline_inputs extraction characterization
     test_climatological_defaults_match_documented_values,
     test_build_dry_run_features_missing_snapshot_returns_defaults,

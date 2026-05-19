@@ -90,26 +90,113 @@ def test_no_sys_path_insert_in_backend_src():
     )
 
 
+def test_orm_models_use_record_suffix():
+    """ORM models that collide with Pydantic types in shared.types must use
+    the ``*Record`` suffix in production code.
+
+    The Pydantic types in :mod:`shared.types` (``DailyPrediction``,
+    ``WeatherSnapshot``, ``ClimiaReport``, ``Recommendation``) are
+    different objects from the SQLAlchemy mappings in :mod:`db.models`.
+    Sharing names led to confusing imports and risk of accidentally
+    constructing the wrong one in tests / runtime code. Backward-compat
+    aliases remain inside ``db/models.py`` itself, but no other module in
+    ``backend/src`` may import the bare names from ``db.models``.
+    """
+    legacy_names = ("DailyPrediction", "WeatherSnapshot", "ClimiaReport")
+    # Recommendation also collides but the bare name appears in
+    # `recommendation.types` (a separate dataclass) for legitimate reasons,
+    # so we only enforce on the three weather/prediction types here.
+    pattern = re.compile(
+        r"^\s*from\s+db\.models\s+import\s+([^\n]+)$", re.MULTILINE
+    )
+    offenders: list[tuple[Path, str]] = []
+    for py_file in BACKEND_SRC.rglob("*.py"):
+        if py_file.relative_to(BACKEND_SRC) == Path("db/models.py"):
+            continue
+        text = py_file.read_text(encoding="utf-8")
+        for match in pattern.finditer(text):
+            imported = match.group(1)
+            for legacy in legacy_names:
+                # Match the legacy name as a whole token (avoid matching
+                # the *Record suffix variant).
+                if re.search(rf"\b{legacy}\b(?!Record)", imported):
+                    offenders.append(
+                        (py_file.relative_to(BACKEND_SRC), legacy)
+                    )
+    assert not offenders, (
+        "Production code under backend/src must import ORM rows via the "
+        "*Record suffix (e.g. DailyPredictionRecord), not the bare names "
+        "that collide with shared.types. Offenders: "
+        f"{offenders}"
+    )
+
+
+def test_single_kalshi_fee_formula_definition():
+    """The literal Kalshi fee formula must live in exactly one module.
+
+    The taker fee ``0.07 * p * (1 - p)`` is a domain constant; multiple
+    inline copies invite drift if Kalshi changes their fee schedule. The
+    canonical definition is :func:`trading.edge_engine.calculate_kalshi_fee`.
+    Other call sites must route through that helper.
+
+    This invariant matches the *computational* literal — strings like
+    ``"0.07 *"`` inside docstrings/comments are allowed (and grep finds
+    them too), so the test specifically looks for an expression of the
+    shape ``0.07 * <price> * (1 - <price>)`` in actual Python code.
+    """
+    # Match a multiplication of 0.07 by a price and (1 - price) factor,
+    # which is the Kalshi fee formula shape regardless of variable name
+    # used for the price.
+    pattern = re.compile(
+        r"0\.07\s*\*\s*[A-Za-z_][A-Za-z_0-9]*\s*\*\s*\(\s*1(?:\.0)?\s*-\s*[A-Za-z_][A-Za-z_0-9]*\s*\)"
+    )
+    hits: list[Path] = []
+    for py_file in BACKEND_SRC.rglob("*.py"):
+        text = py_file.read_text(encoding="utf-8")
+        # Strip out triple-quoted docstrings and # comments before checking.
+        without_docstrings = re.sub(r'""".*?"""', "", text, flags=re.DOTALL)
+        without_docstrings = re.sub(r"'''.*?'''", "", without_docstrings, flags=re.DOTALL)
+        code_only = "\n".join(
+            line.split("#", 1)[0] for line in without_docstrings.splitlines()
+        )
+        if pattern.search(code_only):
+            hits.append(py_file.relative_to(BACKEND_SRC))
+    assert hits == [Path("trading/edge_engine.py")], (
+        "The Kalshi fee formula `0.07 * p * (1 - p)` must be defined only in "
+        "trading/edge_engine.py (via calculate_kalshi_fee). Inline copies "
+        f"break the single-source-of-truth invariant. Found in: {hits}"
+    )
+
+
 def test_no_paper_trade_ledger_jsonl_reference_in_paper_trading():
     """The canonical production paper ledger is ledger.json via PaperLedger.
 
     Modules under backend/src/paper_trading/ must not reference the legacy
-    ``paper_trade_ledger.jsonl`` filename — that path was always empty in
-    production and reading it produced silently-wrong metrics.
+    ``paper_trade_ledger.jsonl`` filename in *executable code* — that path
+    was always empty in production and reading it produced silently-wrong
+    metrics.
 
-    The backtesting coordinator legitimately writes per-run JSONL ledgers
-    under its own run directory; that lives in `backtesting/`, not
-    `paper_trading/`, and is therefore not subject to this invariant.
+    Docstrings and comments may still mention the filename for historical
+    context; we strip those out before checking. The backtesting
+    coordinator legitimately writes per-run JSONL ledgers under its own
+    run directory; that lives in ``backtesting/``, not ``paper_trading/``,
+    and is therefore not subject to this invariant.
     """
     paper_trading_dir = BACKEND_SRC / "paper_trading"
     offenders = []
     for py_file in paper_trading_dir.rglob("*.py"):
         text = py_file.read_text(encoding="utf-8")
-        if "paper_trade_ledger.jsonl" in text:
+        # Strip triple-quoted docstrings and line comments before checking.
+        code_only = re.sub(r'""".*?"""', "", text, flags=re.DOTALL)
+        code_only = re.sub(r"'''.*?'''", "", code_only, flags=re.DOTALL)
+        code_only = "\n".join(
+            line.split("#", 1)[0] for line in code_only.splitlines()
+        )
+        if "paper_trade_ledger.jsonl" in code_only:
             offenders.append(py_file.relative_to(BACKEND_SRC))
     assert not offenders, (
         "paper_trading/ must not reference the legacy paper_trade_ledger.jsonl "
-        f"filename; offenders: {offenders}. Use PaperLedger / "
+        f"filename in executable code; offenders: {offenders}. Use PaperLedger / "
         "shared.artifact_paths.PAPER_LEDGER_FILE instead."
     )
 

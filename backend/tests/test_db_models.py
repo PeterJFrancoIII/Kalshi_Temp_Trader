@@ -6,21 +6,21 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
-from db.models import DailyPrediction, ValidationStatus
+from db.models import DailyPredictionRecord, ValidationStatus
 
 
 def test_daily_prediction_has_model_version():
-    """DailyPrediction must define a model_version column attribute."""
-    assert hasattr(DailyPrediction, "model_version"), (
-        "DailyPrediction is missing the model_version column. "
+    """DailyPredictionRecord must define a model_version column attribute."""
+    assert hasattr(DailyPredictionRecord, "model_version"), (
+        "DailyPredictionRecord is missing the model_version column. "
         "run_daily_prediction.py will crash on non-dry-run saves."
     )
 
 
 def test_daily_prediction_model_version_default():
     """model_version column must have a default of 'rules_v1'."""
-    col = DailyPrediction.__table__.c.get("model_version")
-    assert col is not None, "model_version column not found in DailyPrediction table"
+    col = DailyPredictionRecord.__table__.c.get("model_version")
+    assert col is not None, "model_version column not found in DailyPredictionRecord table"
     # Check the SQLAlchemy column default
     assert col.default is not None, "model_version column has no default"
     # The default arg is stored as a ColumnDefault; .arg holds the value
@@ -30,8 +30,8 @@ def test_daily_prediction_model_version_default():
 
 
 def test_daily_prediction_model_version_v2():
-    """DailyPrediction can be constructed with model_version='rules_v2_climatology'."""
-    pred = DailyPrediction(
+    """DailyPredictionRecord can be constructed with model_version='rules_v2_climatology'."""
+    pred = DailyPredictionRecord(
         run_id="test-run-v2",
         date="2026-05-03",
         station="KMIA",

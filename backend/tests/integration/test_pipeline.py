@@ -3,7 +3,14 @@ import os
 from datetime import datetime, date
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from db.models import Base, LiveObservation, ForecastSnapshot, DailyPrediction, Settlement, ClimiaReport
+from db.models import (
+    Base,
+    LiveObservation,
+    ForecastSnapshot,
+    DailyPredictionRecord,
+    Settlement,
+    ClimiaReportRecord,
+)
 from calibration.reports import process_settlements_for_date
 from scheduler.run_daily_prediction import run_prediction_pipeline
 
@@ -54,7 +61,7 @@ def test_full_pipeline_flow(db, monkeypatch):
     run_prediction_pipeline(target_date=target_date, force=True)
     
     # Verify prediction saved
-    pred = db.query(DailyPrediction).filter(DailyPrediction.date == "2026-05-03").first()
+    pred = db.query(DailyPredictionRecord).filter(DailyPredictionRecord.date == "2026-05-03").first()
     assert pred is not None
     assert pred.best_single_number_f > 0
     # Check bin zeroing (observed max 82 should zero out <=78 and 79-80)
@@ -63,11 +70,11 @@ def test_full_pipeline_flow(db, monkeypatch):
 
     # 4. Run Settlement
     # Mock CLIMIA Report in DB
-    climia = ClimiaReport(
+    climia = ClimiaReportRecord(
         date="2026-05-03",
         station="KMIA",
         max_temp_f=82,
-        normal_high_f=84
+        normal_high_f=84,
     )
     db.add(climia)
     db.commit()

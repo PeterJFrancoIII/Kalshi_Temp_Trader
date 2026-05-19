@@ -1,6 +1,11 @@
 from typing import Dict, Any
 from sqlalchemy.orm import Session
-from db.models import DailyPrediction, ClimiaReport, Settlement, CalibrationMetric
+from db.models import (
+    DailyPredictionRecord,
+    ClimiaReportRecord,
+    Settlement,
+    CalibrationMetric,
+)
 from calibration.metrics import score_prediction
 
 def process_settlements_for_date(db: Session, date_str: str) -> int:
@@ -9,13 +14,22 @@ def process_settlements_for_date(db: Session, date_str: str) -> int:
     computes metrics, and saves them to the DB.
     Returns the number of settled predictions.
     """
-    climia = db.query(ClimiaReport).filter(ClimiaReport.date == date_str).order_by(ClimiaReport.id.desc()).first()
+    climia = (
+        db.query(ClimiaReportRecord)
+        .filter(ClimiaReportRecord.date == date_str)
+        .order_by(ClimiaReportRecord.id.desc())
+        .first()
+    )
     if not climia or climia.max_temp_f is None:
         return 0
-        
-    predictions = db.query(DailyPrediction).filter(
-        DailyPrediction.date == date_str
-    ).outerjoin(Settlement).filter(Settlement.id == None).all()
+
+    predictions = (
+        db.query(DailyPredictionRecord)
+        .filter(DailyPredictionRecord.date == date_str)
+        .outerjoin(Settlement)
+        .filter(Settlement.id == None)
+        .all()
+    )
     
     settled_count = 0
     actual_temp = climia.max_temp_f
@@ -66,9 +80,13 @@ def generate_calibration_summary(db: Session, station: str = "KMIA") -> Dict[str
     """
     from calibration.metrics import calculate_aggregate_stats
     
-    metrics = db.query(CalibrationMetric).join(Settlement).join(DailyPrediction).filter(
-        DailyPrediction.station == station
-    ).all()
+    metrics = (
+        db.query(CalibrationMetric)
+        .join(Settlement)
+        .join(DailyPredictionRecord)
+        .filter(DailyPredictionRecord.station == station)
+        .all()
+    )
     
     if not metrics:
         return {}

@@ -14,20 +14,20 @@ try:
     from db.models import (
         LiveObservation,
         ForecastSnapshot,
-        WeatherSnapshot,
-        DailyPrediction,
+        WeatherSnapshotRecord,
+        DailyPredictionRecord,
         ValidationStatus,
-        ClimiaReport,
+        ClimiaReportRecord,
     )
 except ImportError:
     SessionLocal = None
     init_db = lambda: None
     LiveObservation = None
     ForecastSnapshot = None
-    WeatherSnapshot = None
-    DailyPrediction = None
+    WeatherSnapshotRecord = None
+    DailyPredictionRecord = None
     ValidationStatus = None
-    ClimiaReport = None
+    ClimiaReportRecord = None
 
 from features.pipeline_inputs import build_dry_run_features
 from forecasting.rules_model import forecast_daily_high_bins, validate_probability_bins
@@ -140,10 +140,15 @@ def run_prediction_pipeline(
             # Idempotency Check
             from sqlalchemy import desc
             if not force:
-                recent_prediction = db.query(DailyPrediction).filter(
-                    DailyPrediction.date == target_date.isoformat(),
-                    DailyPrediction.model_version == model_name # v2 integration: check per model
-                ).order_by(desc(DailyPrediction.created_at)).first()
+                recent_prediction = (
+                    db.query(DailyPredictionRecord)
+                    .filter(
+                        DailyPredictionRecord.date == target_date.isoformat(),
+                        DailyPredictionRecord.model_version == model_name,
+                    )
+                    .order_by(desc(DailyPredictionRecord.created_at))
+                    .first()
+                )
                 
                 if recent_prediction:
                     time_since = datetime.now() - recent_prediction.created_at
@@ -165,9 +170,12 @@ def run_prediction_pipeline(
                 ForecastSnapshot.station == "KMIA"
             ).order_by(desc(ForecastSnapshot.fetched_at)).first()
             
-            latest_climia = db.query(ClimiaReport).filter(
-                ClimiaReport.station == "KMIA"
-            ).order_by(desc(ClimiaReport.fetched_at)).first()
+            latest_climia = (
+                db.query(ClimiaReportRecord)
+                .filter(ClimiaReportRecord.station == "KMIA")
+                .order_by(desc(ClimiaReportRecord.fetched_at))
+                .first()
+            )
 
             features = {
                 "observed_max_so_far_f": int(latest_obs.observed_max_so_far_f),
@@ -238,7 +246,7 @@ def save_prediction_to_db(prediction_output: Dict[str, Any]):
         target_date = date.fromisoformat(prediction_output["date"])
         run_id = f"kmia_{target_date.strftime('%Y%m%d')}_{prediction_output['model_version']}_{datetime.now().strftime('%H%M%S')}"
         
-        daily_pred = DailyPrediction(
+        daily_pred = DailyPredictionRecord(
             run_id=run_id,
             date=prediction_output["date"],
             station="KMIA",

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytz
 from sqlalchemy.orm import Session
 from db.session import SessionLocal
-from db.models import LiveObservation, ClimiaReport, DailyPrediction, Settlement, CalibrationMetric
+from db.models import LiveObservation
 from ingestion.kmia_live_fetcher import fetch_wrh_timeseries
 from ingestion.kmia_obhistory_parser import parse_wrh_timeseries
 from calibration.reports import process_settlements_for_date

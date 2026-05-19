@@ -1,6 +1,72 @@
+"""Canonical edge / EV math for paper-trading evaluation.
+
+This module is the single source of truth for:
+    - Kalshi fee formula (``0.07 * p * (1 - p)``)
+    - Implied probability from a yes_ask quote
+    - Raw edge, fee-adjusted edge, slippage-adjusted breakeven
+    - Confidence-scaled edge
+    - Speed-to-ROI scoring
+    - The richer ``compute_edge(...) -> dict`` used by the paper signal
+      generator
+
+Older code in :mod:`recommendation.ev` re-exports the helpers below for
+backward compatibility; new callers should import from this module
+directly.
+
+NO REAL TRADING EXECUTION.
+"""
+
 import math
 from datetime import datetime, timezone
 from typing import Optional, Tuple
+
+
+# --- Atomic helpers -------------------------------------------------------
+
+def calculate_implied_probability(yes_ask_cents: float) -> float:
+    """Convert a Kalshi yes_ask quote (in cents, 0-100) to implied probability.
+
+    Inputs are typically integer cents (e.g. ``45`` → ``0.45``) but any
+    numeric value in the ``[0, 100]`` range is accepted.
+    """
+    return round(yes_ask_cents / 100.0, 4)
+
+
+def calculate_kalshi_fee(price: float) -> float:
+    """Kalshi taker fee in probability terms.
+
+    Single canonical definition of the fee formula. ``0.07 * p * (1 - p)``.
+    """
+    return round(0.07 * price * (1.0 - price), 4)
+
+
+def calculate_raw_edge(model_prob: float, market_prob: float) -> float:
+    """Pre-fee edge: model probability minus market-implied probability."""
+    return round(model_prob - market_prob, 4)
+
+
+def calculate_edge_after_fees(raw_edge: float, fee: float) -> float:
+    """Subtract fees from a raw edge."""
+    return round(raw_edge - fee, 4)
+
+
+def calculate_confidence_adjusted_edge(edge: float, confidence: str) -> float:
+    """Scale an edge by model confidence tier.
+
+    Returns ``edge`` for ``high`` confidence, half for ``medium``, a tenth
+    for ``low``, and ``0.0`` for anything else (including unknown values).
+    """
+    confidence = (confidence or "").lower()
+    if confidence == "high":
+        return round(edge, 4)
+    if confidence == "medium":
+        return round(edge * 0.5, 4)
+    if confidence == "low":
+        return round(edge * 0.1, 4)
+    return 0.0
+
+
+# --- Composite helpers ----------------------------------------------------
 
 def calculate_fee_adjusted_breakeven(price: float) -> float:
     """
@@ -10,7 +76,7 @@ def calculate_fee_adjusted_breakeven(price: float) -> float:
     """
     if not (0.0 <= price <= 1.0):
         raise ValueError("Price must be between 0.0 and 1.0")
-    fee = 0.07 * price * (1.0 - price)
+    fee = calculate_kalshi_fee(price)
     return round(price + fee, 4)
 
 def calculate_slippage_adjusted_breakeven(price: float, slippage: float = 0.0) -> float:

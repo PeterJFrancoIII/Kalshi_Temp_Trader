@@ -17,10 +17,12 @@ class RecommendationAction(str, enum.Enum):
     TRADE_CANDIDATE = "TRADE_CANDIDATE"
     REJECT = "REJECT"
 
-class ClimiaReport(Base):
-    """
-    Final ground-truth climatological data from NWS Daily Climatological Report (CLIMIA).
-    Used as the settlement-adjacent truth source.
+class ClimiaReportRecord(Base):
+    """ORM row for the final ground-truth climatological data (CLIMIA).
+
+    Renamed from ``ClimiaReport`` to disambiguate from the Pydantic model
+    of the same name in :mod:`shared.types`. A backward-compat alias
+    ``ClimiaReport`` is kept at module-end for older callers.
     """
     __tablename__ = 'climia_reports'
     
@@ -108,9 +110,12 @@ class KalshiOrderbook(Base):
     
     market = relationship("KalshiMarket", back_populates="orderbooks")
 
-class WeatherSnapshot(Base):
-    """
-    Aggregated state of weather data (live + forecast) at a point in time.
+class WeatherSnapshotRecord(Base):
+    """ORM row aggregating live + forecast weather state.
+
+    Renamed from ``WeatherSnapshot`` to disambiguate from the Pydantic
+    model of the same name in :mod:`shared.types`. Backward-compat alias
+    preserved at module end.
     """
     __tablename__ = 'weather_snapshots'
     
@@ -121,9 +126,12 @@ class WeatherSnapshot(Base):
     latest_forecast_id = Column(Integer, ForeignKey('forecast_snapshots.id'))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-class DailyPrediction(Base):
-    """
-    The core prediction output containing probabilistic bins for a target date.
+class DailyPredictionRecord(Base):
+    """ORM row for the daily probabilistic prediction.
+
+    Renamed from ``DailyPrediction`` to disambiguate from the Pydantic
+    model of the same name in :mod:`shared.types`. Backward-compat alias
+    preserved at module end.
     """
     __tablename__ = 'daily_predictions'
     
@@ -149,7 +157,7 @@ class DailyPrediction(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     llm_review = relationship("LlmReview", back_populates="prediction", uselist=False, cascade="all, delete-orphan")
-    recommendation = relationship("Recommendation", back_populates="prediction", uselist=False, cascade="all, delete-orphan")
+    recommendation = relationship("RecommendationRecord", back_populates="prediction", uselist=False, cascade="all, delete-orphan")
     settlement = relationship("Settlement", back_populates="prediction", uselist=False, cascade="all, delete-orphan")
 
 class LlmReview(Base):
@@ -167,11 +175,14 @@ class LlmReview(Base):
     discrepancy_flag = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
-    prediction = relationship("DailyPrediction", back_populates="llm_review")
+    prediction = relationship("DailyPredictionRecord", back_populates="llm_review")
 
-class Recommendation(Base):
-    """
-    Automated trade recommendation based on prediction and market data.
+class RecommendationRecord(Base):
+    """ORM row for an automated trade recommendation.
+
+    Renamed from ``Recommendation`` to disambiguate from the dataclass of
+    the same name in :mod:`recommendation.types` and the Pydantic model in
+    :mod:`shared.types`. Backward-compat alias preserved at module end.
     """
     __tablename__ = 'recommendations'
     
@@ -183,7 +194,7 @@ class Recommendation(Base):
     expected_value = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
-    prediction = relationship("DailyPrediction", back_populates="recommendation")
+    prediction = relationship("DailyPredictionRecord", back_populates="recommendation")
 
 class Settlement(Base):
     """
@@ -199,7 +210,7 @@ class Settlement(Base):
     actual_bin = Column(String)
     settled_at = Column(DateTime(timezone=True), server_default=func.now())
     
-    prediction = relationship("DailyPrediction", back_populates="settlement")
+    prediction = relationship("DailyPredictionRecord", back_populates="settlement")
     metrics = relationship("CalibrationMetric", back_populates="settlement", uselist=False, cascade="all, delete-orphan")
 
 class CalibrationMetric(Base):
@@ -220,3 +231,17 @@ class CalibrationMetric(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     settlement = relationship("Settlement", back_populates="metrics")
+
+
+# --- Backward-compat aliases ---------------------------------------------
+# These keep older imports working while callers migrate to the *Record
+# names. The aliases share identity with the renamed classes — they are
+# the SAME class, not subclasses — so SQLAlchemy sees one mapping and
+# isinstance() checks behave identically.
+#
+# New code MUST use the *Record names. The invariant test
+# `test_orm_models_use_record_suffix` enforces this for backend/src.
+ClimiaReport = ClimiaReportRecord
+WeatherSnapshot = WeatherSnapshotRecord
+DailyPrediction = DailyPredictionRecord
+Recommendation = RecommendationRecord

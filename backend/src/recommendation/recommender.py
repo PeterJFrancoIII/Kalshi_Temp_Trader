@@ -33,12 +33,11 @@ def generate_recommendations(
         # Mapping check
         mapping_ok, mapping_reason = gates.check_market_mapping(snapshot.bin_name, VALID_BINS)
         
-        # EV calculations
+        # EV calculations (math lives in trading.edge_engine; see recommendation.ev)
         model_prob = input_data.model_probabilities.get(snapshot.bin_name, 0.0)
         market_ask_prob = ev.calculate_implied_probability(snapshot.yes_ask)
         edge_before_fees = ev.calculate_edge(model_prob, market_ask_prob)
-        
-        # New Fee Logic: 0.07 * p * (1-p)
+
         estimated_fee = ev.calculate_kalshi_fee(market_ask_prob)
         edge_after_fees = ev.calculate_edge_after_fees(edge_before_fees, estimated_fee)
         

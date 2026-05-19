@@ -1,6 +1,6 @@
 # Refactoring Plan — KMIA Kalshi Predictor
 
-**Status:** Phase 1 complete — see [REFACTORING_DEEP_DIVE.md](REFACTORING_DEEP_DIVE.md) for full analysis  
+**Status:** Phase 2 complete — see [REFACTORING_DEEP_DIVE.md](REFACTORING_DEEP_DIVE.md) for full analysis  
 **Baseline:** `bash scripts/run_tests.sh` — all tests passing (2026-05-19)  
 **Scope:** Tighter code structure and governance. **No real-money trading.**
 
@@ -136,18 +136,25 @@ flowchart TB
 | ID | Task | Status |
 |----|------|--------|
 | 2.1 | Deprecate `kalshi/client.py`; redirect tests to `market_data`; canonical `get_markets`/`get_events` added | Done |
-| 2.2 | Unify edge/EV behind one module; thin wrappers in `recommendation/` | Pending |
-| 2.3 | Single paper ledger path (`ledger.json`); migrate readers off JSONL variants | Pending |
-| 2.4 | Rename SQLAlchemy models: `DailyPredictionRecord`, etc. | Pending |
+| 2.2 | Unify edge/EV behind `trading/edge_engine`; `recommendation/ev` becomes a thin re-export shim | Done |
+| 2.3 | Single paper ledger path (`ledger.json`); legacy `paper_trade_ledger.jsonl` readers migrated to `PaperLedger` | Done |
+| 2.4 | Rename SQLAlchemy models to `*Record` suffix to disambiguate from Pydantic types | Done |
 | 2.5 | Extract `run_daily_prediction` feature assembly → `features/pipeline_inputs.py` | Done |
 
-**Exit criteria:** Tests pass; daily workflow script smoke-run with byte-identical forecast output; docs updated. (2.1 + 2.5 verified 2026-05-19.)
+**Exit criteria:** Tests pass; daily workflow script smoke-run with byte-identical forecast output; docs updated. (Verified 2026-05-19.)
 
 **Bonus fixes during Phase 2:**
 
 - `kalshi/client.py` is now a deprecation shim emitting `DeprecationWarning`; eliminates URL split-brain.
 - Latent `NameError` in scheduler (when NWS snapshot missing, `thunderstorm_severity` was undefined) fixed by giving it an explicit default in `CLIMATOLOGICAL_DEFAULTS`.
-- New invariant: `test_single_kalshi_public_client_definition`.
+- Latent `open_paper_trades` count bug fixed: legacy reader counted *all* trades (including settled) via line-count of a non-existent JSONL; new path counts open trades only via `PaperLedger.count_open_trades()`.
+- Kalshi fee formula (`0.07 * p * (1 - p)`) now has exactly one inline copy across the codebase (in `trading/edge_engine.calculate_kalshi_fee`).
+- Dead ORM imports removed from `scheduler/jobs.py` (only `LiveObservation` is actually used).
+- New invariants:
+  - `test_single_kalshi_public_client_definition`
+  - `test_no_paper_trade_ledger_jsonl_reference_in_paper_trading`
+  - `test_single_kalshi_fee_formula_definition`
+  - `test_orm_models_use_record_suffix`
 
 ---
 
