@@ -52,6 +52,13 @@ backend/data/
 .tmp.driveupload/
 test_output*.txt
 
+# Third-party API credentials and documentation that contains them
+# (The_Weather_Company_API_Documents holds a plaintext API key file —
+# never commit any folder under here, even when 1_Downloads/ is otherwise tracked.)
+1_Downloads/The_Weather_Company_API_Documents/
+**/API Key.md
+**/API_Key.md
+
 # Local scratch workspace
 scratch/
 
