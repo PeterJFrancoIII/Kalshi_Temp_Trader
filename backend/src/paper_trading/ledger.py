@@ -82,13 +82,41 @@ def record_paper_trade():
             return
 
     # Record simulated trade
+    lower_inc = best_signal.get("lower_inclusive")
+    upper_inc = best_signal.get("upper_inclusive")
+    if lower_inc is None or upper_inc is None:
+        try:
+            from market_data.kalshi_contract_mapper import extract_contract_thresholds
+            mapping = extract_contract_thresholds({
+                "ticker": ticker,
+                "title": best_signal.get("market_title") or "",
+                "strike_type": best_signal.get("strike_type") or "",
+                "floor_strike": best_signal.get("threshold_f"),
+                "cap_strike": best_signal.get("range_high_f"),
+            })
+            if lower_inc is None:
+                lower_inc = mapping.get("lower_inclusive")
+            if upper_inc is None:
+                upper_inc = mapping.get("upper_inclusive")
+        except Exception as e:
+            logger.warning(f"Failed to extract inclusive bounds for ticker {ticker}: {e}")
+
     ledger.record_trade(
         market_ticker=ticker,
         target_date=target_date,
         execution_price=signal_entry_price(best_signal),
         quantity=1, # Default paper quantity
         model_probability=best_signal.get("model_probability"),
-        forecast_bin=best_signal.get("forecast_bin_label") or best_signal.get("forecast_bin")
+        forecast_bin=best_signal.get("forecast_bin_label") or best_signal.get("forecast_bin"),
+        condition_type=best_signal.get("condition_type"),
+        threshold_f=best_signal.get("threshold_f"),
+        range_high_f=best_signal.get("range_high_f"),
+        lower_inclusive=lower_inc,
+        upper_inclusive=upper_inc,
+        contract_range_label=best_signal.get("contract_range_label") or best_signal.get("forecast_bin_label"),
+        risk_decision=best_signal.get("risk_decision"),
+        no_trade_reason=best_signal.get("no_trade_reason"),
+        weather_gate_status=best_signal.get("weather_gate_status"),
     )
 
     logger.info(f"Recorded paper trade for {ticker} in ledger.json")

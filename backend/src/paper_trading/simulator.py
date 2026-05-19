@@ -41,28 +41,8 @@ def settle_paper_trade(trade_record: Dict, actual_high: int) -> Dict:
     if trade_record.get('status') != 'FILLED':
         return trade_record
 
-    # Get bin range from ticker or snapshot (e.g., KMIA-26MAY03-T82)
-    # For now, let's assume the record has 'target_bin' like "81-82" or ">=87"
-    target_bin = trade_record.get('target_bin')
-    if not target_bin:
-        # Fallback: try to extract from ticker if it follows a pattern
-        # But it's safer if the recommender provided it.
-        return trade_record
-
-    # Determine if the target bin won
-    is_hit = False
-    try:
-        if "-" in target_bin:
-            low, high = map(int, target_bin.split('-'))
-            is_hit = low <= actual_high <= high
-        elif "<=" in target_bin:
-            val = int(target_bin.replace('<=', ''))
-            is_hit = actual_high <= val
-        elif ">=" in target_bin:
-            val = int(target_bin.replace('>=', ''))
-            is_hit = actual_high >= val
-    except (ValueError, TypeError):
-        return trade_record
+    from paper_trading.settlement import contract_settles_yes
+    is_hit = contract_settles_yes(actual_high, trade_record)
 
     side = trade_record.get('simulated_side', 'YES')
     entry_price = trade_record.get('entry_price', 0)

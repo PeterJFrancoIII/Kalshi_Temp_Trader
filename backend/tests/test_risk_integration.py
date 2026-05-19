@@ -444,7 +444,7 @@ class TestPnLWriteback(unittest.TestCase):
                 ledger = PaperLedger(ledger_path=self.ledger_path)
                 for j in range(90):  # 90 × $0.60 loss = $54/day × 3 days = $162 weekly
                     ledger.record_trade(
-                        market_ticker=f"KXHIGHMIA-{ticker_date}-B{j}",
+                        market_ticker=f"KXHIGHMIA-{ticker_date}-B{85 + j}",
                         target_date=date_str,
                         execution_price=0.60,
                         quantity=1,

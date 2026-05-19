@@ -116,6 +116,118 @@ def _temp_satisfies_bin_label(temp: int, bin_label: str) -> bool:
         return False
 
 
+def contract_settles_yes(actual_high_f: float, contract_mapping_or_trade: Dict[str, Any]) -> bool:
+    """
+    Determines if a contract/trade settles YES based on the actual high temperature.
+    Correct integer settlement semantics are enforced:
+    - 'above':
+        - lower_inclusive=True: actual_high_f >= threshold_f
+        - lower_inclusive=False: actual_high_f > threshold_f
+    - 'below':
+        - upper_inclusive=True: actual_high_f <= threshold_f
+        - upper_inclusive=False: actual_high_f < threshold_f
+    - 'between':
+        - lower_inclusive/upper_inclusive bounds are evaluated.
+    - Returns False (with warning/error) for unknown/ambiguous mappings.
+    """
+    cond_type = contract_mapping_or_trade.get("condition_type")
+    thresh = contract_mapping_or_trade.get("threshold_f")
+    high = contract_mapping_or_trade.get("range_high_f")
+    lower_inc = contract_mapping_or_trade.get("lower_inclusive")
+    upper_inc = contract_mapping_or_trade.get("upper_inclusive")
+    uncertain = contract_mapping_or_trade.get("uncertain", False)
+
+    # Reconstruct from ticker if missing/unknown
+    if (uncertain or not cond_type or cond_type == "unknown") and not contract_mapping_or_trade.get("forecast_bin"):
+        ticker = contract_mapping_or_trade.get("market_ticker") or contract_mapping_or_trade.get("ticker")
+        if ticker:
+            try:
+                from market_data.kalshi_contract_mapper import extract_contract_thresholds
+                m = {
+                    "ticker": ticker,
+                    "title": contract_mapping_or_trade.get("market_title") or contract_mapping_or_trade.get("title") or "",
+                    "floor_strike": thresh,
+                    "cap_strike": high,
+                }
+                mapping = extract_contract_thresholds(m)
+                cond_type = mapping.get("condition_type")
+                thresh = mapping.get("threshold_f") if thresh is None else thresh
+                high = mapping.get("range_high_f") if high is None else high
+                lower_inc = mapping.get("lower_inclusive") if lower_inc is None else lower_inc
+                upper_inc = mapping.get("upper_inclusive") if upper_inc is None else upper_inc
+                uncertain = mapping.get("uncertain", False)
+            except Exception as e:
+                logger.warning(f"Could not extract thresholds from ticker {ticker}: {e}")
+
+    # Normalize inclusive flags if None
+    if lower_inc is None:
+        lower_inc = True
+    if upper_inc is None:
+        upper_inc = True
+
+    if uncertain or not cond_type or cond_type == "unknown":
+        # Fallback to string bin range parsing
+        for key in ["forecast_bin", "contract_range_label", "forecast_bin_label", "contract_range", "target_bin"]:
+            bin_str = contract_mapping_or_trade.get(key)
+            if bin_str and bin_str != "unknown":
+                try:
+                    from market_data.kalshi_contract_mapper import bin_string_to_range
+                    low_val, high_val = bin_string_to_range(bin_str)
+                    if low_val == -999:
+                        return float(actual_high_f) <= float(high_val)
+                    elif high_val == 999:
+                        return float(actual_high_f) >= float(low_val)
+                    else:
+                        return float(low_val) <= float(actual_high_f) <= float(high_val)
+                except Exception:
+                    pass
+        logger.warning(f"Unknown or ambiguous contract mapping for settlement: {contract_mapping_or_trade}")
+        return False
+
+    try:
+        if cond_type == "above":
+            if thresh is None:
+                logger.warning(f"Missing threshold_f for 'above' condition in trade: {contract_mapping_or_trade}")
+                return False
+            if lower_inc:
+                return float(actual_high_f) >= float(thresh)
+            else:
+                return float(actual_high_f) > float(thresh)
+
+        elif cond_type == "below":
+            if thresh is None:
+                logger.warning(f"Missing threshold_f for 'below' condition in trade: {contract_mapping_or_trade}")
+                return False
+            if upper_inc:
+                return float(actual_high_f) <= float(thresh)
+            else:
+                return float(actual_high_f) < float(thresh)
+
+        elif cond_type == "between":
+            if thresh is None or high is None:
+                logger.warning(f"Missing threshold_f or range_high_f for 'between' condition in trade: {contract_mapping_or_trade}")
+                return False
+
+            if lower_inc:
+                lower_ok = float(actual_high_f) >= float(thresh)
+            else:
+                lower_ok = float(actual_high_f) > float(thresh)
+
+            if upper_inc:
+                upper_ok = float(actual_high_f) <= float(high)
+            else:
+                upper_ok = float(actual_high_f) < float(high)
+
+            return lower_ok and upper_ok
+
+        else:
+            logger.warning(f"Unsupported condition type '{cond_type}' in trade: {contract_mapping_or_trade}")
+            return False
+    except (ValueError, TypeError) as e:
+        logger.error(f"Error evaluating settlement for trade: {e}")
+        return False
+
+
 def _load_trades_from_ledger(ledger_path: Path) -> List[Dict[str, Any]]:
     """
     Loads trade records from either format:
@@ -301,12 +413,30 @@ def settle_paper_trades(
                         mismatch = True
                 forecast_bin = trade.get("forecast_bin", "")
 
-                # F3: use _temp_satisfies_bin_label so dynamic bin labels (>=95, <=89,
-                # 91-92) work correctly in addition to legacy fixed-bin labels.
-                bins_covered = [b.strip() for b in forecast_bin.split("/") if b.strip()]
-                is_won = any(
-                    _temp_satisfies_bin_label(actual_max, b) for b in bins_covered
-                )
+                # Enforce correct integer settlement semantics using centralized contract_settles_yes
+                is_ambiguous = False
+                cond_type = trade.get("condition_type")
+                uncertain = trade.get("uncertain", False)
+                
+                # Check if we can successfully parse/resolve it or if it is completely ambiguous
+                if (uncertain or not cond_type or cond_type == "unknown") and not trade.get("forecast_bin"):
+                    # Try fallback check to see if we can resolve from fallback strings
+                    resolved_fallback = False
+                    for key in ["forecast_bin", "contract_range_label", "forecast_bin_label", "contract_range"]:
+                        bin_str = trade.get(key)
+                        if bin_str and bin_str != "unknown":
+                            resolved_fallback = True
+                            break
+                    if not resolved_fallback:
+                        is_ambiguous = True
+                
+                if is_ambiguous:
+                    is_won = False
+                    result_str = "UNRESOLVED"
+                    logger.warning(f"Trade for {ticker} on {trade_date} has ambiguous/unknown mapping and is marked UNRESOLVED.")
+                else:
+                    is_won = contract_settles_yes(actual_max, trade)
+                    result_str = "WON" if is_won else "LOST"
 
                 # F4: support both new (execution_price) and legacy (simulated_entry_price)
                 entry_price = (
@@ -316,7 +446,6 @@ def settle_paper_trades(
                 )
                 pnl = 1.00 - entry_price if is_won else -entry_price
 
-                result_str = "WON" if is_won else "LOST"
                 if mismatch or correction.get("settlement_status") == "needs_manual_review":
                     result_str = "NEEDS_MANUAL_REVIEW"
 
@@ -342,6 +471,8 @@ def settle_paper_trades(
                     "exclude_from_learning": correction.get("exclude_from_learning", False),
                     "safety": "NO REAL TRADING EXECUTION",
                 }
+                if settlement_as_of_time:
+                    settlement["settlement_as_of_time_utc"] = settlement_as_of_time.isoformat()
                 new_settlements.append(settlement)
                 # F1: record for JSON ledger PnL writeback
                 settlements_by_key[(ticker, trade_date)] = {

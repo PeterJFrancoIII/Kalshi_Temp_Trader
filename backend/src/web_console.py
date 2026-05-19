@@ -1011,7 +1011,19 @@ def render_paper_trading(perf, settlements, trades, app_state=None):
     open_trades = [t for t in trades if str(t.get("status", "")).lower() == "open"]
     if open_trades:
         df_open = pd.DataFrame(open_trades)
-        display_cols = ["timestamp_utc", "market_ticker", "target_date", "forecast_bin", "execution_price"]
+        
+        # Format complex fields
+        def format_rd(rd):
+            if not rd: return "—"
+            if isinstance(rd, dict):
+                passed = rd.get("passed", rd.get("all_passed", True))
+                return "PASS" if passed else "BLOCK"
+            return str(rd)
+            
+        if "risk_decision" in df_open.columns:
+            df_open["risk_decision"] = df_open["risk_decision"].apply(format_rd)
+            
+        display_cols = ["timestamp_utc", "market_ticker", "target_date", "forecast_bin", "contract_range_label", "execution_price", "risk_decision", "no_trade_reason"]
         available = [c for c in display_cols if c in df_open.columns]
         st.dataframe(df_open[available].iloc[::-1], width="stretch", hide_index=True)
     else:
@@ -1024,7 +1036,7 @@ def render_paper_trading(perf, settlements, trades, app_state=None):
     settled_trades = [t for t in trades if str(t.get("status", "")).lower() == "settled"]
     if settled_trades:
         df_history = pd.DataFrame(settled_trades)
-        display_cols = ["target_date", "market_ticker", "status", "pnl", "settled_at_utc"]
+        display_cols = ["target_date", "market_ticker", "contract_range_label", "status", "pnl", "settled_at_utc", "risk_decision", "no_trade_reason"]
         available = [c for c in display_cols if c in df_history.columns]
         
         # Safe pre-formatting for PnL and status
@@ -1033,6 +1045,16 @@ def render_paper_trading(perf, settlements, trades, app_state=None):
             df_display["pnl"] = df_display["pnl"].apply(format_pnl)
         if "status" in df_display.columns:
             df_display["status"] = df_display["status"].apply(lambda x: str(x).upper() if x else "—")
+            
+        def format_rd(rd):
+            if not rd: return "—"
+            if isinstance(rd, dict):
+                passed = rd.get("passed", rd.get("all_passed", True))
+                return "PASS" if passed else "BLOCK"
+            return str(rd)
+            
+        if "risk_decision" in df_display.columns:
+            df_display["risk_decision"] = df_display["risk_decision"].apply(format_rd)
             
         st.dataframe(df_display.iloc[::-1], width="stretch", hide_index=True)
     else:

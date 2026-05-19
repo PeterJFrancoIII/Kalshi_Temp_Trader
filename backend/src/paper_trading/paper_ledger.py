@@ -107,6 +107,15 @@ class PaperLedger:
         quantity: int,
         model_probability: Optional[float] = None,
         forecast_bin: Optional[str] = None,
+        condition_type: Optional[str] = None,
+        threshold_f: Optional[float] = None,
+        range_high_f: Optional[float] = None,
+        lower_inclusive: Optional[bool] = None,
+        upper_inclusive: Optional[bool] = None,
+        contract_range_label: Optional[str] = None,
+        risk_decision: Optional[Any] = None,
+        no_trade_reason: Optional[str] = None,
+        weather_gate_status: Optional[str] = None,
     ):
         """Records a new paper trade.
 
@@ -120,6 +129,30 @@ class PaperLedger:
             forecast_bin: The forecast bin or condition description (e.g. ">=87").
                 Stored for settlement bin-match logic.
         """
+        # Fallback boundary extraction if missing
+        if lower_inclusive is None or upper_inclusive is None or condition_type is None:
+            try:
+                from market_data.kalshi_contract_mapper import extract_contract_thresholds
+                m = {
+                    "ticker": market_ticker,
+                    "title": "",
+                    "floor_strike": threshold_f,
+                    "cap_strike": range_high_f,
+                }
+                mapping = extract_contract_thresholds(m)
+                if lower_inclusive is None:
+                    lower_inclusive = mapping.get("lower_inclusive")
+                if upper_inclusive is None:
+                    upper_inclusive = mapping.get("upper_inclusive")
+                if condition_type is None:
+                    condition_type = mapping.get("condition_type")
+                if threshold_f is None:
+                    threshold_f = mapping.get("threshold_f")
+                if range_high_f is None:
+                    range_high_f = mapping.get("range_high_f")
+            except Exception:
+                pass
+
         trade = {
             "market_ticker": market_ticker,
             "target_date": target_date,
@@ -130,6 +163,15 @@ class PaperLedger:
             "pnl": 0.0,  # Open trade has 0 realized PnL initially
             "model_probability": model_probability,
             "forecast_bin": forecast_bin,
+            "condition_type": condition_type,
+            "threshold_f": threshold_f,
+            "range_high_f": range_high_f,
+            "lower_inclusive": lower_inclusive,
+            "upper_inclusive": upper_inclusive,
+            "contract_range_label": contract_range_label,
+            "risk_decision": risk_decision,
+            "no_trade_reason": no_trade_reason,
+            "weather_gate_status": weather_gate_status,
         }
         self.ledger_data.setdefault("trades", []).append(trade)
         # We don't deduct cost from account_balance right away if we just track PnL upon settlement
