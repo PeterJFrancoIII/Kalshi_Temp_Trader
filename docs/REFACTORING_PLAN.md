@@ -219,6 +219,7 @@ After the extractions, `generate_paper_signal` itself dropped from ~445 lines to
 |----|------|--------|
 | 7.1 | Publish `AGENTS.md` at repo root with canonical-module table, gating commands, and non-negotiable rules | Done |
 | 7.2 | Add invariant pinning `AGENTS.md` existence + canonical-module references | Done |
+| 7.3 | Add invariant enforcing the `safety` block (`no_real_trading: True`, `no_order_execution: True`) in the paper signal report | Done |
 
 `AGENTS.md` is now the entry contract for any future agent (human or AI)
 picking up work in this repository. It captures the five non-negotiable

@@ -16,7 +16,7 @@ invariants are the contract.
 
 | # | Rule | Enforced by |
 |---|------|-------------|
-| 1 | **No real-money trading.** The `safety` block in every paper signal report must keep `no_real_trading: True` and `no_order_execution: True`. | Manual review + downstream tests |
+| 1 | **No real-money trading.** The `safety` block in every paper signal report must keep `no_real_trading: True` and `no_order_execution: True`. | `test_paper_signal_report_emits_no_real_trading_safety_block` |
 | 2 | **`REQUIRED_BINS` is defined once**, in `backend/src/shared/types.py`. The list itself is part of the MVP lockdown ([docs/MVP_LOCKDOWN.md](docs/MVP_LOCKDOWN.md)). | `test_required_bins_defined_only_in_shared_types`, `test_canonical_bins_match_mvp_lockdown` |
 | 3 | **No `sys.path` mutation** under `backend/src`; **no `from src.X` / `import src.X`** anywhere. Launchers set `PYTHONPATH=backend/src` instead. | `test_no_sys_path_insert_in_backend_src`, `test_no_src_dot_imports_in_backend_src`, `test_no_src_dot_imports_in_backend_tests` |
 | 4 | **One canonical implementation per domain concern.** See the canonical-module table below. | `test_single_kalshi_public_client_definition`, `test_single_kalshi_fee_formula_definition`, `test_no_paper_trade_ledger_jsonl_reference_in_paper_trading`, `test_orm_models_use_record_suffix` |

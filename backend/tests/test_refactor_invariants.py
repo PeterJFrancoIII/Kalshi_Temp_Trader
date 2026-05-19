@@ -219,6 +219,43 @@ def test_single_kalshi_public_client_definition():
     )
 
 
+def test_paper_signal_report_emits_no_real_trading_safety_block():
+    """The paper signal report MUST emit a ``safety`` block asserting
+    ``no_real_trading`` and ``no_order_execution`` for the MVP.
+
+    This is rule #1 in ``AGENTS.md`` and the single most important
+    invariant in the repo: every paper signal report carries an
+    explicit, machine-readable declaration that no real money flowed.
+    Downstream tooling (the Streamlit safety banner, the daily status
+    writer, and any future audit log) keys off these flags.
+
+    The invariant is intentionally a **source-level grep**, not a
+    runtime check. Catching the regression at refactor-time — before
+    any artifact is even generated — means a typo or accidental
+    deletion fails the gate immediately rather than producing a
+    report that *looks* fine but no longer disclaims real trading.
+
+    We require the literals to live in
+    ``paper_trading/signal_generator.py`` because that is the only
+    place that builds the report payload (see
+    :func:`paper_trading.signal_generator.generate_paper_signal`).
+    """
+    signal_gen = (BACKEND_SRC / "paper_trading" / "signal_generator.py").read_text(encoding="utf-8")
+    required_literals = [
+        '"no_real_trading": True',
+        '"no_order_execution": True',
+        '"safety"',
+    ]
+    missing = [lit for lit in required_literals if lit not in signal_gen]
+    assert not missing, (
+        "paper_trading/signal_generator.py must construct the safety "
+        "block with no_real_trading=True and no_order_execution=True "
+        f"in the report payload. Missing literals: {missing}. "
+        "See AGENTS.md rule #1 — this is the MVP no-real-trading "
+        "contract and may not be removed without explicit instruction."
+    )
+
+
 def test_agents_md_exists_and_lists_canonical_modules():
     """AGENTS.md must exist at repo root and reference each canonical module.
 
