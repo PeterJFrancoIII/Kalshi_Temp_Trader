@@ -219,6 +219,51 @@ def test_single_kalshi_public_client_definition():
     )
 
 
+def test_agents_md_exists_and_lists_canonical_modules():
+    """AGENTS.md must exist at repo root and reference each canonical module.
+
+    Phase 7 (governance) — AGENTS.md is the contract that tells future
+    agents (human or AI) where the single source of truth lives for
+    each domain concern. Deleting it or letting it drift away from the
+    actual canonical modules turns the rest of this invariant suite
+    into folklore.
+
+    We don't try to keep the table machine-perfect — we just assert
+    the file exists and mentions each canonical module name. A missing
+    entry here means an agent has moved a module without updating the
+    governance doc, and the next agent will have to rediscover the
+    canonical location by reading code.
+    """
+    repo_root = BACKEND_ROOT.parent
+    agents_md = repo_root / "AGENTS.md"
+    assert agents_md.exists(), (
+        f"AGENTS.md missing at repo root ({repo_root}). It is the "
+        "entry contract for future agents — restore it from git history "
+        "rather than working around its absence."
+    )
+    text = agents_md.read_text(encoding="utf-8")
+    required_module_references = [
+        "shared/types.py",
+        "market_data/kalshi_public_client.py",
+        "trading/edge_engine",
+        "paper_trading/paper_ledger",
+        "paper_trading/signal_generator",
+        "db/models.py",
+        "ingestion/weather_status_writer",
+        "console/data_helpers.py",
+        "console/pages",
+        "shared/feature_flags.py",
+        "storage/jsonl_store",
+    ]
+    missing = [name for name in required_module_references if name not in text]
+    assert not missing, (
+        "AGENTS.md must reference every canonical module by path so the "
+        "governance contract stays aligned with the code. Missing "
+        f"references: {missing}. Update the canonical-module table in "
+        "AGENTS.md when you move a module."
+    )
+
+
 def test_signal_generator_helpers_remain_module_level():
     """Phase 4.1/4.2 helpers in signal_generator.py must stay module-level.
 

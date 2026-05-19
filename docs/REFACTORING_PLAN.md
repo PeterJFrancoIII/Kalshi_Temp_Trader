@@ -1,6 +1,6 @@
 # Refactoring Plan — KMIA Kalshi Predictor
 
-**Status:** Phase 4 complete. Signal generator orchestrator extracted into focused helpers.  
+**Status:** Phases 0–4 complete. Phase 7 governance contract published (`AGENTS.md`). Phases 5–6 deferred.  
 **Baseline:** `bash scripts/run_tests.sh` — all tests passing (2026-05-19)  
 **Scope:** Tighter code structure and governance. **No real-money trading.**
 
@@ -212,6 +212,34 @@ After the extractions, `generate_paper_signal` itself dropped from ~445 lines to
 - `test_signal_generator_helpers.py` — 27 unit tests covering each helper's contract, including the subtle “present-but-zero vs missing” distinction, the orderbook-override priority, and the weather-gate fail-closed override.
 
 **Verification.** Full test suite green (`run_tests.py`), and a live `generate_paper_signal()` invocation against the current artifacts produced the same 12-signal report across two event dates with the safety block intact.
+
+### Phase 7 — Governance contract (completed 2026-05-19)
+
+| ID | Task | Status |
+|----|------|--------|
+| 7.1 | Publish `AGENTS.md` at repo root with canonical-module table, gating commands, and non-negotiable rules | Done |
+| 7.2 | Add invariant pinning `AGENTS.md` existence + canonical-module references | Done |
+
+`AGENTS.md` is now the entry contract for any future agent (human or AI)
+picking up work in this repository. It captures the five non-negotiable
+rules, the canonical-module table (where the single source of truth
+lives for each concern), the ship-a-change workflow, and the "things
+you should NOT do without explicit instruction" list (LLM wiring,
+adding stations, replacing file persistence, real-trading paths). The
+`test_agents_md_exists_and_lists_canonical_modules` invariant ensures
+the contract stays aligned with the code — if you move a module to a
+new canonical location, the test fails until `AGENTS.md` is updated.
+
+### Phases 5–6 — Deferred candidates (not started)
+
+| ID | Task | Status |
+|----|------|--------|
+| 5 | Decompose `paper_trading/settlement.py` (572 lines, ~200-line `settle_paper_trades` monolith) using the same helper-extraction pattern as Phase 4 | Deferred |
+| 6 | Split `market_data/kalshi_contract_mapper.py` (559 lines) into a parser and a mapper, each independently testable | Deferred |
+
+Both are well-bounded continuations of the same playbook; the next
+agent can pick either one with `AGENTS.md` and the existing invariants
+as guardrails.
 
 ---
 
