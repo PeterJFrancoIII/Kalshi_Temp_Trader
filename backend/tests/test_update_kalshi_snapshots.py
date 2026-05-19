@@ -105,8 +105,18 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
         }
         
         # Mock open to return a valid snapshot when reading latest
+        from datetime import datetime
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from dateutil.tz import gettz as ZoneInfo
+        
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        ticker_date_str = now_et.strftime("%y%b%d").upper()
+        ticker = f"KXHIGHMIA-{ticker_date_str}-T80"
+
         m_open = mock_open(read_data=json.dumps({
-            "selected_temperature_markets": [{"ticker": "KXHIGHMIA-99DEC31-T80"}]
+            "selected_temperature_markets": [{"ticker": ticker}]
         }))
         
         with patch('builtins.open', m_open):
@@ -116,7 +126,7 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
                 pass
                 
         # Verify that it attempted to fetch orderbooks for the preserved ticker
-        mock_client.get_orderbook.assert_called_with("KXHIGHMIA-99DEC31-T80")
+        mock_client.get_orderbook.assert_called_with(ticker)
         
         # Verify that it did NOT overwrite latest (did not call save_market_snapshot)
         mock_client.save_market_snapshot.assert_not_called()
