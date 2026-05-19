@@ -268,5 +268,51 @@ class TestKalshiContractMapper(unittest.TestCase):
         self.assertTrue(res3["uncertain"])
         self.assertTrue(any("ticker threshold" in w.lower() for w in res3["parse_warnings"]))
 
+    def test_classify_market_date_eligibility(self):
+        from datetime import datetime, timezone
+        from market_data.kalshi_contract_mapper import classify_market_date_eligibility
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from dateutil.tz import gettz as ZoneInfo
+
+        # 1. ELIGIBLE_SAME_DAY: market_date is today
+        now_et = datetime(2026, 5, 18, 9, 0, 0, tzinfo=ZoneInfo("America/New_York"))
+        elig = classify_market_date_eligibility("2026-05-18", now_et)
+        self.assertTrue(elig["eligible"])
+        self.assertEqual(elig["status"], "ELIGIBLE_SAME_DAY")
+        self.assertEqual(elig["market_date"], "2026-05-18")
+        self.assertEqual(elig["current_date_et"], "2026-05-18")
+
+        # 2. ELIGIBLE_NEXT_DAY: market_date is tomorrow, time is at or after 10 AM ET (e.g. 10:15 AM)
+        now_et_after_10 = datetime(2026, 5, 18, 10, 15, 0, tzinfo=ZoneInfo("America/New_York"))
+        elig = classify_market_date_eligibility("2026-05-19", now_et_after_10)
+        self.assertTrue(elig["eligible"])
+        self.assertEqual(elig["status"], "ELIGIBLE_NEXT_DAY")
+
+        # 3. NOT_YET_OPEN: market_date is tomorrow, time is before 10 AM ET (e.g. 9:45 AM)
+        now_et_before_10 = datetime(2026, 5, 18, 9, 45, 0, tzinfo=ZoneInfo("America/New_York"))
+        elig = classify_market_date_eligibility("2026-05-19", now_et_before_10)
+        self.assertFalse(elig["eligible"])
+        self.assertEqual(elig["status"], "NOT_YET_OPEN")
+
+        # 4. DATE_MISMATCH (Past): market_date is in the past
+        elig = classify_market_date_eligibility("2026-05-17", now_et)
+        self.assertFalse(elig["eligible"])
+        self.assertEqual(elig["status"], "DATE_MISMATCH")
+        self.assertIn("past date", elig["reason"].lower())
+
+        # 5. DATE_MISMATCH (Future): market_date is more than one day ahead
+        elig = classify_market_date_eligibility("2026-05-20", now_et)
+        self.assertFalse(elig["eligible"])
+        self.assertEqual(elig["status"], "DATE_MISMATCH")
+        self.assertIn("future date", elig["reason"].lower())
+
+        # 6. Robustness test: invalid format
+        elig = classify_market_date_eligibility("invalid-date", now_et)
+        self.assertFalse(elig["eligible"])
+        self.assertEqual(elig["status"], "DATE_MISMATCH")
+        self.assertIn("invalid market_date format", elig["reason"].lower())
+
 if __name__ == "__main__":
     unittest.main()

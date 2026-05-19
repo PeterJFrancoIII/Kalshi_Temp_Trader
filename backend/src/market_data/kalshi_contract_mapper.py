@@ -438,6 +438,117 @@ def parse_kalshi_markets(snapshot_path: Path, target_date: Optional[str] = None)
         
     return apply_parsing_fallbacks(kmia_markets)
 
+def classify_market_date_eligibility(
+    market_date: str,
+    now_et: Any,
+    market_open_hour_et: int = 10
+) -> dict:
+    """
+    Classifies a market's date eligibility using Eastern Time (ET).
+    
+    Args:
+        market_date: Target date of the market in 'YYYY-MM-DD' format or datetime.date object.
+        now_et: Current timezone-aware datetime in America/New_York / US/Eastern.
+        market_open_hour_et: Opening hour of tomorrow's contracts (default 10 AM).
+        
+    Returns:
+        Dict containing:
+            - eligible: bool
+            - status: "ELIGIBLE_SAME_DAY" | "ELIGIBLE_NEXT_DAY" | "NOT_YET_OPEN" | "DATE_MISMATCH"
+            - reason: str
+            - market_date: str
+            - current_date_et: str
+            - current_time_et: str
+    """
+    from datetime import datetime as dt_class, date as date_class
+    
+    # 1. Parse target date and extract current date from now_et
+    try:
+        if isinstance(market_date, str):
+            target_dt = dt_class.strptime(market_date, "%Y-%m-%d").date()
+        elif isinstance(market_date, date_class):
+            target_dt = market_date
+        else:
+            target_dt = dt_class.strptime(str(market_date), "%Y-%m-%d").date()
+    except Exception as e:
+        return {
+            "eligible": False,
+            "status": "DATE_MISMATCH",
+            "reason": f"Invalid market_date format: {e}",
+            "market_date": str(market_date),
+            "current_date_et": now_et.strftime("%Y-%m-%d") if now_et else "unknown",
+            "current_time_et": now_et.strftime("%H:%M:%S") if now_et else "unknown"
+        }
+
+    if now_et is None:
+        return {
+            "eligible": False,
+            "status": "DATE_MISMATCH",
+            "reason": "Current time now_et is not provided.",
+            "market_date": target_dt.strftime("%Y-%m-%d"),
+            "current_date_et": "unknown",
+            "current_time_et": "unknown"
+        }
+
+    current_date_et = now_et.date()
+    
+    # 2. Compare target_dt to current_date_et
+    delta = (target_dt - current_date_et).days
+    
+    current_date_str = current_date_et.strftime("%Y-%m-%d")
+    current_time_str = now_et.strftime("%H:%M:%S")
+    market_date_str = target_dt.strftime("%Y-%m-%d")
+    
+    if delta == 0:
+        return {
+            "eligible": True,
+            "status": "ELIGIBLE_SAME_DAY",
+            "reason": "Market is for today.",
+            "market_date": market_date_str,
+            "current_date_et": current_date_str,
+            "current_time_et": current_time_str
+        }
+    elif delta == 1:
+        # Tomorrow's market. Eligible only at or after market_open_hour_et (10 AM ET).
+        if now_et.hour >= market_open_hour_et:
+            return {
+                "eligible": True,
+                "status": "ELIGIBLE_NEXT_DAY",
+                "reason": f"Market is for tomorrow, and prior-day 10:00 AM ET opening time has passed.",
+                "market_date": market_date_str,
+                "current_date_et": current_date_str,
+                "current_time_et": current_time_str
+            }
+        else:
+            return {
+                "eligible": False,
+                "status": "NOT_YET_OPEN",
+                "reason": f"Market is for tomorrow, but prior-day 10:00 AM ET opening time has not been reached.",
+                "market_date": market_date_str,
+                "current_date_et": current_date_str,
+                "current_time_et": current_time_str
+            }
+    elif delta < 0:
+        # Past date
+        return {
+            "eligible": False,
+            "status": "DATE_MISMATCH",
+            "reason": f"Market is for a past date ({market_date_str} < {current_date_str}).",
+            "market_date": market_date_str,
+            "current_date_et": current_date_str,
+            "current_time_et": current_time_str
+        }
+    else:
+        # Delta > 1 (Future date further out than tomorrow)
+        return {
+            "eligible": False,
+            "status": "DATE_MISMATCH",
+            "reason": f"Market is for a future date more than one day ahead ({market_date_str} > {current_date_str} + 1).",
+            "market_date": market_date_str,
+            "current_date_et": current_date_str,
+            "current_time_et": current_time_str
+        }
+
 if __name__ == "__main__":
     # Test with a local file if it exists
     test_path = Path("backend/data/processed/kalshi_market_snapshots/latest_kalshi_market_snapshot.json")

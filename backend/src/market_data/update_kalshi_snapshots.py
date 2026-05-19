@@ -163,13 +163,22 @@ def main():
                         prev_snapshot = json.load(f)
                     prev_markets = prev_snapshot.get("selected_temperature_markets", [])
                     
-                    # Filter for non-expired markets
-                    now_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    # Filter for non-expired markets using ET-aware classify_market_date_eligibility
+                    from market_data.kalshi_contract_mapper import classify_market_date_eligibility
+                    try:
+                        from zoneinfo import ZoneInfo
+                    except ImportError:
+                        from dateutil.tz import gettz as ZoneInfo
+                    
+                    now_et = datetime.now(ZoneInfo("America/New_York"))
                     fresh_prev_markets = []
                     for m in prev_markets:
                         t_date = parse_ticker_date(m.get("ticker", ""))
-                        if t_date and t_date >= now_date_str:
-                            fresh_prev_markets.append(m)
+                        if t_date:
+                            elig = classify_market_date_eligibility(t_date, now_et)
+                            # Keep markets that are eligible for today, tomorrow, or not yet open tomorrow
+                            if elig["eligible"] or elig["status"] == "NOT_YET_OPEN":
+                                fresh_prev_markets.append(m)
                     
                     if fresh_prev_markets:
                         print(f"Preserving {len(fresh_prev_markets)} fresh markets from previous valid snapshot.")
