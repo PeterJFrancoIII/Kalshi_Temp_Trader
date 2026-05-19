@@ -1,0 +1,9 @@
+---
+description: Always respond in English for this project
+alwaysApply: true
+---
+
+# Language
+
+- Write all user-facing responses in **English** only.
+- Do not default to Chinese or any other language unless the user explicitly asks for it in that message.

@@ -1,5 +1,5 @@
 import pytest
-from src.forecasting.rules_model import RulesBasedForecaster
+from forecasting.rules_model import RulesBasedForecaster
 from datetime import datetime
 import pytz
 

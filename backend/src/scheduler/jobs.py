@@ -5,11 +5,11 @@ import time
 from datetime import datetime, timedelta
 import pytz
 from sqlalchemy.orm import Session
-from ..db.session import SessionLocal
-from ..db.models import LiveObservation, ClimiaReport, DailyPrediction, Settlement, CalibrationMetric
-from ..ingestion.kmia_live_fetcher import fetch_wrh_timeseries
-from ..ingestion.kmia_obhistory_parser import parse_wrh_timeseries
-from ..calibration.reports import process_settlements_for_date
+from db.session import SessionLocal
+from db.models import LiveObservation, ClimiaReport, DailyPrediction, Settlement, CalibrationMetric
+from ingestion.kmia_live_fetcher import fetch_wrh_timeseries
+from ingestion.kmia_obhistory_parser import parse_wrh_timeseries
+from calibration.reports import process_settlements_for_date
 
 # Setup logging
 logging.basicConfig(
@@ -75,7 +75,7 @@ def run_midnight_prediction():
     # For now we'll call the entrypoint script
     try:
         import subprocess
-        subprocess.run(["python3", "-m", "src.scheduler.run_daily_prediction"], check=True)
+        subprocess.run(["python3", "-m", "scheduler.run_daily_prediction"], check=True)
     except Exception as e:
         logger.error(f"Failed to run daily prediction: {e}")
 

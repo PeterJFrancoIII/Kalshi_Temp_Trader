@@ -1,58 +1,26 @@
-import requests
-from typing import Dict, Any, Optional
+"""Deprecated re-export shim.
 
-class KalshiPublicClient:
-    """
-    Read-only unauthenticated client for Kalshi market data.
-    Uses the requests library as per requirement.
-    """
-    
-    # Standard public URL from the docs
-    BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
+The canonical read-only Kalshi client lives in
+``market_data.kalshi_public_client``. This shim exists only so legacy callers
+that still do ``from kalshi.client import KalshiPublicClient`` keep working
+during the Phase 2 consolidation. Migrate to::
 
-    def __init__(self, base_url: Optional[str] = None):
-        self.base_url = base_url or self.BASE_URL
+    from market_data.kalshi_public_client import KalshiPublicClient
 
-    def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Internal helper for unauthenticated GET requests.
-        """
-        url = f"{self.base_url}{path}"
-        response = requests.get(url, params=params, headers={"Accept": "application/json"})
-        response.raise_for_status()
-        return response.json()
+This file is scheduled for removal in Phase 3.
 
-    def get_events(self, series_ticker: Optional[str] = None, status: str = "open") -> Dict[str, Any]:
-        """
-        Fetches events from Kalshi.
-        """
-        params = {}
-        if series_ticker:
-            params["series_ticker"] = series_ticker
-        if status:
-            params["status"] = status
-        return self._get("/events", params=params)
+No real-money trading code is or will be added here.
+"""
 
-    def get_markets(self, series_ticker: Optional[str] = None, status: str = "open") -> Dict[str, Any]:
-        """
-        Fetches markets from Kalshi.
-        """
-        params = {}
-        if series_ticker:
-            params["series_ticker"] = series_ticker
-        if status:
-            params["status"] = status
-        return self._get("/markets", params=params)
+import warnings
 
-    def get_market(self, ticker: str) -> Dict[str, Any]:
-        """
-        Fetches a specific market by ticker.
-        """
-        return self._get(f"/markets/{ticker}")
+from market_data.kalshi_public_client import KalshiPublicClient
 
-    def get_orderbook(self, ticker: str) -> Dict[str, Any]:
-        """
-        Fetches the orderbook for a specific market.
-        """
-        return self._get(f"/markets/{ticker}/orderbook")
+warnings.warn(
+    "kalshi.client is deprecated; import KalshiPublicClient from "
+    "market_data.kalshi_public_client instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
+__all__ = ["KalshiPublicClient"]

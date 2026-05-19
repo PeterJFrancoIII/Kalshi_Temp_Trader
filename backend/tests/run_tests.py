@@ -38,6 +38,22 @@ if _MISSING:
 from test_paper_signal_generator import TestPaperSignalGenerator
 from test_update_kalshi_snapshots import TestUpdateKalshiSnapshots
 from test_artifact_paths import TestArtifactPaths
+from test_refactor_invariants import (
+    test_required_bins_defined_only_in_shared_types,
+    test_canonical_bins_match_mvp_lockdown,
+    test_no_src_dot_imports_in_backend_src,
+    test_no_src_dot_imports_in_backend_tests,
+    test_no_sys_path_insert_in_backend_src,
+    test_single_kalshi_public_client_definition,
+)
+from test_pipeline_inputs import (
+    test_climatological_defaults_match_documented_values,
+    test_build_dry_run_features_missing_snapshot_returns_defaults,
+    test_build_dry_run_features_with_obs_and_forecast,
+    test_build_dry_run_features_no_obs_for_target_date_marks_stale,
+    test_thunderstorm_severity_classification,
+    test_derive_weather_flags_overcast_partly_cloudy_distinction,
+)
 from test_calibration_metrics import (
     test_temp_to_bin_logic,
     test_top_bin_logic,
@@ -579,6 +595,22 @@ tests = [
     test_normalize_bundle_preserves_safety_and_missing_hourly_flag,
     test_normalize_current_does_not_use_expire_time_as_observation,
     test_normalize_current_observation_time_from_valid_fields,
+    # Phase 0 refactor guardrails
+    test_required_bins_defined_only_in_shared_types,
+    test_canonical_bins_match_mvp_lockdown,
+    # Phase 1 refactor guardrails
+    test_no_src_dot_imports_in_backend_src,
+    test_no_src_dot_imports_in_backend_tests,
+    test_no_sys_path_insert_in_backend_src,
+    # Phase 2 refactor guardrails
+    test_single_kalshi_public_client_definition,
+    # Phase 2.5 — features.pipeline_inputs extraction characterization
+    test_climatological_defaults_match_documented_values,
+    test_build_dry_run_features_missing_snapshot_returns_defaults,
+    test_build_dry_run_features_with_obs_and_forecast,
+    test_build_dry_run_features_no_obs_for_target_date_marks_stale,
+    test_thunderstorm_severity_classification,
+    test_derive_weather_flags_overcast_partly_cloudy_distinction,
 ]
 
 

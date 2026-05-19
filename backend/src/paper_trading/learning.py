@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime, timezone
-import glob
+from pathlib import Path
 
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
@@ -16,28 +16,28 @@ try:
 except ImportError:
     def is_excluded_from_learning(date_str): return False
 
+from paper_trading.paper_ledger import PaperLedger
+
+
 def load_json(path):
     if os.path.exists(path):
         try:
             with open(path, 'r') as f:
                 return json.load(f)
-        except:
+        except Exception:
             return {}
     return {}
 
+
 def get_open_trades_count():
-    ledger_path = os.path.join(PAPER_DIR, "paper_trade_ledger.jsonl")
-    count = 0
-    if os.path.exists(ledger_path):
-        with open(ledger_path, 'r') as f:
-            for line in f:
-                try:
-                    trade = json.loads(line)
-                    if trade.get('status') == 'open':
-                        count += 1
-                except:
-                    continue
-    return count
+    """Count open paper trades from the canonical PaperLedger.
+
+    Previously read a non-existent `paper_trade_ledger.jsonl` and silently
+    returned 0; now sources from `<PAPER_DIR>/ledger.json` via PaperLedger so
+    test monkeypatching of PAPER_DIR continues to work.
+    """
+    ledger = PaperLedger(ledger_path=Path(PAPER_DIR) / "ledger.json")
+    return ledger.count_open_trades()
 
 def generate_summary():
     os.makedirs(LEARNING_DIR, exist_ok=True)

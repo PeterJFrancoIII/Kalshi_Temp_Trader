@@ -1,21 +1,11 @@
 import os
 import json
 import pytest
-from src.calibration.comparison import (
-    score_model_comparison, 
-    write_comparison_json, 
+from calibration.comparison import (
+    score_model_comparison,
+    write_comparison_json,
     write_comparison_markdown,
-    save_comparison_report
-)
-
-import os
-import json
-import pytest
-from src.calibration.comparison import (
-    score_model_comparison, 
-    write_comparison_json, 
-    write_comparison_markdown,
-    save_comparison_report
+    save_comparison_report,
 )
 
 def get_sample_predictions():

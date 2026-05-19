@@ -1,11 +1,32 @@
+"""Generic JSONL-backed recommendation store (legacy / utility).
+
+This module is NOT the production paper ledger. The canonical production
+paper account lives in :mod:`paper_trading.paper_ledger` (PaperLedger,
+backed by ``ledger.json``). The helpers here predate that and remain only
+as a generic append/read/update JSONL primitive used by older unit tests.
+
+For new code:
+    - To record or query paper trades, use
+      :class:`paper_trading.paper_ledger.PaperLedger`.
+    - To persist arbitrary JSONL records, instantiate
+      :class:`storage.jsonl_store.JSONLStore` directly with an explicit path.
+
+Scheduled to be removed once the legacy tests migrate. Do not add new
+callers.
+
+NO REAL TRADING EXECUTION.
+"""
+
 import os
 from typing import List, Optional, Dict
 from storage.jsonl_store import JSONLStore
 
-# Default path for paper trading records
+# Default path for the legacy JSONL store. Kept only so the existing tests
+# pass without modification; production code reads ledger.json via
+# PaperLedger.
 DEFAULT_STORAGE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-    'data', 
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    'data',
     'paper_trades.jsonl'
 )
 

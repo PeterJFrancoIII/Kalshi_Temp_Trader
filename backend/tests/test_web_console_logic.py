@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from src.web_console import (
+from web_console import (
     format_probability,
     format_temp,
     format_num,
@@ -48,8 +48,8 @@ def test_is_signal_stale_or_mismatched():
     pass
 
 def test_format_probability():
-    from src.web_console import format_probability
-    
+    from web_console import format_probability
+
     assert format_probability(None) == "—"
     assert format_probability(0.5) == "50.0%"
     assert format_probability(0.5, show_plus=True) == "+50.0%"
@@ -58,7 +58,7 @@ def test_format_probability():
     assert format_probability("abc") == "—"
 
 def test_format_temp():
-    from src.web_console import format_temp
+    from web_console import format_temp
     assert format_temp(93.2) == "93.2°F"
     assert format_temp(93) == "93.0°F"
     assert format_temp(None) == "—"
@@ -66,7 +66,7 @@ def test_format_temp():
     assert format_temp("") == "—"
 
 def test_format_num():
-    from src.web_console import format_num
+    from web_console import format_num
     assert format_num(10.5, unit="mph") == "10.5 mph"
     assert format_num(None, unit="mph") == "—"
     assert format_num(62, unit="%") == "62.0%"
@@ -74,7 +74,7 @@ def test_format_num():
     assert format_num("N/A") == "—"
 
 def test_format_pnl():
-    from src.web_console import format_pnl
+    from web_console import format_pnl
     assert format_pnl(5.0) == "+$5.00"
     assert format_pnl(-2.5) == "-$2.50"
     assert format_pnl(0) == "$0.00"
@@ -85,7 +85,7 @@ def test_extract_market_rows_logic():
     Test that extract_market_rows handles missing fields gracefully
     and provides data for the active contracts table.
     """
-    from src.web_console import extract_market_rows
+    from web_console import extract_market_rows
     mock_markets = [
         {
             "ticker": "KX-1",
@@ -144,7 +144,7 @@ def test_render_weather_nws_formatting_handles_none():
     Test that the display logic for NWS weather table correctly handles None values
     and returns scalar strings (em-dash) instead of crashing or leaving None/dict.
     """
-    from src.web_console import extract_nws_observation_rows, format_temp, format_num
+    from web_console import extract_nws_observation_rows, format_temp, format_num
     import pandas as pd
     
     # Mock data with None values in various numeric fields
@@ -211,7 +211,7 @@ def test_render_paper_trading_formatting():
     Test that paper trading history handles PnL formatting safely
     without using Styler.applymap.
     """
-    from src.web_console import format_pnl
+    from web_console import format_pnl
     import pandas as pd
     
     # Mock settled trades
@@ -247,7 +247,7 @@ def test_normalize_signal_df_with_new_fields():
     """
     Test that new columns exist and formatting logic applies correct transformations.
     """
-    from src.web_console import format_temp, format_probability
+    from web_console import format_temp, format_probability
     
     mock_signals = [
         {
@@ -300,7 +300,7 @@ def test_render_active_forecasts_unhashable_dicts_fixed():
     when formatting signal columns.
     """
     # Test dictionary input
-    from src.web_console import format_probability
+    from web_console import format_probability
     
     # Define local formatters mimicking web_console.py
     def format_rd(rd):

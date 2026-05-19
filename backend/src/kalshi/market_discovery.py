@@ -1,5 +1,5 @@
 from typing import List, Dict, Any
-from kalshi.client import KalshiPublicClient
+from market_data.kalshi_public_client import KalshiPublicClient
 
 def discover_miami_daily_high_markets(client: KalshiPublicClient) -> List[Dict[str, Any]]:
     """

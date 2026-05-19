@@ -32,6 +32,25 @@ class PaperLedger:
         with open(self.ledger_path, "w") as f:
             json.dump(self.ledger_data, f, indent=2)
 
+    @property
+    def trades(self) -> List[Dict[str, Any]]:
+        """Read-only view of trades in the ledger."""
+        return list(self.ledger_data.get("trades", []))
+
+    def count_open_trades(self) -> int:
+        """Number of trades whose status is 'open' (case-insensitive).
+
+        This is the canonical replacement for older callers that scanned
+        a `paper_trade_ledger.jsonl` file by line count, which conflated
+        "all trades" with "open trades" and silently returned 0 when the
+        file was absent in production.
+        """
+        return sum(
+            1
+            for trade in self.ledger_data.get("trades", [])
+            if str(trade.get("status", "")).lower() == "open"
+        )
+
     def get_summary(self) -> Dict[str, Any]:
         """Calculates daily_pnl, weekly_pnl, and active_trades_by_date for RiskEngine."""
         now = datetime.now(timezone.utc)

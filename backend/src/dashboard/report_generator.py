@@ -2,10 +2,13 @@ import os
 from typing import Dict, List, Any
 from datetime import datetime
 
+from shared.types import REQUIRED_BINS as CANONICAL_REQUIRED_BINS
+
+
 class KMIAForecastReport:
     """Generates Python-based reports for KMIA temperature forecasts."""
-    
-    REQUIRED_BINS = ["<=78", "79-80", "81-82", "83-84", "85-86", ">=87"]
+
+    REQUIRED_BINS = CANONICAL_REQUIRED_BINS
 
     def __init__(self, data: Dict[str, Any]):
         self.data = data
@@ -142,8 +145,8 @@ class KMIAForecastReport:
 
 class ModelComparisonReport:
     """Generates reports comparing two different forecast models."""
-    
-    REQUIRED_BINS = ["<=78", "79-80", "81-82", "83-84", "85-86", ">=87"]
+
+    REQUIRED_BINS = CANONICAL_REQUIRED_BINS
 
     def __init__(self, v1_data: Dict[str, Any], v2_data: Dict[str, Any]):
         self.v1 = v1_data

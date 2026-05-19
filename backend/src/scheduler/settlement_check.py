@@ -1,18 +1,14 @@
 import argparse
 import json
 import os
-import sys
 from typing import Dict, Any, Optional
-
-# Ensure the src directory is on the path when run directly
-_SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _SRC_DIR not in sys.path:
-    sys.path.insert(0, _SRC_DIR)
 
 # Hard import: pydantic is required. Do not mock it.
 # If this fails, install dependencies: pip install -r backend/requirements.txt
 import pydantic  # noqa: F401  — validates environment on import
 
+# Standard entrypoint: `python -m scheduler.settlement_check` with
+# PYTHONPATH=backend/src (see scripts/settle_yesterday.sh).
 from ingestion.climia_parser import get_settlement_max_temp
 from calibration.metrics import score_prediction
 

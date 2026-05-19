@@ -8,17 +8,9 @@ from pathlib import Path
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
 
-try:
-    from src.ingestion.kmia_live_fetcher import fetch_wrh_timeseries, fetch_obhistory
-    from src.ingestion.kmia_obhistory_parser import parse_wrh_timeseries, parse_obhistory
-    from src.ingestion.nws_forecast_fetcher import fetch_nws_forecast
-except ImportError:
-    # Mocks for testing if imports fail
-    def fetch_wrh_timeseries(station="KMIA"): return None
-    def fetch_obhistory(station="KMIA"): return None
-    def parse_wrh_timeseries(data): return []
-    def parse_obhistory(html, ref=None): return [], []
-    def fetch_nws_forecast(grid_id="MFL", x=109, y=96): return None
+from ingestion.kmia_live_fetcher import fetch_wrh_timeseries, fetch_obhistory
+from ingestion.kmia_obhistory_parser import parse_wrh_timeseries, parse_obhistory
+from ingestion.nws_forecast_fetcher import fetch_nws_forecast
 
 logger = logging.getLogger(__name__)
 

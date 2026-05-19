@@ -6,6 +6,9 @@ from pathlib import Path
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
 
+from shared.artifact_paths import PAPER_LEDGER_FILE
+from paper_trading.paper_ledger import PaperLedger
+
 ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = ROOT / "backend" / "data" / "processed"
 CONFIG_DIR = ROOT / "backend" / "config"
@@ -13,7 +16,8 @@ CONFIG_DIR = ROOT / "backend" / "config"
 INPUT_PATHS = {
     "paper_signal": DATA_DIR / "paper_trading" / "latest_paper_signal.json",
     "paper_performance": DATA_DIR / "paper_trading" / "latest_paper_trading_performance.json",
-    "paper_ledger": DATA_DIR / "paper_trading" / "paper_trade_ledger.jsonl",
+    # Canonical production paper ledger (single JSON document).
+    "paper_ledger": PAPER_LEDGER_FILE,
     "kalshi_snapshot": DATA_DIR / "kalshi_market_snapshots" / "latest_kalshi_market_snapshot.json",
     "status_dir": DATA_DIR / "status",
     "reports_dir": DATA_DIR / "reports",
@@ -137,12 +141,16 @@ def generate_report():
     if paper_signal and paper_signal.get("best_signal"):
         best_paper_signal = paper_signal["best_signal"].get("market_ticker", "Unknown")
 
-    # Open paper trades
+    # Open paper trades — counted via the canonical PaperLedger so the value
+    # actually reflects open positions (the legacy line-count approach
+    # included settled/closed trades and silently returned 0 in production
+    # because the JSONL file never existed there).
     open_paper_trades = 0
     if INPUT_PATHS["paper_ledger"].exists():
         try:
-            with open(INPUT_PATHS["paper_ledger"], "r") as f:
-                open_paper_trades = sum(1 for line in f if line.strip())
+            open_paper_trades = PaperLedger(
+                ledger_path=INPUT_PATHS["paper_ledger"]
+            ).count_open_trades()
         except Exception:
             pass
 

@@ -1,6 +1,6 @@
 import math
 import pytest
-from src.calibration.metrics import (
+from calibration.metrics import (
     top_bin,
     brier_score_multiclass,
     log_loss_multiclass,
@@ -13,7 +13,7 @@ from src.calibration.metrics import (
     calculate_aggregate_stats_by_lead_time,
     score_multi_source,
 )
-from src.forecasting.bin_converter import temp_to_bin
+from forecasting.bin_converter import temp_to_bin
 
 def test_temp_to_bin_logic():
     # final high 82 maps to actual bin 81-82

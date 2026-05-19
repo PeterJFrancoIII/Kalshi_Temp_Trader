@@ -1,13 +1,13 @@
 import sys
 import os
 
-# Add backend to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Add backend/src to path so bare imports work when invoked directly.
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
-from src.calibration.comparison import (
-    score_model_comparison, 
-    write_comparison_json, 
-    write_comparison_markdown
+from calibration.comparison import (
+    score_model_comparison,
+    write_comparison_json,
+    write_comparison_markdown,
 )
 
 def test_score_model_comparison_logic():

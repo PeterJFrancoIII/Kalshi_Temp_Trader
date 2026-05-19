@@ -3,9 +3,9 @@ import os
 from datetime import datetime, date
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from src.db.models import Base, LiveObservation, ForecastSnapshot, DailyPrediction, Settlement, ClimiaReport
-from src.calibration.reports import process_settlements_for_date
-from src.scheduler.run_daily_prediction import run_prediction_pipeline
+from db.models import Base, LiveObservation, ForecastSnapshot, DailyPrediction, Settlement, ClimiaReport
+from calibration.reports import process_settlements_for_date
+from scheduler.run_daily_prediction import run_prediction_pipeline
 
 # Setup Test DB
 TEST_DB = "test_kalshi.db"
@@ -45,7 +45,7 @@ def test_full_pipeline_flow(db, monkeypatch):
     db.commit()
 
     # 2. Monkeypatch session to use our test db
-    from src.db import session
+    from db import session
     monkeypatch.setattr(session, "SessionLocal", TestingSessionLocal)
     monkeypatch.setattr(session, "engine", engine)
 

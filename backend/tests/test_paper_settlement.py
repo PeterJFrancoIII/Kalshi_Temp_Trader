@@ -5,7 +5,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
-from src.paper_trading import settlement
+from paper_trading import settlement
 
 class TestPaperSettlement(unittest.TestCase):
     def setUp(self):

@@ -139,11 +139,11 @@ def test_calculate_orderbook_metrics_empty():
 
 def test_read_only_constraint():
     """
-    Ensures that the client doesn't have any order placement methods.
+    Ensures that the canonical Kalshi client doesn't expose order methods.
     """
-    from kalshi.client import KalshiPublicClient
+    from market_data.kalshi_public_client import KalshiPublicClient
     client = KalshiPublicClient()
-    
+
     forbidden = ["create_order", "cancel_order", "place_order", "buy", "sell"]
     for f in forbidden:
         assert not hasattr(client, f), f"Client should not have method {f}"

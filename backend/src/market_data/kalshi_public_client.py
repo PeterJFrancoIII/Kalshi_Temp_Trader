@@ -58,9 +58,35 @@ class KalshiPublicClient:
         """Fetch details for a specific market ticker."""
         return self._get(f"/markets/{market_ticker}")
 
+    def get_markets(
+        self,
+        series_ticker: Optional[str] = None,
+        status: str = "open",
+    ) -> Dict[str, Any]:
+        """Fetch markets, optionally filtered by series ticker and status."""
+        params: Dict[str, Any] = {}
+        if series_ticker:
+            params["series_ticker"] = series_ticker
+        if status:
+            params["status"] = status
+        return self._get("/markets", params=params)
+
     def get_markets_for_series(self, series_ticker: str, status: str = "open") -> Dict[str, Any]:
         """Fetch markets for a specific series (e.g., KXKX)."""
-        return self._get("/markets", params={"series_ticker": series_ticker, "status": status})
+        return self.get_markets(series_ticker=series_ticker, status=status)
+
+    def get_events(
+        self,
+        series_ticker: Optional[str] = None,
+        status: str = "open",
+    ) -> Dict[str, Any]:
+        """Fetch events, optionally filtered by series ticker and status."""
+        params: Dict[str, Any] = {}
+        if series_ticker:
+            params["series_ticker"] = series_ticker
+        if status:
+            params["status"] = status
+        return self._get("/events", params=params)
 
     def get_orderbook(self, market_ticker: str) -> Dict[str, Any]:
         """Fetch orderbook for a specific market ticker."""

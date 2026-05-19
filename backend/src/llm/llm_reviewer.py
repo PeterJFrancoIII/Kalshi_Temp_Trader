@@ -1,6 +1,6 @@
 from typing import Dict, Any
 
-REQUIRED_BINS = ["<=78", "79-80", "81-82", "83-84", "85-86", ">=87"]
+from shared.types import REQUIRED_BINS
 
 def validate_llm_review_output(output: Dict[str, Any], observed_max_so_far_f: int) -> bool:
     """

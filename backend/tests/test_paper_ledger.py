@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
-from src.paper_trading.paper_ledger import PaperLedger
+from paper_trading.paper_ledger import PaperLedger
 
 class TestPaperLedger(unittest.TestCase):
     def setUp(self):

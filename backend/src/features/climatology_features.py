@@ -1,8 +1,7 @@
 from datetime import date, timedelta
 from typing import List, Optional, Dict, Any
 from forecasting.bin_converter import temp_to_bin as temp_to_required_bin
-
-REQUIRED_BINS = ["<=78", "79-80", "81-82", "83-84", "85-86", ">=87"]
+from shared.types import REQUIRED_BINS
 
 def count_records_by_bin(records: List[Dict[str, Any]]) -> Dict[str, int]:
     """
