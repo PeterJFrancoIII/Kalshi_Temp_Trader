@@ -40,6 +40,14 @@ from test_update_kalshi_snapshots import TestUpdateKalshiSnapshots
 from test_artifact_paths import TestArtifactPaths
 from test_feature_flags import TestLLMReviewFlag
 from test_jsonl_store import TestJSONLStore
+from test_signal_generator_helpers import (
+    TestBuildContractProbabilityPayload,
+    TestDecidePaperAction,
+    TestExtractMarketPricing,
+    TestLoadEventForecast,
+    TestResolveModelProbabilityFromBins,
+    TestResolveTempDistribution,
+)
 from test_refactor_invariants import (
     test_required_bins_defined_only_in_shared_types,
     test_canonical_bins_match_mvp_lockdown,
@@ -551,6 +559,13 @@ tests = [
     # Phase 3 guardrails — feature flags + JSONLStore locking
     lambda: run_unittest_class(TestLLMReviewFlag),
     lambda: run_unittest_class(TestJSONLStore),
+    # Phase 4.1 / 4.2 — signal_generator helper extractions
+    lambda: run_unittest_class(TestExtractMarketPricing),
+    lambda: run_unittest_class(TestResolveModelProbabilityFromBins),
+    lambda: run_unittest_class(TestBuildContractProbabilityPayload),
+    lambda: run_unittest_class(TestDecidePaperAction),
+    lambda: run_unittest_class(TestLoadEventForecast),
+    lambda: run_unittest_class(TestResolveTempDistribution),
     # Phase 9 P0 lookahead-safety tests
     test_backtest_coordinator_initialization,
     test_backtest_missing_data_handling,

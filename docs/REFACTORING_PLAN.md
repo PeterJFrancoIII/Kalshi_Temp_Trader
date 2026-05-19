@@ -1,6 +1,6 @@
 # Refactoring Plan — KMIA Kalshi Predictor
 
-**Status:** Phase 3 complete. All four phase-3 tasks delivered.  
+**Status:** Phase 4 complete. Signal generator orchestrator extracted into focused helpers.  
 **Baseline:** `bash scripts/run_tests.sh` — all tests passing (2026-05-19)  
 **Scope:** Tighter code structure and governance. **No real-money trading.**
 
@@ -183,6 +183,35 @@ flowchart TB
 - **3.3** — `shared/feature_flags.py` introduced as the single source of truth for opt-in runtime features; `LLM_REVIEW_ENABLED` defaults to OFF with env-var override (`KMIA_LLM_REVIEW_ENABLED=1`). `llm/llm_reviewer.py` docstring now states the deferral plainly and points at the flag and validator contract.
 - **3.4** — `storage/jsonl_store.py` rewritten with POSIX `fcntl` advisory locks (exclusive on write, shared on read) and read-modify-write atomicity for `update_record`. Verified with a concurrent-writer characterization test that two spawn-mode subprocesses appending 50 records each produce 100 intact, non-torn JSON lines.
 - **Test runner hygiene** — `run_tests.py` now guards its test loop under `if __name__ == "__main__"` so multiprocessing workers (spawn) no longer re-execute the whole suite when a test launches a subprocess.
+
+### Phase 4 — Decompose signal generator (completed 2026-05-19)
+
+| ID | Task | Status |
+|----|------|--------|
+| 4.1 | Extract per-market signal-build logic from `paper_trading/signal_generator.py` | Done |
+| 4.2 | Extract forecast-loading + distribution-resolution helpers | Done |
+| 4.3 | Add invariants + characterization tests for the new helpers | Done |
+
+**Why this matters.** `generate_paper_signal` had grown to a ~445-line orchestrator: nested per-event-date and per-market loops, two duplicated direct-lookup blocks against `model_bins`, two near-identical signal-dict construction paths, and a 30-line action-decision block buried inside the inner loop. Every paper trade we evaluate flows through this code, and the density made it hard to reason about whether the weather gate, the risk engine, or the stale-market check would win in an ambiguous case.
+
+**What changed.** Six pure helpers, each individually unit-tested:
+
+- `_extract_market_pricing(market, orderbook)` — encodes the dollar/cent/orderbook fallback chain for YES ask/bid/last.
+- `_resolve_model_probability_from_bins(model_bins, bin_str)` — single source of truth for the normalized-key direct lookup; returns `None` only when the bin is genuinely absent (distinguishable from a present-but-zero probability).
+- `_build_contract_probability_payload(...)` — assembles the `contract_prob_payload` dict, with a documented priority order (distribution mapper → stub → direct-bin override) and explicit stale-market handling.
+- `_decide_paper_action(edge, is_stale, risk_decision, weather_gate)` — codifies the five-rung action ladder (`NO SIGNAL → NO TRADE → PAPER BUY CANDIDATE → WATCH → NO EDGE`) with the weather gate as a strict fail-closed override.
+- `_load_event_forecast(...)` — resolves the forecast artifact for an event date, handling JSON vs MD, override paths, corrupt files, and date-mismatch warnings.
+- `_resolve_temp_distribution(...)` — picks the 1°F integer distribution (preferring the forecast's own field over a reconstruction from coarse bins).
+
+After the extractions, `generate_paper_signal` itself dropped from ~445 lines to ~325 lines, and the per-market loop body became flat enough to scan in one read.
+
+**Guardrails added.**
+
+- `test_signal_generator_helpers_remain_module_level` — fails if any of the six helpers is deleted or inlined.
+- `test_generate_paper_signal_stays_under_size_budget` — fails if the orchestrator function exceeds 400 source lines.
+- `test_signal_generator_helpers.py` — 27 unit tests covering each helper's contract, including the subtle “present-but-zero vs missing” distinction, the orderbook-override priority, and the weather-gate fail-closed override.
+
+**Verification.** Full test suite green (`run_tests.py`), and a live `generate_paper_signal()` invocation against the current artifacts produced the same 12-signal report across two event dates with the safety block intact.
 
 ---
 

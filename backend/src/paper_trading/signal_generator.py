@@ -199,6 +199,318 @@ def estimate_contract_probability(mapping: Dict[str, Any], model_bins: Dict[str,
     return total_prob, []
 
 
+# ---------------------------------------------------------------------------
+# Private helpers used by generate_paper_signal() below.
+#
+# These were extracted from a 400+ line monolithic implementation to make the
+# per-market signal pipeline readable and individually testable. Behavior is
+# unchanged.
+# ---------------------------------------------------------------------------
+
+
+def _extract_market_pricing(
+    market: Dict[str, Any], orderbook: Dict[str, Any]
+) -> Dict[str, Optional[float]]:
+    """Resolve YES ask, bid, and last_price (in dollars) for a market.
+
+    Resolution order:
+
+    1. Snapshot ``*_dollars`` fields on the market.
+    2. Cent fallback fields (``yes_ask``, ``yes_bid``, ``last_price``)
+       divided by 100.
+    3. Orderbook overrides (``top_yes_ask_dollars``,
+       ``top_yes_bid_dollars``, ``last_price_dollars``) — these take
+       priority over the snapshot when present, because the orderbook
+       artifact is fresher than the market snapshot.
+
+    Returns a dict ``{"ask": float|None, "bid": float|None, "last": float|None}``.
+    """
+    ask = market.get("yes_ask_dollars")
+    bid = market.get("yes_bid_dollars")
+    last = market.get("last_price_dollars")
+    ask = float(ask) if ask is not None else None
+    bid = float(bid) if bid is not None else None
+    last = float(last) if last is not None else None
+
+    if ask is None and market.get("yes_ask") is not None:
+        ask = market.get("yes_ask") / 100.0
+    if bid is None and market.get("yes_bid") is not None:
+        bid = market.get("yes_bid") / 100.0
+    if last is None and market.get("last_price") is not None:
+        last = market.get("last_price") / 100.0
+
+    if orderbook.get("top_yes_ask_dollars") is not None:
+        ask = float(orderbook["top_yes_ask_dollars"])
+    if orderbook.get("top_yes_bid_dollars") is not None:
+        bid = float(orderbook["top_yes_bid_dollars"])
+    if orderbook.get("last_price_dollars") is not None:
+        last = float(orderbook["last_price_dollars"])
+
+    return {"ask": ask, "bid": bid, "last": last}
+
+
+def _resolve_model_probability_from_bins(
+    model_bins: Dict[str, float], bin_str: Optional[str]
+) -> Optional[float]:
+    """Direct-lookup the model probability for ``bin_str`` in ``model_bins``.
+
+    Matches by :func:`shared.normalization.normalize_contract_key` so
+    ``">=87"`` and ``"≥87°F"`` are treated as the same bin. Returns
+    ``None`` if the bin is not in ``model_bins`` (so a present-but-zero
+    probability is distinguishable from a missing one).
+    """
+    if not (model_bins and bin_str):
+        return None
+    norm_bin = normalize_contract_key(bin_str)
+    for k, v in model_bins.items():
+        if normalize_contract_key(k) == norm_bin:
+            return v
+    return None
+
+
+def _build_contract_probability_payload(
+    market: Dict[str, Any],
+    mapping: Dict[str, Any],
+    temp_dist: Optional[Dict[int, float]],
+    model_bins: Dict[str, float],
+    bin_str: Optional[str],
+    is_stale: bool,
+) -> Dict[str, Any]:
+    """Build the ``contract_prob_payload`` attached to each signal.
+
+    Priority order:
+
+    1. Temperature distribution via
+       :func:`forecasting.contract_probability_mapper.map_contract_probability`.
+    2. A stub payload marked ``tradable=False`` if no distribution is
+       available (kept so downstream consumers always get a well-formed
+       payload).
+    3. Direct-lookup override against ``model_bins`` for backwards
+       compatibility with older v1 forecasts.
+
+    Stale markets are forced to probability 0.0 and ``tradable=False``.
+    """
+    if temp_dist is not None:
+        payload = map_contract_probability(temp_dist, mapping)
+    else:
+        payload = None
+
+    if payload is None:
+        payload = {
+            "market_ticker": market.get("ticker"),
+            "contract_range_label": bin_str,
+            "condition_type": mapping.get("condition_type", "unknown"),
+            "threshold_f": mapping.get("threshold_f"),
+            "range_high_f": mapping.get("range_high_f"),
+            "model_probability": None,
+            "tradable": False,
+            "warnings": ["No temperature distribution found"],
+            "distribution_source": "none",
+            "schema_version": "1.0.0",
+        }
+    else:
+        payload = dict(payload)
+
+    if is_stale:
+        payload["model_probability"] = 0.0
+        payload["tradable"] = False
+        payload["warnings"] = list(payload.get("warnings", [])) + ["Market is stale"]
+
+    # Direct-lookup override for backwards compatibility with older
+    # forecasts that publish ``model_bins`` directly. We always trust an
+    # explicit direct match over the distribution mapping, because the
+    # distribution may have rounding artifacts near contract boundaries.
+    direct_prob = _resolve_model_probability_from_bins(model_bins, bin_str)
+    if direct_prob is not None:
+        payload["model_probability"] = direct_prob
+
+    return payload
+
+
+def _load_event_forecast(
+    event_date: str,
+    override_forecast_path: Optional[Path],
+    override_forecast_date: Optional[str],
+) -> Dict[str, Any]:
+    """Resolve and load the forecast artifact for a specific event date.
+
+    Search order:
+
+    1. If ``override_forecast_path`` was passed AND its date matches the
+       event date, use it directly.
+    2. Otherwise, search ``REPORTS_DIR`` for the latest
+       ``kmia_forecast_<event_date>_rules_v2_climatology_*`` file.
+
+    The artifact is parsed into ``model_bins`` (label → probability)
+    and ``integer_dist`` (1°F-resolution integer distribution). The
+    bins come either from the JSON ``probability_bins`` field or from
+    parsing the markdown report when no JSON exists.
+
+    Returns a dict with keys:
+    ``forecast_path``, ``forecast_data``, ``model_bins``,
+    ``integer_dist``, ``status``, ``warnings``.
+
+    On clean load the status is ``"OK"``; missing forecasts produce
+    ``"NO_SIGNAL"`` and parser failures produce
+    ``"ERROR_LOADING_FORECAST"``.
+    """
+    result: Dict[str, Any] = {
+        "forecast_path": None,
+        "forecast_data": {},
+        "model_bins": {},
+        "integer_dist": {},
+        "status": "OK",
+        "warnings": [],
+    }
+
+    if override_forecast_path and event_date == override_forecast_date:
+        f_file: Optional[Path] = override_forecast_path
+    else:
+        f_file = find_forecast_for_date(event_date)
+    result["forecast_path"] = f_file
+
+    if not f_file:
+        result["status"] = "NO_SIGNAL"
+        result["warnings"].append(f"No forecast artifact found for {event_date}.")
+        return result
+
+    try:
+        if f_file.suffix == ".md":
+            model_bins = parse_forecast_bins_from_md(f_file)
+            forecast_data_obj: Dict[str, Any] = {"probability_bins": model_bins, "date": event_date}
+            integer_dist: Dict[int, float] = {}
+        else:
+            with open(f_file, "r") as f:
+                forecast_data_obj = json.load(f)
+                model_bins = forecast_data_obj.get("probability_bins", {})
+                raw_int_dist = forecast_data_obj.get("integer_distribution", {})
+                integer_dist = {int(k): v for k, v in raw_int_dist.items()}
+
+        result["forecast_data"] = forecast_data_obj
+        result["model_bins"] = model_bins
+        result["integer_dist"] = integer_dist
+
+        f_date = forecast_data_obj.get("date")
+        if f_date and f_date != event_date:
+            result["warnings"].append(
+                f"Forecast date {f_date} does not match event date {event_date}. "
+                "Signals may be unreliable."
+            )
+    except Exception as e:
+        result["status"] = "ERROR_LOADING_FORECAST"
+        result["warnings"].append(f"Error loading forecast {f_file.name}: {e}")
+        return result
+
+    if not model_bins and result["status"] == "OK":
+        result["status"] = "NO_SIGNAL"
+        result["warnings"].append(f"Forecast for {event_date} contains no probability bins.")
+
+    return result
+
+
+def _resolve_temp_distribution(
+    model_bins: Dict[str, float],
+    integer_dist: Dict[int, float],
+    nws_snapshot: Optional[Dict[str, Any]],
+    event_date: str,
+) -> Optional[Dict[int, float]]:
+    """Choose the 1°F-resolution distribution to feed the contract mapper.
+
+    Priority:
+
+    1. The forecast's own ``integer_distribution`` (preferred — produced
+       by the v2 climatology model).
+    2. A reconstructed distribution from coarse ``model_bins`` via
+       :func:`forecasting.distribution_utils.build_integer_distribution_from_bins`
+       (used for v1 forecasts and tests that don't supply a full
+       distribution).
+    3. ``None`` if neither is available.
+
+    The ``observed_max_so_far_f`` from the NWS snapshot is passed
+    through to the reconstruction so already-realized temperatures
+    zero out the lower bins.
+    """
+    if integer_dist:
+        return integer_dist
+    if model_bins:
+        observed_max = nws_snapshot.get("observed_max_so_far_f") if nws_snapshot else None
+        return build_integer_distribution_from_bins(
+            probability_bins=model_bins,
+            observed_max_so_far_f=observed_max,
+            station="KMIA",
+            target_date=event_date,
+        )
+    return None
+
+
+def _decide_paper_action(
+    edge: float,
+    is_stale: bool,
+    risk_decision: Dict[str, Any],
+    weather_gate: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Assign paper-trading action, confidence, and propagated risk fields.
+
+    Resolution order (first matching rule wins):
+
+    1. ``is_stale`` → ``NO SIGNAL`` with synthesized BLOCK risk decision.
+    2. Risk engine voted BLOCK → ``NO TRADE``.
+    3. ``edge >= 0.05`` → ``PAPER BUY CANDIDATE`` (``high`` if
+       ``edge >= 0.15``, else ``medium``).
+    4. ``0 < edge < 0.05`` → ``WATCH``.
+    5. ``edge <= 0`` → ``NO EDGE``.
+
+    After the above, the NWS weather gate acts as a strict fail-closed
+    override: if ``allow_paper_recommendations`` is ``False``, the
+    action is forced to ``NO TRADE`` regardless of the edge.
+
+    Returns ``{"action", "confidence", "risk_decision_val", "no_trade_reason_val"}``.
+    """
+    action = "NO EDGE"
+    conf = "low"
+
+    if is_stale:
+        action = "NO SIGNAL"
+        risk_decision_val: Any = {
+            "decision": "BLOCK",
+            "reason": "Market is stale",
+            "gates_evaluated": (
+                risk_decision.get("gates_evaluated", {})
+                if isinstance(risk_decision, dict) else {}
+            ),
+        }
+        no_trade_reason_val = "Market is stale"
+    elif risk_decision.get("decision") == "BLOCK":
+        action = "NO TRADE"
+        risk_decision_val = risk_decision
+        no_trade_reason_val = risk_decision.get("reason")
+    elif edge >= 0.05:
+        action = "PAPER BUY CANDIDATE"
+        conf = "high" if edge >= 0.15 else "medium"
+        risk_decision_val = risk_decision
+        no_trade_reason_val = risk_decision.get("reason")
+    elif edge > 0.0:
+        action = "WATCH"
+        risk_decision_val = risk_decision
+        no_trade_reason_val = risk_decision.get("reason")
+    else:
+        action = "NO EDGE"
+        risk_decision_val = risk_decision
+        no_trade_reason_val = risk_decision.get("reason")
+
+    if not weather_gate.get("allow_paper_recommendations", False):
+        action = "NO TRADE"
+        risk_decision_val = "BLOCK"
+        no_trade_reason_val = weather_gate.get("no_trade_reason")
+
+    return {
+        "action": action,
+        "confidence": conf,
+        "risk_decision_val": risk_decision_val,
+        "no_trade_reason_val": no_trade_reason_val,
+    }
+
+
 def _read_embedded_snapshot_timestamp(snapshot_path: Path) -> Optional[datetime]:
     """
     Reads the embedded timestamp from a Kalshi market snapshot JSON file.
@@ -314,89 +626,44 @@ def generate_paper_signal(
     for event_date in target_dates:
         markets = markets_by_date[event_date]
         event_ticker = markets[0].get("event_ticker")
-        
-        # Find matching forecast
-        f_file = None
-        if forecast_path and event_date == override_forecast_date:
-            f_file = forecast_path
-        else:
-            f_file = find_forecast_for_date(event_date)
-            
-        event_status = "OK"
-        event_warnings = []
-        event_signals = []
-        event_probs = {}
-        forecast_data_obj = {}
-        model_bins = {}
-        integer_dist = {}
 
-        if not f_file:
-            event_status = "NO_SIGNAL"
-            event_warnings.append(f"No forecast artifact found for {event_date}.")
-        else:
-            # Load forecast data
-            try:
-                if f_file.suffix == ".md":
-                    model_bins = parse_forecast_bins_from_md(f_file)
-                    forecast_data_obj = {"probability_bins": model_bins, "date": event_date}
-                else:
-                    with open(f_file, "r") as f:
-                        forecast_data_obj = json.load(f)
-                        model_bins = forecast_data_obj.get("probability_bins", {})
-                        raw_int_dist = forecast_data_obj.get("integer_distribution", {})
-                        integer_dist = {int(k): v for k, v in raw_int_dist.items()}
-                
-                # Check for date mismatch between loaded forecast and target event_date
-                f_date = forecast_data_obj.get("date")
-                if f_date and f_date != event_date:
-                    event_warnings.append(
-                        f"Forecast date {f_date} does not match event date {event_date}. Signals may be unreliable."
-                    )
-            except Exception as e:
-                event_status = "ERROR_LOADING_FORECAST"
-                event_warnings.append(f"Error loading forecast {f_file.name}: {e}")
-
-        if not model_bins and event_status == "OK":
-            event_status = "NO_SIGNAL"
-            event_warnings.append(f"Forecast for {event_date} contains no probability bins.")
+        forecast_load = _load_event_forecast(
+            event_date=event_date,
+            override_forecast_path=forecast_path,
+            override_forecast_date=override_forecast_date,
+        )
+        f_file = forecast_load["forecast_path"]
+        model_bins = forecast_load["model_bins"]
+        integer_dist = forecast_load["integer_dist"]
+        event_status = forecast_load["status"]
+        event_warnings = list(forecast_load["warnings"])
+        event_signals: List[Dict[str, Any]] = []
+        event_probs: Dict[str, float] = {}
 
         # Calculate probabilities and signals for this date
         if model_bins or integer_dist:
-            # Determine the temperature distribution to use for mapping
-            temp_dist_to_use = None
-            if integer_dist:
-                temp_dist_to_use = integer_dist
-            elif model_bins:
-                observed_max = nws_snapshot.get("observed_max_so_far_f") if nws_snapshot else None
-                temp_dist_to_use = build_integer_distribution_from_bins(
-                    probability_bins=model_bins,
-                    observed_max_so_far_f=observed_max,
-                    station="KMIA",
-                    target_date=event_date
-                )
+            temp_dist_to_use = _resolve_temp_distribution(
+                model_bins=model_bins,
+                integer_dist=integer_dist,
+                nws_snapshot=nws_snapshot,
+                event_date=event_date,
+            )
 
             # Pre-compute probabilities using map_contract_probability dynamically
             for m in markets:
                 ticker = m.get("ticker")
                 mapping = m.get("contract_mapping", {})
                 contract_bin_data = m.get("contract_bin")
-                
+
                 is_stale = (event_date < now_date_str)
                 bin_str = contract_bin_data.get("label") if contract_bin_data else mapping_to_bin_string(mapping)
-                
-                prob = None
+
                 if is_stale:
                     prob = 0.0
                 else:
-                    # 1. Try direct lookup in model_bins first for exact backwards-compatibility
-                    if model_bins and bin_str:
-                        norm_bin = normalize_contract_key(bin_str)
-                        for k, v in model_bins.items():
-                            if normalize_contract_key(k) == norm_bin:
-                                prob = v
-                                break
-                    
-                    # 2. Fall back to dynamic mapping
+                    # 1. Try direct lookup in model_bins first for exact backwards-compatibility.
+                    prob = _resolve_model_probability_from_bins(model_bins, bin_str)
+                    # 2. Fall back to dynamic mapping.
                     if prob is None and temp_dist_to_use is not None:
                         res_prob = map_contract_probability(temp_dist_to_use, mapping)
                         prob = res_prob.get("model_probability")
@@ -410,27 +677,9 @@ def generate_paper_signal(
                 ticker = m.get("ticker")
                 mapping = m.get("contract_mapping", {})
                 bin_str = m.get("contract_bin", {}).get("label") if m.get("contract_bin") else mapping_to_bin_string(mapping)
-                
-                # Pricing
-                ask = m.get("yes_ask_dollars")
-                bid = m.get("yes_bid_dollars")
-                last = m.get("last_price_dollars")
-                
-                # Cast to float if present
-                ask = float(ask) if ask is not None else None
-                bid = float(bid) if bid is not None else None
-                last = float(last) if last is not None else None
-                
-                # Cents fallback
-                if ask is None and m.get("yes_ask") is not None: ask = m.get("yes_ask") / 100.0
-                if bid is None and m.get("yes_bid") is not None: bid = m.get("yes_bid") / 100.0
-                if last is None and m.get("last_price") is not None: last = m.get("last_price") / 100.0
 
-                # Orderbook override
-                ob_m = all_orderbooks.get(ticker, {})
-                if ob_m.get("top_yes_ask_dollars") is not None: ask = float(ob_m["top_yes_ask_dollars"])
-                if ob_m.get("top_yes_bid_dollars") is not None: bid = float(ob_m["top_yes_bid_dollars"])
-                if ob_m.get("last_price_dollars") is not None: last = float(ob_m["last_price_dollars"])
+                prices = _extract_market_pricing(m, all_orderbooks.get(ticker, {}))
+                ask, bid, last = prices["ask"], prices["bid"], prices["last"]
 
                 executable_price = select_executable_price(ask, last)
                 if executable_price is None or executable_price == 0:
@@ -438,60 +687,32 @@ def generate_paper_signal(
                     continue
 
                 is_stale = (event_date < now_date_str)
-                
-                # Contract probability payload
-                contract_prob_payload = None
-                if temp_dist_to_use is not None:
-                    contract_prob_payload = map_contract_probability(temp_dist_to_use, mapping)
-                
-                if contract_prob_payload is None:
-                    contract_prob_payload = {
-                        "market_ticker": ticker,
-                        "contract_range_label": bin_str,
-                        "condition_type": mapping.get("condition_type", "unknown"),
-                        "threshold_f": mapping.get("threshold_f"),
-                        "range_high_f": mapping.get("range_high_f"),
-                        "model_probability": None,
-                        "tradable": False,
-                        "warnings": ["No temperature distribution found"],
-                        "distribution_source": "none",
-                        "schema_version": "1.0.0"
-                    }
-                else:
-                    contract_prob_payload = dict(contract_prob_payload)
-                
-                if is_stale:
-                    contract_prob_payload["model_probability"] = 0.0
-                    contract_prob_payload["tradable"] = False
-                    contract_prob_payload["warnings"] = list(contract_prob_payload.get("warnings", [])) + ["Market is stale"]
 
-                # For backwards compatibility / direct lookup if model_bins is present
-                if model_bins and bin_str:
-                    norm_bin = normalize_contract_key(bin_str)
-                    for k, v in model_bins.items():
-                        if normalize_contract_key(k) == norm_bin:
-                            contract_prob_payload["model_probability"] = v
-                            break
-
+                contract_prob_payload = _build_contract_probability_payload(
+                    market=m,
+                    mapping=mapping,
+                    temp_dist=temp_dist_to_use,
+                    model_bins=model_bins,
+                    bin_str=bin_str,
+                    is_stale=is_stale,
+                )
                 prob = contract_prob_payload.get("model_probability")
-                
-                # Check if the bin is explicitly missing from the forecast's model_bins
-                is_missing_from_model_bins = False
-                if model_bins and bin_str:
-                    norm_bin = normalize_contract_key(bin_str)
-                    has_match = False
-                    for k in model_bins.keys():
-                        if normalize_contract_key(k) == norm_bin:
-                            has_match = True
-                            break
-                    if not has_match:
-                        is_missing_from_model_bins = True
+
+                # A bin is "explicitly missing" when model_bins exists but does
+                # not list this contract bin — we surface a warning and emit a
+                # NO_SIGNAL entry rather than silently using the distribution
+                # mapper's interpolation.
+                is_missing_from_model_bins = bool(
+                    model_bins
+                    and bin_str
+                    and _resolve_model_probability_from_bins(model_bins, bin_str) is None
+                )
 
                 if prob is None or is_missing_from_model_bins:
                     event_warnings.append(f"{ticker}: Probability for bin {bin_str} not found in forecast.")
                     if not weather_gate.get("allow_paper_recommendations", False):
                         p_action = "NO TRADE"
-                        p_risk_dec = "BLOCK"
+                        p_risk_dec: Any = "BLOCK"
                         p_no_trade_reason = weather_gate.get("no_trade_reason")
                     else:
                         p_action = "NO SIGNAL"
@@ -518,23 +739,23 @@ def generate_paper_signal(
                     })
                     continue
 
-                # Compute fee- and slippage-aware trading edge
+                # Compute fee- and slippage-aware trading edge.
                 edge_payload = compute_edge(
                     model_probability=prob,
                     yes_ask=ask,
                     yes_bid=bid,
                     last_price=last,
-                    slippage_buffer=0.0
+                    slippage_buffer=0.0,
                 )
-                
+
                 edge = edge_payload.get("executable_edge", 0.0)
                 raw_edge = edge_payload.get("raw_edge", 0.0)
                 fb = edge_payload.get("breakeven_probability", 0.0)
-                
+
                 ev = calculate_expected_value(prob, fb)
                 speed, mins = calculate_speed_to_roi(ev, m.get("close_time"))
 
-                # Evaluate risk decision using evaluate_risk_decision (fail-closed check)
+                # Evaluate risk decision (fail-closed check).
                 risk_decision = evaluate_risk_decision(
                     weather_gate=weather_gate,
                     contract_probability=contract_prob_payload,
@@ -542,48 +763,20 @@ def generate_paper_signal(
                     manual_kill_switch=False,
                     min_executable_edge=0.0,
                     max_spread=0.15,
-                    near_boundary_risk=False
+                    near_boundary_risk=False,
                 )
 
-                # Assign action based on stale status, risk decision, and edge
-                action = "NO EDGE"
-                conf = "low"
-                
+                # Stale markets get sentinel edge/EV values so they sort last.
                 if is_stale:
-                    action = "NO SIGNAL"
                     edge = -999.0
                     ev = -999.0
-                    risk_decision_val = {
-                        "decision": "BLOCK",
-                        "reason": "Market is stale",
-                        "gates_evaluated": risk_decision.get("gates_evaluated", {}) if isinstance(risk_decision, dict) else {}
-                    }
-                    no_trade_reason_val = "Market is stale"
-                elif risk_decision.get("decision") == "BLOCK":
-                    action = "NO TRADE"
-                    risk_decision_val = risk_decision
-                    no_trade_reason_val = risk_decision.get("reason")
-                elif edge >= 0.05:
-                    action = "PAPER BUY CANDIDATE"
-                    conf = "medium"
-                    if edge >= 0.15:
-                        conf = "high"
-                    risk_decision_val = risk_decision
-                    no_trade_reason_val = risk_decision.get("reason")
-                elif edge > 0.0:
-                    action = "WATCH"
-                    risk_decision_val = risk_decision
-                    no_trade_reason_val = risk_decision.get("reason")
-                else:
-                    action = "NO EDGE"
-                    risk_decision_val = risk_decision
-                    no_trade_reason_val = risk_decision.get("reason")
 
-                # Strict fail-closed weather gate fallback:
-                if not weather_gate.get("allow_paper_recommendations", False):
-                    action = "NO TRADE"
-                    risk_decision_val = "BLOCK"
-                    no_trade_reason_val = weather_gate.get("no_trade_reason")
+                action_info = _decide_paper_action(
+                    edge=edge,
+                    is_stale=is_stale,
+                    risk_decision=risk_decision,
+                    weather_gate=weather_gate,
+                )
 
                 event_signals.append({
                     "market_ticker": ticker,
@@ -605,10 +798,10 @@ def generate_paper_signal(
                     "expected_value": round(ev, 4),
                     "speed_to_roi_score": speed,
                     "time_to_close_minutes": mins,
-                    "paper_action": action,
-                    "confidence": conf,
-                    "risk_decision": risk_decision_val,
-                    "no_trade_reason": no_trade_reason_val,
+                    "paper_action": action_info["action"],
+                    "confidence": action_info["confidence"],
+                    "risk_decision": action_info["risk_decision_val"],
+                    "no_trade_reason": action_info["no_trade_reason_val"],
                     "weather_gate_status": weather_gate.get("status"),
                     "yes_ask": ask,
                     "yes_bid": bid,

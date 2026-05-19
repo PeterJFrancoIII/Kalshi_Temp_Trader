@@ -219,6 +219,65 @@ def test_single_kalshi_public_client_definition():
     )
 
 
+def test_signal_generator_helpers_remain_module_level():
+    """Phase 4.1/4.2 helpers in signal_generator.py must stay module-level.
+
+    Inlining these back into ``generate_paper_signal`` would re-create the
+    400+ line monolith we just disassembled. Each helper is also tested
+    individually in ``test_signal_generator_helpers.py``; deleting one
+    would silently break those tests, but this invariant guarantees
+    they remain *discoverable* from the module surface.
+    """
+    text = (BACKEND_SRC / "paper_trading" / "signal_generator.py").read_text(encoding="utf-8")
+    required_helpers = [
+        "_extract_market_pricing",
+        "_resolve_model_probability_from_bins",
+        "_build_contract_probability_payload",
+        "_decide_paper_action",
+        "_load_event_forecast",
+        "_resolve_temp_distribution",
+    ]
+    missing = []
+    for name in required_helpers:
+        if not re.search(rf"^\s*def\s+{re.escape(name)}\s*\(", text, re.MULTILINE):
+            missing.append(name)
+    assert not missing, (
+        "signal_generator.py must keep these helpers as module-level "
+        f"functions; missing: {missing}. See docs/REFACTORING_PLAN.md "
+        "Phase 4 for rationale."
+    )
+
+
+def test_generate_paper_signal_stays_under_size_budget():
+    """The ``generate_paper_signal`` orchestrator must stay readable.
+
+    Counts source lines from ``def generate_paper_signal(`` through the
+    next top-level ``def``/``class``/``if __name__``. Budget is 400 lines;
+    the function is currently ~325 after Phase 4. Raising the budget
+    should be a deliberate decision, not a silent slide.
+    """
+    text = (BACKEND_SRC / "paper_trading" / "signal_generator.py").read_text(encoding="utf-8")
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith("def generate_paper_signal("):
+            start = i
+            break
+    assert start is not None, "generate_paper_signal definition not found"
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        line = lines[j]
+        if line.startswith("def ") or line.startswith("class ") or line.startswith("if __name__"):
+            end = j
+            break
+    length = end - start
+    assert length <= 400, (
+        f"generate_paper_signal grew to {length} lines (budget 400). "
+        "Extract a helper into signal_generator.py and add a "
+        "matching characterization test."
+    )
+
+
 def test_render_functions_live_under_console_pages_only():
     """``render_<tab>`` tab functions must live under console/pages/.
 
