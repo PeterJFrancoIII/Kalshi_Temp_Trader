@@ -38,6 +38,8 @@ if _MISSING:
 from test_paper_signal_generator import TestPaperSignalGenerator
 from test_update_kalshi_snapshots import TestUpdateKalshiSnapshots
 from test_artifact_paths import TestArtifactPaths
+from test_feature_flags import TestLLMReviewFlag
+from test_jsonl_store import TestJSONLStore
 from test_refactor_invariants import (
     test_required_bins_defined_only_in_shared_types,
     test_canonical_bins_match_mvp_lockdown,
@@ -545,6 +547,9 @@ tests = [
     lambda: run_unittest_class(TestPaperSignalGenerator),
     lambda: run_unittest_class(TestUpdateKalshiSnapshots),
     lambda: run_unittest_class(TestArtifactPaths),
+    # Phase 3 guardrails — feature flags + JSONLStore locking
+    lambda: run_unittest_class(TestLLMReviewFlag),
+    lambda: run_unittest_class(TestJSONLStore),
     # Phase 9 P0 lookahead-safety tests
     test_backtest_coordinator_initialization,
     test_backtest_missing_data_handling,
@@ -620,19 +625,31 @@ tests = [
 ]
 
 
-failed = 0
-for test in tests:
-    try:
-        test()
-        print(f"PASS: {test.__name__}")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"FAIL: {test.__name__} - {e}")
-        failed += 1
+def _run_all_tests():
+    """Execute every registered test, printing PASS/FAIL per item.
 
-if failed > 0:
-    sys.exit(1)
-else:
-    print("ALL TESTS PASSED.")
-    sys.exit(0)
+    Lives inside a function so that ``multiprocessing`` workers, which
+    re-import this module under the ``spawn`` start method, do not
+    re-run the whole suite when a test launches a subprocess. The
+    ``if __name__ == "__main__"`` guard below is the matching idiom.
+    """
+    failed = 0
+    for test in tests:
+        try:
+            test()
+            print(f"PASS: {test.__name__}")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"FAIL: {test.__name__} - {e}")
+            failed += 1
+
+    if failed > 0:
+        sys.exit(1)
+    else:
+        print("ALL TESTS PASSED.")
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    _run_all_tests()

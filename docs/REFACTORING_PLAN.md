@@ -1,6 +1,6 @@
 # Refactoring Plan — KMIA Kalshi Predictor
 
-**Status:** Phase 2 complete — see [REFACTORING_DEEP_DIVE.md](REFACTORING_DEEP_DIVE.md) for full analysis  
+**Status:** Phase 3 (3.2 / 3.3 / 3.4) complete; 3.1 (`web_console.py` split) is the only remaining item.  
 **Baseline:** `bash scripts/run_tests.sh` — all tests passing (2026-05-19)  
 **Scope:** Tighter code structure and governance. **No real-money trading.**
 
@@ -160,14 +160,21 @@ flowchart TB
 
 ### Phase 3 — Deepen modules (delete shallow layers)
 
-| ID | Task |
-|----|------|
-| 3.1 | Split `web_console.py` (~1.7k lines) into `console/pages/*` + shared loaders |
-| 3.2 | Merge `weather/nws_kmia_client` into ingestion orchestrator |
-| 3.3 | Wire or explicitly defer LLM review in pipeline (config flag) |
-| 3.4 | `jsonl_store` file locking or SQLite for paper history |
+| ID | Task | Status |
+|----|------|--------|
+| 3.1 | Split `web_console.py` (~1.7k lines) into `console/pages/*` + shared loaders | Pending |
+| 3.2 | Merge `weather/nws_kmia_client` into ingestion orchestrator | Done |
+| 3.3 | Wire or explicitly defer LLM review in pipeline (config flag) | Done |
+| 3.4 | `jsonl_store` file locking or SQLite for paper history | Done |
 
 **Exit criteria:** No file > ~400 lines without documented reason; interface tests at module boundaries.
+
+**Phase 3 batch completed 2026-05-19:**
+
+- **3.2** — `NWSKMIAClient` moved to canonical `ingestion/weather_status_writer.py`; `weather/nws_kmia_client.py` becomes a deprecation shim that re-exports the class and the underlying `fetch_*` functions so legacy patch paths keep working. `scripts/check_weather_ingestion.sh` now `export`s `PYTHONPATH` (was a silent no-op) and invokes the canonical module via `python -m ingestion.weather_status_writer`.
+- **3.3** — `shared/feature_flags.py` introduced as the single source of truth for opt-in runtime features; `LLM_REVIEW_ENABLED` defaults to OFF with env-var override (`KMIA_LLM_REVIEW_ENABLED=1`). `llm/llm_reviewer.py` docstring now states the deferral plainly and points at the flag and validator contract.
+- **3.4** — `storage/jsonl_store.py` rewritten with POSIX `fcntl` advisory locks (exclusive on write, shared on read) and read-modify-write atomicity for `update_record`. Verified with a concurrent-writer characterization test that two spawn-mode subprocesses appending 50 records each produce 100 intact, non-torn JSON lines.
+- **Test runner hygiene** — `run_tests.py` now guards its test loop under `if __name__ == "__main__"` so multiprocessing workers (spawn) no longer re-execute the whole suite when a test launches a subprocess.
 
 ---
 

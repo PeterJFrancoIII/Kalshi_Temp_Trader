@@ -3,7 +3,7 @@
 # NO REAL TRADING EXECUTION
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHONPATH="$ROOT_DIR/backend/src"
+export PYTHONPATH="$ROOT_DIR/backend/src"
 PYTHON_BIN="$ROOT_DIR/.venv/bin/python3"
 
 echo "===================================================="
@@ -11,9 +11,11 @@ echo "         KMIA WEATHER INGESTION AUDIT"
 echo "         NO REAL TRADING EXECUTION"
 echo "===================================================="
 
-# Run the ingestion client
+# Run the ingestion status writer (canonical module path).
+# The class is also re-exported from weather.nws_kmia_client for
+# backward compatibility — see that module's docstring.
 cd "$ROOT_DIR"
-"$PYTHON_BIN" backend/src/weather/nws_kmia_client.py
+"$PYTHON_BIN" -m ingestion.weather_status_writer
 
 STATUS_FILE="backend/data/processed/weather_ingestion/latest_weather_ingestion_status.json"
 

@@ -1,6 +1,37 @@
+"""Validation contract for a future LLM review integration.
+
+LLM review is **not wired into the daily pipeline in the MVP**. The
+``rules_v1`` and ``rules_v2_climatology`` models are deterministic and
+do not call an external LLM. This module defines the validation contract
+that any future LLM integration must satisfy before its output is
+allowed to feed downstream consumers (paper signals, risk engine,
+status writer).
+
+To enable LLM review:
+
+1. Implement a provider that returns a dict matching
+   :func:`validate_llm_review_output`'s expectations.
+2. Set ``KMIA_LLM_REVIEW_ENABLED=1`` (see
+   :mod:`shared.feature_flags`).
+3. Route the prediction through the provider and gate downstream
+   consumption on a successful call to
+   :func:`validate_llm_review_output`.
+
+The validator enforces:
+
+- The canonical :data:`shared.types.REQUIRED_BINS` are all present.
+- Probabilities are floats in ``[0, 1]`` and sum to ~1.0.
+- Impossible lower bins (already exceeded by ``observed_max_so_far_f``)
+  are zero.
+- A ``confidence`` field is ``"low"``, ``"medium"``, or ``"high"``.
+
+NO REAL TRADING EXECUTION.
+"""
+
 from typing import Dict, Any
 
 from shared.types import REQUIRED_BINS
+
 
 def validate_llm_review_output(output: Dict[str, Any], observed_max_so_far_f: int) -> bool:
     """

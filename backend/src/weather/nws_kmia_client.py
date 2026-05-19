@@ -1,157 +1,49 @@
-import logging
-import json
-import os
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List
-from pathlib import Path
+"""Backward-compat shim for the KMIA weather status orchestrator.
 
-# NO REAL TRADING EXECUTION
-# DRY-RUN / PAPER EVALUATION ONLY
+The class :class:`NWSKMIAClient` now lives in
+:mod:`ingestion.weather_status_writer`. This module re-exports it so
+existing callers and tests keep working.
 
-from ingestion.kmia_live_fetcher import fetch_wrh_timeseries, fetch_obhistory
-from ingestion.kmia_obhistory_parser import parse_wrh_timeseries, parse_obhistory
+The shim also re-imports the underlying fetcher functions
+(:func:`fetch_wrh_timeseries`, :func:`fetch_obhistory`,
+:func:`fetch_nws_forecast`) so legacy tests that patch
+``weather.nws_kmia_client.fetch_*`` continue to find a binding to patch.
+New tests should patch ``ingestion.weather_status_writer.fetch_*``
+instead.
+
+Operations callers should now use module-mode invocation::
+
+    PYTHONPATH=backend/src python3 -m ingestion.weather_status_writer
+
+NO REAL TRADING EXECUTION.
+"""
+
+from __future__ import annotations
+
+from ingestion.kmia_live_fetcher import fetch_obhistory, fetch_wrh_timeseries
+from ingestion.kmia_obhistory_parser import parse_obhistory, parse_wrh_timeseries
 from ingestion.nws_forecast_fetcher import fetch_nws_forecast
+from ingestion.weather_status_writer import (
+    DATA_DIR,
+    HISTORY_FILE,
+    STATUS_FILE,
+    NWSKMIAClient,
+    main,
+)
 
-logger = logging.getLogger(__name__)
+__all__ = [
+    "DATA_DIR",
+    "HISTORY_FILE",
+    "NWSKMIAClient",
+    "STATUS_FILE",
+    "fetch_nws_forecast",
+    "fetch_obhistory",
+    "fetch_wrh_timeseries",
+    "main",
+    "parse_obhistory",
+    "parse_wrh_timeseries",
+]
 
-# Paths
-ROOT = Path(__file__).resolve().parents[3]
-DATA_DIR = ROOT / "backend" / "data" / "processed" / "weather_ingestion"
-STATUS_FILE = DATA_DIR / "latest_weather_ingestion_status.json"
-HISTORY_FILE = ROOT / "backend" / "data" / "processed" / "history" / "kmia_daily_history.jsonl"
-
-class NWSKMIAClient:
-    def __init__(self, station: str = "KMIA"):
-        self.station = station
-        self.data_dir = DATA_DIR
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-
-    def get_live_status(self) -> Dict[str, Any]:
-        """
-        Fetches and summarizes the latest KMIA weather data.
-        """
-        status = {
-            "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
-            "generated_at_utc": None,
-            "observation_time_utc": None,
-            "station": self.station,
-            "source": "NWS/public",
-            "current_temp_f": None,
-            "observed_max_so_far_f": None,
-            "forecast_high_f": None,
-            "latest_observation_time": None,
-            "stale_data": True,
-            "history_record_count": 0,
-            "climatology_active": False,
-            "settlement_authority_status": "PRELIMINARY", # NWS live is not settlement truth
-            "metar_parse_status": "PENDING",
-            "station_status": "OK",
-            "kmia1m_status": "UNAVAILABLE", # 1-minute signal placeholder
-            "qc_flags": {},
-            "warnings": [],
-            "safety": {
-                "no_real_trading": True
-            }
-        }
-
-        # 1. Fetch Observations (JSON API)
-        raw_json = fetch_wrh_timeseries(self.station)
-        observations = []
-        if raw_json:
-            observations = parse_wrh_timeseries(raw_json)
-            status["metar_parse_status"] = "OK" if observations else "EMPTY"
-        
-        # 2. Fallback to HTML ObHistory if JSON fails or is empty
-        if not observations:
-            raw_html = fetch_obhistory(self.station)
-            if raw_html:
-                observations, parse_warns = parse_obhistory(raw_html)
-                status["warnings"].extend(parse_warns)
-                status["metar_parse_status"] = "OK_HTML_FALLBACK" if observations else "FAILED"
-
-        if observations:
-            latest = observations[-1]
-            status["current_temp_f"] = latest.temperature_f
-            status["latest_observation_time"] = latest.timestamp.isoformat()
-
-            # Staleness: ensure UTC via astimezone
-            if latest.timestamp.tzinfo:
-                latest_utc = latest.timestamp.astimezone(timezone.utc)
-            else:
-                # If naive, assume UTC label (typical for NWS wrh/obhistory if not already handled by parser)
-                latest_utc = latest.timestamp.replace(tzinfo=timezone.utc)
-            
-            status["observation_time_utc"] = latest_utc.isoformat()
-            status["generated_at_utc"] = latest_utc.isoformat() # Best estimate for live
-            
-            time_diff = datetime.now(timezone.utc) - latest_utc
-            status["stale_data"] = time_diff > timedelta(hours=1)
-
-            # Observed daily max: compare dates in ET (LST Day Boundary)
-            try:
-                from dateutil import tz as _tz
-                _ET = _tz.gettz("America/New_York")
-                today_et = datetime.now(_ET).date()
-                today_obs = []
-                for o in observations:
-                    if o.temperature_f is None:
-                        continue
-                    # Convert to ET for day-boundary check
-                    o_et = o.timestamp.astimezone(_ET) if o.timestamp.tzinfo else o.timestamp.replace(tzinfo=timezone.utc).astimezone(_ET)
-                    if o_et.date() == today_et:
-                        today_obs.append(o)
-                
-            except Exception:
-                # Fallback: use system local date if dateutil unavailable
-                today_et = datetime.now().date()
-                today_obs = [o for o in observations if o.timestamp.date() == today_et and o.temperature_f is not None]
-
-            if today_obs:
-                status["observed_max_so_far_f"] = max(o.temperature_f for o in today_obs)
-        else:
-            status["warnings"].append("No observations found via JSON or HTML.")
-            status["metar_parse_status"] = "MISSING"
-
-
-        # 3. Fetch NWS Forecast High
-        forecast_data = fetch_nws_forecast()
-        if forecast_data:
-            periods = forecast_data.get("properties", {}).get("periods", [])
-            if periods:
-                # First period is usually today's high or tonight's low
-                today_period = periods[0]
-                if today_period.get("isDaytime"):
-                    status["forecast_high_f"] = today_period.get("temperature")
-                elif len(periods) > 1 and periods[1].get("isDaytime"):
-                    status["forecast_high_f"] = periods[1].get("temperature")
-
-        # 4. History Count
-        if HISTORY_FILE.exists():
-            try:
-                count = 0
-                with open(HISTORY_FILE, "r") as f:
-                    for line in f:
-                        if line.strip():
-                            count += 1
-                status["history_record_count"] = count
-                status["climatology_active"] = count > 0
-            except Exception as e:
-                status["warnings"].append(f"Error reading history: {e}")
-
-        return status
-
-    def save_status(self, status: Dict[str, Any]):
-        """Saves status to JSON file."""
-        try:
-            with open(STATUS_FILE, "w") as f:
-                json.dump(status, f, indent=2)
-            logger.info(f"Saved weather ingestion status to {STATUS_FILE}")
-        except Exception as e:
-            logger.error(f"Failed to save weather status: {e}")
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    client = NWSKMIAClient()
-    status = client.get_live_status()
-    client.save_status(status)
-    print(json.dumps(status, indent=2))
+    main()
