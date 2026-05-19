@@ -50,6 +50,7 @@ from test_refactor_invariants import (
     test_no_paper_trade_ledger_jsonl_reference_in_paper_trading,
     test_single_kalshi_fee_formula_definition,
     test_orm_models_use_record_suffix,
+    test_render_functions_live_under_console_pages_only,
 )
 from test_pipeline_inputs import (
     test_climatological_defaults_match_documented_values,
@@ -615,6 +616,7 @@ tests = [
     test_no_paper_trade_ledger_jsonl_reference_in_paper_trading,
     test_single_kalshi_fee_formula_definition,
     test_orm_models_use_record_suffix,
+    test_render_functions_live_under_console_pages_only,
     # Phase 2.5 — features.pipeline_inputs extraction characterization
     test_climatological_defaults_match_documented_values,
     test_build_dry_run_features_missing_snapshot_returns_defaults,

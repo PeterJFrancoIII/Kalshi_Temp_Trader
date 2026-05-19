@@ -217,3 +217,40 @@ def test_single_kalshi_public_client_definition():
         "KalshiPublicClient must only be defined in market_data/kalshi_public_client.py; "
         f"found definitions in: {definitions}"
     )
+
+
+def test_render_functions_live_under_console_pages_only():
+    """``render_<tab>`` tab functions must live under console/pages/.
+
+    Phase 3.1 split web_console.py into focused tab modules. The
+    entry-point file should only *import* tab renderers, never *define*
+    them — otherwise the file creeps back to its old 1.7k-line shape
+    and the per-tab boundary erodes.
+
+    The Streamlit multipage convention under ``backend/src/pages/`` is
+    exempt: those files are auto-discovered standalone Streamlit pages,
+    not tab renderers for the main console, and their internal
+    ``render_*`` helpers are private to each page.
+    """
+    pattern = re.compile(r"^\s*def\s+render_[A-Za-z_]+\s*\(", re.MULTILINE)
+    expected_dir = BACKEND_SRC / "console" / "pages"
+    streamlit_multipage_dir = BACKEND_SRC / "pages"
+    offenders = []
+    for py_file in BACKEND_SRC.rglob("*.py"):
+        text = py_file.read_text(encoding="utf-8")
+        if not pattern.search(text):
+            continue
+        # Skip Streamlit's auto-discovered multipage directory; those
+        # files own their own internal render helpers.
+        try:
+            py_file.relative_to(streamlit_multipage_dir)
+            continue
+        except ValueError:
+            pass
+        if py_file.parent != expected_dir:
+            offenders.append(py_file.relative_to(BACKEND_SRC))
+    assert not offenders, (
+        "render_* tab functions must live under console/pages/; "
+        f"unexpected definitions found in: {offenders}. Move the render "
+        "function to console/pages/<tab>.py and import it from web_console."
+    )

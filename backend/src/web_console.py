@@ -1,1528 +1,210 @@
-import streamlit as st
+"""Streamlit dashboard entry point for the KMIA Kalshi predictor.
+
+The historical 1.7k-line single-file implementation has been split into
+focused modules under :mod:`console`:
+
+- :mod:`console.data_helpers` — pure helpers (file IO, formatters,
+  domain extractors).
+- :mod:`console.pages` — one ``render_<tab>`` function per submodule.
+
+This file now owns three responsibilities only:
+
+1. Streamlit page configuration and the safety banner.
+2. Loading the per-render artifact set and deriving ``app_state``.
+3. Wiring the sidebar and the eight tab strip to the page renderers.
+
+For backward compatibility with the existing test suite (which imports
+``from web_console import format_temp`` etc.), all helper names from
+:mod:`console.data_helpers` are re-exported at module scope.
+
+NO REAL TRADING EXECUTION. DRY-RUN / PAPER EVALUATION ONLY.
+"""
+
+from __future__ import annotations
+
 import json
-import os
 import logging
 from datetime import datetime
 from pathlib import Path
+
 import pandas as pd
-import re
-from typing import Optional, Tuple
-from shared.timestamp_utils import parse_ticker_date
+import streamlit as st
+
+from console.data_helpers import (
+    aggregate_warnings,
+    calculate_hypothetical_costs,
+    derive_orderbook_prices,
+    extract_best_signal,
+    extract_bin_from_market,
+    extract_market_rows,
+    extract_nws_observation_rows,
+    format_num,
+    format_pnl,
+    format_probability,
+    format_temp,
+    is_signal_stale_or_mismatched,
+    latest_file,
+    load_forecast_data,
+    load_json,
+    load_latest_forecast_summary,
+    load_latest_json,
+    load_text,
+    normalize_signal_df,
+    pretty_format_bin,
+    safe_dataframe,
+)
+from console.pages import (
+    render_active_forecasts,
+    render_backtesting,
+    render_calibration_learning,
+    render_command_center,
+    render_kalshi_market_console,
+    render_paper_trading,
+    render_system_health,
+    render_weather_nws,
+)
+from shared.artifact_paths import (
+    BACKTEST_REPORTS_DIR,
+    CALIBRATION_DIR,
+    KALSHI_MARKET_SNAPSHOT_DIR,
+    LATEST_KALSHI_MARKET_SNAPSHOT,
+    LATEST_KALSHI_ORDERBOOKS,
+    LATEST_NWS_KMIA_SNAPSHOT,
+    LATEST_PAPER_SIGNAL,
+    LOGS_DIR,
+    PAPER_LEDGER_FILE,
+    PAPER_TRADING_DIR,
+    PROCESSED_DATA_DIR,
+    REPORTS_DIR,
+    STATUS_DIR,
+    WEATHER_NWS_DIR,
+)
 
 logger = logging.getLogger(__name__)
 
-# NO REAL TRADING EXECUTION
-# DRY-RUN / PAPER EVALUATION ONLY
-
-# Resolution of Paths
+# --- Legacy local aliases (kept so existing tests / runtime code that
+# imports these names from ``web_console`` continue to work). The
+# canonical paths live in :mod:`shared.artifact_paths`. ----------------
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / "backend" / "data" / "processed"
-STATUS_DIR = DATA / "status"
-REPORTS_DIR = DATA / "reports"
-LOGS_DIR = DATA / "logs"
-CAL_DIR = DATA / "aggregate_calibration"
-KALSHI_DIR = DATA / "kalshi_market_snapshots"
-HISTORY_FILE = DATA / "history" / "kmia_daily_history.jsonl"
-PAPER_DIR = DATA / "paper_trading"
+DATA = PROCESSED_DATA_DIR
+CAL_DIR = CALIBRATION_DIR
+KALSHI_DIR = KALSHI_MARKET_SNAPSHOT_DIR
+PAPER_DIR = PAPER_TRADING_DIR
+NWS_DIR = WEATHER_NWS_DIR
 LEARNING_DIR = DATA / "learning"
-NWS_DIR = DATA / "weather_nws"
 WEATHER_INGESTION_DIR = DATA / "weather_ingestion"
+HISTORY_FILE = DATA / "history" / "kmia_daily_history.jsonl"
+
+
+__all__ = [
+    # re-exported helpers (keep this list in sync with console.data_helpers)
+    "aggregate_warnings",
+    "calculate_hypothetical_costs",
+    "derive_orderbook_prices",
+    "extract_best_signal",
+    "extract_bin_from_market",
+    "extract_market_rows",
+    "extract_nws_observation_rows",
+    "format_num",
+    "format_pnl",
+    "format_probability",
+    "format_temp",
+    "is_signal_stale_or_mismatched",
+    "latest_file",
+    "load_forecast_data",
+    "load_json",
+    "load_latest_forecast_summary",
+    "load_latest_json",
+    "load_text",
+    "normalize_signal_df",
+    "pretty_format_bin",
+    "safe_dataframe",
+    # re-exported page renderers
+    "render_active_forecasts",
+    "render_backtesting",
+    "render_calibration_learning",
+    "render_command_center",
+    "render_kalshi_market_console",
+    "render_paper_trading",
+    "render_system_health",
+    "render_weather_nws",
+]
+
+
+# --- Streamlit entry point -------------------------------------------
 
-try:
-    from shared.manual_corrections import load_manual_corrections
-except ImportError:
-    def load_manual_corrections(): return {}
-
-from shared.artifact_paths import LATEST_NWS_KMIA_SNAPSHOT, LATEST_KALSHI_MARKET_SNAPSHOT, LATEST_KALSHI_ORDERBOOKS, LATEST_PAPER_SIGNAL, PAPER_LEDGER_FILE, BACKTEST_REPORTS_DIR
-
-# --- CORE HELPERS ---
-def latest_file(directory: Path, pattern: str) -> Optional[Path]:
-    if not directory.exists():
-        return None
-    files = list(directory.glob(pattern))
-    if not files:
-        return None
-    return max(files, key=os.path.getmtime)
-
-def load_latest_json(directory: Path, pattern: str) -> tuple[Optional[dict], Optional[Path]]:
-    path = latest_file(directory, pattern)
-    if path:
-        return load_json(path), path
-    return None, None
-
-def load_text(path):
-    if path and path.exists():
-        with open(path, 'r') as f:
-            return f.read()
-    return None
-
-def load_json(path):
-    if path and path.exists():
-        with open(path, 'r') as f:
-            return json.load(f)
-    return None
-
-def format_probability(value, show_plus=False):
-    if value is None:
-        return "—"
-    try:
-        prefix = "+" if show_plus and float(value) > 0 else ""
-        return f"{prefix}{float(value) * 100:.1f}%"
-    except (TypeError, ValueError):
-        return "—"
-
-def extract_bin_from_market(mkt: dict) -> Optional[str]:
-    """Extracts a standardized forecast-style bin label from market metadata."""
-    if not isinstance(mkt, dict):
-        return None
-    strike_type = mkt.get("strike_type")
-    floor = mkt.get("floor_strike")
-    cap = mkt.get("cap_strike")
-    
-    if strike_type == "greater":
-        return f">={int(floor) + 1}" if floor is not None else None
-    elif strike_type == "less":
-        return f"<={int(cap) - 1}" if cap is not None else None
-    elif floor is not None and cap is not None:
-        return f"{int(floor)}-{int(cap)}"
-    return None
-
-def pretty_format_bin(label: str) -> str:
-    """Pretty-prints bin labels for UI display."""
-    if not label or label == "unknown":
-        return label
-    
-    # Standardize common labels
-    res = label.replace(">=", "≥").replace("<=", "≤")
-    
-    # Add degree symbol if it looks like a temperature/number
-    if any(c.isdigit() for c in res):
-        # Don't add if already has it
-        if "°F" not in res:
-            res += "°F"
-    return res
-
-def format_num(val, unit=""):
-    """Formats a number to 1 decimal place with an optional unit."""
-    if val is None or val == "N/A" or val == "":
-        return "—"
-    try:
-        res = f"{float(val):.1f}"
-        if unit:
-            if unit == "%":
-                res += unit
-            else:
-                res += f" {unit}"
-        return res
-    except (ValueError, TypeError):
-        return str(val)
-
-def format_temp(val):
-    """Formats a temperature to 1 decimal place with °F."""
-    if val is None or val == "N/A" or val == "":
-        return "—"
-    try:
-        return f"{float(val):.1f}°F"
-    except (ValueError, TypeError):
-        return str(val)
-
-def format_pnl(val):
-    """Formats PnL with $ and +/- prefix, using em-dash for None."""
-    if val is None or val == "N/A" or val == "" or pd.isna(val):
-        return "—"
-    try:
-        val_f = float(val)
-        if val_f > 0:
-            return f"+${val_f:.2f}"
-        elif val_f < 0:
-            return f"-${abs(val_f):.2f}"
-        else:
-            return f"$0.00"
-    except (ValueError, TypeError):
-        return str(val)
-
-def load_forecast_data(forecast_filename):
-    if not forecast_filename:
-        return None
-    # Check REPORTS_DIR first
-    path = REPORTS_DIR / forecast_filename
-    if path.exists():
-        return load_json(path)
-    # Fallback to direct path if it's absolute
-    if os.path.isabs(forecast_filename) and os.path.exists(forecast_filename):
-        return load_json(Path(forecast_filename))
-    return None
-
-def normalize_signal_df(df):
-    """Normalize aliases for signal dataframes."""
-    if "forecast_bin" not in df.columns and "bin" in df.columns:
-        df["forecast_bin"] = df["bin"]
-    if "contract_ticker" not in df.columns and "market_ticker" in df.columns:
-        df["contract_ticker"] = df["market_ticker"]
-    if "market_implied_probability" not in df.columns and "market_probability" in df.columns:
-        df["market_implied_probability"] = df["market_probability"]
-    if "action" not in df.columns and "paper_action" in df.columns:
-        df["action"] = df["paper_action"]
-    if "time_to_close" not in df.columns and "time_to_close_minutes" in df.columns:
-        df["time_to_close"] = df["time_to_close_minutes"]
-    if "speed_to_roi" not in df.columns and "speed_to_roi_score" in df.columns:
-        df["speed_to_roi"] = df["speed_to_roi_score"]
-    return df
-
-def safe_dataframe(df, display_columns, fallback_message="No displayable columns found.", formatters=None):
-    """Safely render a DataFrame ignoring missing columns and using scalar formatting."""
-    available_columns = [c for c in display_columns if c in df.columns]
-    if available_columns:
-        df_display = df[available_columns].copy()
-        if formatters:
-            for col, fmt in formatters.items():
-                if col in df_display.columns:
-                    if callable(fmt):
-                        df_display[col] = df_display[col].apply(fmt)
-                    else:
-                        # Handle string formatters like "{:.1f}"
-                        df_display[col] = df_display[col].apply(
-                            lambda x: fmt.format(x) if x is not None and not pd.isna(x) else "—"
-                        )
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
-    else:
-        st.info(fallback_message)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-def load_latest_forecast_summary(report_path):
-    """
-    Extracts today's forecast and top bin from the latest markdown report.
-    Returns a dict with status keys.
-    """
-    res = {
-        "best_single_number": "Unknown",
-        "top_probability_bin": "Unknown",
-        "source_file": str(report_path) if report_path else None,
-        "warnings": []
-    }
-
-    if not report_path:
-        return res
-
-    if isinstance(report_path, str):
-        if not os.path.isabs(report_path) and "/" not in report_path:
-            report_path = REPORTS_DIR / report_path
-        else:
-            report_path = Path(report_path)
-
-    if not report_path.exists():
-        res["warnings"].append(f"Report file not found: {report_path.name}")
-        return res
-    
-    content = load_text(report_path)
-    if not content:
-        res["warnings"].append(f"Report file empty: {report_path.name}")
-        return res
-    
-    sn_match = re.search(r"\*\*(?:Best Single-Number Estimate|Forecast High):\*\*\s*([\d.]+)", content)
-    if sn_match:
-        res["best_single_number"] = sn_match.group(1)
-        
-    bin_section = re.search(r"## Probability Bins(.*?)(?:##|\Z)", content, re.DOTALL)
-    if bin_section:
-        rows = re.findall(r"\|\s*([^|]+?)\s*\|\s*([\d.]+)%\s*\|", bin_section.group(1))
-        bins = []
-        for b_label, b_prob in rows:
-            try:
-                bins.append((b_label.strip(), float(b_prob)))
-            except ValueError:
-                continue
-        
-        if bins:
-            bins.sort(key=lambda x: x[1], reverse=True)
-            res["top_probability_bin"] = f"{bins[0][0]} ({bins[0][1]}%)"
-            
-    return res
-
-def extract_nws_observation_rows(n_data):
-    candidate_paths = [
-        ("recent_observations_table",),
-        ("observations",),
-        ("recent_observations",),
-        ("live_observations",),
-        ("parsed_observations",),
-        ("api_inputs", "recent_observations_table"),
-        ("api_inputs", "observations"),
-        ("raw", "observations"),
-    ]
-    if not isinstance(n_data, dict):
-        return []
-    for path in candidate_paths:
-        node = n_data
-        for key in path:
-            if isinstance(node, dict):
-                node = node.get(key)
-            else:
-                node = None
-                break
-        if isinstance(node, list) and node and all(isinstance(x, dict) for x in node):
-            return node
-    return []
-
-def extract_best_signal(p_data: dict) -> Optional[dict]:
-    if not isinstance(p_data, dict):
-        return None
-    best_sig = p_data.get("best_signal")
-    if not best_sig and p_data.get("signals"):
-        best_sig = p_data["signals"][0]
-    return best_sig
-
-def aggregate_warnings(p_data: dict, mkts: dict, n_data: dict, status_data: dict) -> list[str]:
-    all_warnings = []
-    if p_data and isinstance(p_data, dict) and p_data.get("warnings"):
-        all_warnings.extend(p_data["warnings"])
-    if mkts and isinstance(mkts, dict) and mkts.get("warnings"):
-        all_warnings.extend(mkts["warnings"])
-    if n_data and isinstance(n_data, dict) and n_data.get("warnings"):
-        all_warnings.extend(n_data["warnings"])
-    if status_data and isinstance(status_data, dict) and status_data.get("warnings"):
-        all_warnings.extend(status_data["warnings"])
-    return all_warnings
-
-
-def derive_orderbook_prices(orderbook: dict) -> dict:
-    """
-    Derives YES/NO asks from bids (100 - opposite bid).
-    """
-    prices = {
-        "top_yes_bid": None,
-        "top_no_bid": None,
-        "derived_yes_ask": None,
-        "derived_no_ask": None
-    }
-    if not isinstance(orderbook, dict):
-        return prices
-        
-    yes_bids = orderbook.get("yes_bids", [])
-    no_bids = orderbook.get("no_bids", [])
-    
-    if yes_bids and len(yes_bids) > 0:
-        prices["top_yes_bid"] = yes_bids[0][0]
-    else:
-        # Fallback to market snapshot prices (convert dollars to cents)
-        val = orderbook.get("top_yes_bid_dollars")
-        if val is not None:
-            prices["top_yes_bid"] = int(val * 100)
-            
-    if no_bids and len(no_bids) > 0:
-        prices["top_no_bid"] = no_bids[0][0]
-    else:
-        val = orderbook.get("top_no_bid_dollars")
-        if val is not None:
-            prices["top_no_bid"] = int(val * 100)
-        
-    # Derived Ask Logic following priority:
-    # 1. Real orderbook depth derived values
-    # 2. Direct market snapshot fields
-    # 3. Derived opposite-side fallback
-    
-    # YES Ask
-    if no_bids and len(no_bids) > 0:
-        prices["derived_yes_ask"] = 100 - no_bids[0][0]
-    elif orderbook.get("top_yes_ask_dollars") is not None:
-        prices["derived_yes_ask"] = int(orderbook.get("top_yes_ask_dollars") * 100)
-    elif prices["top_no_bid"] is not None:
-        prices["derived_yes_ask"] = 100 - prices["top_no_bid"]
-        
-    # NO Ask
-    if yes_bids and len(yes_bids) > 0:
-        prices["derived_no_ask"] = 100 - yes_bids[0][0]
-    elif orderbook.get("top_no_ask_dollars") is not None:
-        prices["derived_no_ask"] = int(orderbook.get("top_no_ask_dollars") * 100)
-    elif prices["top_yes_bid"] is not None:
-        prices["derived_no_ask"] = 100 - prices["top_yes_bid"]
-        
-    return prices
-
-
-def calculate_hypothetical_costs(quantity: int, prices: dict) -> dict:
-    """
-    Calculates costs and proceeds for paper trading.
-    """
-    results = {
-        "buy_yes_cost": None,
-        "buy_no_cost": None,
-        "sell_yes_proceeds": None,
-        "sell_no_proceeds": None,
-        "max_payout": quantity * 1.00,
-        "max_loss_buy_yes": None,
-        "max_loss_buy_no": None
-    }
-    
-    if prices.get("derived_yes_ask") is not None:
-        results["buy_yes_cost"] = quantity * prices["derived_yes_ask"] / 100.0
-        results["max_loss_buy_yes"] = results["buy_yes_cost"]
-    if prices.get("derived_no_ask") is not None:
-        results["buy_no_cost"] = quantity * prices["derived_no_ask"] / 100.0
-        results["max_loss_buy_no"] = results["buy_no_cost"]
-        
-    if prices.get("top_yes_bid") is not None:
-        results["sell_yes_proceeds"] = quantity * prices["top_yes_bid"] / 100.0
-    if prices.get("top_no_bid") is not None:
-        results["sell_no_proceeds"] = quantity * prices["top_no_bid"] / 100.0
-        
-    return results
-
-
-def extract_market_rows(markets: list, paper_signals: dict, orderbooks: dict) -> list[dict]:
-    """
-    Aggregates data for the active contracts table.
-    """
-    rows = []
-    if not isinstance(markets, list):
-        return rows
-        
-    signals = paper_signals.get("signals", []) if isinstance(paper_signals, dict) else []
-    signal_map = {sig.get("market_ticker"): sig for sig in signals if sig.get("market_ticker")}
-    
-    # Extract signal date from forecast source filename for mismatch detection
-    signal_date = None
-    forecast_source = paper_signals.get("forecast_source", "") if isinstance(paper_signals, dict) else ""
-    if forecast_source:
-        date_match = re.search(r"(\d{4}-\d{2}-\d{2})", forecast_source)
-        if date_match:
-            signal_date = date_match.group(1)
-
-    obs_dict = orderbooks.get("orderbooks", {}) if isinstance(orderbooks, dict) else {}
-    
-    for mkt in markets:
-        ticker = mkt.get("ticker", "")
-        ticker_date = parse_ticker_date(ticker)
-        sig = signal_map.get(ticker, {})
-        ob = obs_dict.get(ticker, {})
-        
-        prices = derive_orderbook_prices(ob)
-        
-        # Handle contract_bin as either dict (ContractBin dump) or string
-        cb_data = mkt.get("contract_bin")
-        if isinstance(cb_data, dict):
-            bin_label = cb_data.get("label")
-        else:
-            bin_label = cb_data or extract_bin_from_market(mkt) or ticker
-            
-        model_prob = sig.get("model_probability")
-        # Fallback for model_probability from dynamic_contract_probabilities if dates match
-        if model_prob is None and ticker_date == signal_date and paper_signals and "dynamic_contract_probabilities" in paper_signals:
-            if bin_label in paper_signals["dynamic_contract_probabilities"]:
-                model_prob = paper_signals["dynamic_contract_probabilities"][bin_label]
-        
-        display_bin = pretty_format_bin(bin_label)
-        
-        row = {
-            "date": ticker_date,
-            "ticker": ticker,
-            "bin": display_bin,
-            "title": mkt.get("title", ""),
-            "yes_bid": prices["top_yes_bid"] if prices["top_yes_bid"] is not None else mkt.get("yes_bid"),
-            "yes_ask": prices["derived_yes_ask"] if prices["derived_yes_ask"] is not None else mkt.get("yes_ask"),
-            "model_probability": model_prob,
-            "market_probability": sig.get("market_probability"),
-            "edge": sig.get("edge"),
-            "action": sig.get("paper_action", "N/A" if ticker_date == signal_date else "DATE MISMATCH"),
-            "stale": mkt.get("stale", False)
-        }
-        
-        rows.append(row)
-    return rows
-
-
-# --- RENDERING HELPERS ---
-
-def is_signal_stale_or_mismatched(p_data, mkts):
-    """Checks if the best signal is stale or mismatched with active markets."""
-    best_sig = extract_best_signal(p_data)
-    active_markets = mkts.get("selected_temperature_markets", []) if mkts else []
-    active_tickers = [m.get("ticker") for m in active_markets]
-    
-    if len(active_markets) == 0 or (best_sig and best_sig.get("market_ticker") not in active_tickers):
-        if best_sig and best_sig.get("paper_action") == "PAPER BUY CANDIDATE":
-            return True
-    return False
-
-def render_command_center(app_state, p_data, mkts):
-    st.header("🏠 Command Center")
-    
-    # 2. Top-level mode/status cards
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Bot Mode", "DRY-RUN / PAPER")
-    with col2:
-        st.metric("Live Trading", "DISABLED")
-    with col3:
-        st.metric("Station", "KMIA")
-    with col4:
-        target_date = "N/A"
-        if p_data and "trade_date" in p_data:
-            target_date = p_data["trade_date"]
-        st.metric("Target Date", target_date)
-
-    st.divider()
-
-    # 3. Weather status cards (NWS Gate Freshness)
-    st.subheader("🌦️ Weather Freshness (NWS Gate)")
-    n_data = app_state.get("n_data", {})
-    gate = app_state.get("weather_gate", {})
-    gate_status = gate.get("status", "UNKNOWN") if isinstance(gate, dict) else "UNKNOWN"
-    gate_emoji = {"OK": "🟢", "STALE": "🟡", "ERROR": "🔴", "MISSING": "⚪"}.get(gate_status, "❓")
-    allow_recommendations = gate.get("allow_paper_recommendations", False) if isinstance(gate, dict) else False
-    allow_emoji = "✅ ALLOWED" if allow_recommendations else "❌ BLOCKED"
-    
-    col_g1, col_g2, col_g3, col_g4 = st.columns(4)
-    with col_g1:
-        st.metric("NWS Gate Status", f"{gate_emoji} {gate_status}")
-    with col_g2:
-        st.metric("Trading Allowance", allow_emoji)
-    with col_g3:
-        age = gate.get("observation_age_minutes") if isinstance(gate, dict) else None
-        age_str = f"{age:.1f}m" if age is not None else "—"
-        st.metric("Observation Age", age_str)
-    with col_g4:
-        st.metric("Current Temp", format_temp(n_data.get('current_temp_f') if n_data else None))
-
-    if isinstance(gate, dict):
-        if not allow_recommendations:
-            st.error(f"⚠️ **Paper Recommendations Blocked:** {gate.get('no_trade_reason') or 'No-trade reason unspecified.'}")
-        elif gate.get("warnings"):
-            for warning in gate["warnings"]:
-                st.warning(f"⚠️ {warning}")
-    else:
-        st.warning("No weather gate status found.")
-
-    st.divider()
-
-    # 4. Kalshi market status card
-    st.subheader("⚖️ Kalshi Market Status")
-    if mkts:
-        kc1, kc2, kc3 = st.columns(3)
-        mtime = "N/A"
-        if app_state.get("latest_kalshi_json") and app_state["latest_kalshi_json"].exists():
-            mtime = datetime.fromtimestamp(app_state["latest_kalshi_json"].stat().st_mtime).strftime('%Y-%m-%d %H:%M')
-        kc1.metric("Snapshot Time", mtime)
-        kc2.metric("Total Markets", mkts.get("total_markets_returned", 0))
-        kc3.metric("Active KXHIGHMIA", len(mkts.get("selected_temperature_markets", [])))
-        
-        if not mkts.get("selected_temperature_markets"):
-            st.warning("⚠️ No active Miami temperature markets found.")
-    else:
-        st.warning("No Kalshi market snapshot found.")
-
-    st.divider()
-
-    # 5. Best Signal Panel
-    st.subheader("🏆 Best Signal")
-    best_sig = extract_best_signal(p_data)
-    
-    # Defensive checks
-    if is_signal_stale_or_mismatched(p_data, mkts):
-        st.error("### NO SIGNAL — stale or mismatched paper signal ignored.")
-    elif best_sig:
-        st.info(f"**{best_sig.get('market_ticker', 'N/A')}** | Action: {best_sig.get('paper_action', 'N/A')}")
-        sc1, sc2, sc3, sc4 = st.columns(4)
-        sc1.metric("Model Prob", format_probability(best_sig.get('model_probability')))
-        sc2.metric("Market Prob", format_probability(best_sig.get('market_probability')))
-        sc3.metric("Edge", format_probability(best_sig.get('edge'), show_plus=True))
-        sc4.metric("Confidence", best_sig.get("confidence", "N/A").upper())
-        
-        with st.expander("Signal Details", expanded=True):
-            st.write(f"**Contract:** {best_sig.get('market_title', 'N/A')}")
-            st.write(f"**Status:** {best_sig.get('status', 'N/A')}")
-            st.write(f"**Expected Value:** {best_sig.get('expected_value', 'N/A')}")
-            st.write(f"**Yes Bid:** {best_sig.get('yes_bid', 'N/A')} | **Yes Ask:** {best_sig.get('yes_ask', 'N/A')}")
-            st.write(f"**Last Price:** {best_sig.get('last_price', 'N/A')}")
-            risk = best_sig.get("risk_decision")
-            if isinstance(risk, dict):
-                risk_passed = risk.get("passed", risk.get("all_passed"))
-                risk_color = "✅" if risk_passed else "🚫"
-                st.write(f"**Risk Gate:** {risk_color} {'PASS' if risk_passed else 'BLOCKED'}")
-                
-                gate_id = risk.get("failed_gate_id")
-                gate_name = risk.get("failed_gate_name")
-                if gate_id:
-                    st.write(f"**Failed Gate ID:** `{gate_id}`")
-                if gate_name:
-                    st.write(f"**Failed Gate Name:** {gate_name}")
-
-                no_trade = risk.get("no_trade_reason") or risk.get("blocking_reason")
-                if no_trade:
-                    st.warning(f"No-Trade Reason: {no_trade}")
-            if best_sig.get("no_trade_reason"):
-                st.warning(f"No-Trade Reason: {best_sig['no_trade_reason']}")
-            if best_sig.get("warnings"):
-                st.warning(" | ".join(best_sig["warnings"]))
-    else:
-        st.error(f"### STATUS: {p_data.get('status', 'NO_SIGNAL')}")
-        st.write(f"**Forecast Source:** `{p_data.get('forecast_source', 'N/A')}`")
-        st.write(f"**Market Snapshot:** `{p_data.get('market_snapshot_source', 'N/A')}`")
-        if p_data.get("warnings"):
-            for w in p_data["warnings"]:
-                st.warning(w)
-
-    st.divider()
-
-    # 6. Warnings / no-trade reasons section
-    st.subheader("⚠️ Operator Attention")
-    status_data = load_json(app_state.get("latest_status_json"))
-    all_warnings = aggregate_warnings(p_data, mkts, n_data, status_data)
-        
-    if all_warnings:
-        for w in all_warnings:
-            st.warning(w)
-    else:
-        st.success("No critical warnings detected.")
-
-    st.divider()
-
-    # 8. Action Commands
-    st.subheader("⌨️ Action Commands")
-    st.write("Run these commands in the terminal to update data or generate signals:")
-    st.code("bash scripts/update_nws_live_data.sh", language="bash")
-    st.code("bash scripts/update_kalshi_market_data.sh", language="bash")
-    st.code("bash scripts/generate_paper_signal.sh", language="bash")
-    st.code("bash scripts/run_kmia_daily_workflow.sh", language="bash")
-    
-    st.divider()
-    st.subheader("🤖 Decisions")
-    st.button("Record Decision", disabled=True, help="Coming Soon")
-
-    st.divider()
-
-    # 7. Raw Data Expanders
-    st.subheader("🔍 Raw / Debug Views")
-    with st.expander("Raw Paper Signal JSON"):
-        st.json(p_data)
-    with st.expander("Raw Kalshi Snapshot JSON"):
-        st.json(mkts)
-    with st.expander("Raw Weather Snapshot JSON"):
-        st.json(n_data)
-    with st.expander("Latest Status JSON"):
-        if app_state.get("latest_status_json"):
-            st.json(load_json(app_state["latest_status_json"]))
-
-
-def render_kalshi_market_console(m_data, o_data, s_data):
-    st.header("🏪 Kalshi Market Console")
-    st.warning("🚨 **DRY-RUN / PAPER ONLY — NO REAL TRADING EXECUTION**")
-    
-    # 3. Market status summary
-    col1, col2, col3, col4 = st.columns(4)
-    m_time = m_data.get("fetched_at_utc", "N/A") if isinstance(m_data, dict) else "N/A"
-    o_time = o_data.get("fetched_at_utc", "N/A") if isinstance(o_data, dict) else "N/A"
-    col1.metric("Market Snapshot Time", m_time)
-    col2.metric("Orderbook Snapshot Time", o_time)
-    
-    markets = m_data.get("markets", []) if isinstance(m_data, dict) else []
-    obs = o_data.get("orderbooks", {}) if isinstance(o_data, dict) else {}
-    col3.metric("Market Count", len(markets))
-    col4.metric("Orderbook Count", len(obs))
-    
-    status = o_data.get("status", "N/A") if isinstance(o_data, dict) else "N/A"
-    st.write(f"**Orderbook Status:** {status}")
-    
-    warnings = []
-    if isinstance(m_data, dict) and m_data.get("warnings"):
-        warnings.extend(m_data["warnings"])
-    if isinstance(o_data, dict) and o_data.get("warnings"):
-        warnings.extend(o_data["warnings"])
-        
-    if warnings:
-        for w in warnings:
-            st.warning(w)
-            
-    if status == "EMPTY":
-        st.info("No active KXHIGHMIA markets/orderbooks available.")
-        st.write("You can run the following command to update data:")
-        st.code("bash scripts/update_kalshi_market_data.sh", language="bash")
-        
-    # 4. Active contract table
-    rows = extract_market_rows(markets, s_data, o_data)
-    if rows:
-        st.subheader("Active Contracts")
-        
-        # Detect date mismatch for the whole table
-        signal_date = None
-        if s_data and "forecast_source" in s_data:
-            dm = re.search(r"(\d{4}-\d{2}-\d{2})", s_data["forecast_source"])
-            if dm: signal_date = dm.group(1)
-        
-        df_active = pd.DataFrame(rows)
-        if signal_date:
-            mismatched = df_active[df_active["date"] != signal_date]
-            if not mismatched.empty:
-                st.warning(f"⚠️ **Date Mismatch Detected:** Signal date is {signal_date}, but some contracts are for other dates. Probabilities for mismatched dates will show as N/A.")
-
-        # Display with proper formatting
-        rename_map = {
-            "date": "Date",
-            "ticker": "Ticker",
-            "bin": "Bin",
-            "title": "Title",
-            "yes_bid": "YES Bid",
-            "yes_ask": "YES Ask",
-            "model_probability": "Model %",
-            "market_probability": "Market %",
-            "edge": "Edge",
-            "action": "Action"
-        }
-
-        streamlit_col_config = {
-            "model_probability": st.column_config.NumberColumn("Model %", format="%.1f%%"),
-            "market_probability": st.column_config.NumberColumn("Market %", format="%.1f%%"),
-            "edge": st.column_config.NumberColumn("Edge", format="%+.1f%%")
-        }
-        
-        # Scale probabilities for NumberColumn format (0.85 -> 85.0)
-        df_active["model_probability"] = df_active["model_probability"].apply(lambda x: x * 100 if x is not None else None)
-        df_active["market_probability"] = df_active["market_probability"].apply(lambda x: x * 100 if x is not None else None)
-        df_active["edge"] = df_active["edge"].apply(lambda x: x * 100 if x is not None else None)
-        
-        display_cols = [c for c in rename_map.keys() if c in df_active.columns]
-        st.dataframe(
-            df_active[display_cols].rename(columns=rename_map), 
-            column_config=streamlit_col_config,
-            width="stretch", 
-            hide_index=True
-        )
-        
-        # 5. Selected contract control
-        tickers = [r["ticker"] for r in rows]
-        selected_ticker = st.selectbox("Select Contract Ticker", tickers)
-        
-        if selected_ticker:
-            selected_row = next((r for r in rows if r["ticker"] == selected_ticker), None)
-            ob = obs.get(selected_ticker, {})
-            prices = derive_orderbook_prices(ob)
-            
-            st.subheader(f"Contract: {selected_row['title'] if selected_row else selected_ticker}")
-            st.write(f"**Bin:** {selected_row['bin'] if selected_row else 'N/A'}")
-            
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Top YES Bid", prices["top_yes_bid"] if prices["top_yes_bid"] is not None else "N/A")
-            c2.metric("Top NO Bid", prices["top_no_bid"] if prices["top_no_bid"] is not None else "N/A")
-            c3.metric("Derived YES Ask", prices["derived_yes_ask"] if prices["derived_yes_ask"] is not None else "N/A")
-            c4.metric("Derived NO Ask", prices["derived_no_ask"] if prices["derived_no_ask"] is not None else "N/A")
-            
-            st.info("💡 **Derived Ask Logic:** Kalshi orderbooks show YES and NO bids. YES ask can be derived from the best NO bid as 100 - NO bid; NO ask can be derived from the best YES bid as 100 - YES bid.")
-            
-            # 6. Orderbook depth
-            st.subheader("Orderbook Depth")
-            dc1, dc2 = st.columns(2)
-            with dc1:
-                st.write("**YES Bids**")
-                yes_bids = ob.get("yes_bids", [])
-                if yes_bids:
-                    st.dataframe(yes_bids[:5], columns=["Price", "Quantity"])
-                elif prices.get("top_yes_bid") is not None:
-                    st.write(f"Depth unavailable. Top Bid: {prices['top_yes_bid']}")
-                else:
-                    st.write("No bids available.")
-            with dc2:
-                st.write("**NO Bids**")
-                no_bids = ob.get("no_bids", [])
-                if no_bids:
-                    st.dataframe(no_bids[:5], columns=["Price", "Quantity"])
-                elif prices.get("top_no_bid") is not None:
-                    st.write(f"Depth unavailable. Top Bid: {prices['top_no_bid']}")
-                else:
-                    st.write("No bids available.")
-                    
-            # 7. Hypothetical cost calculator
-            st.subheader("Hypothetical Cost Calculator")
-            quantity = st.number_input("Contracts Quantity", min_value=1, value=1, step=1)
-            
-            costs = calculate_hypothetical_costs(quantity, prices)
-            
-            buy_yes_str = f"${costs['buy_yes_cost']:.2f}" if costs.get("buy_yes_cost") is not None else "N/A"
-            buy_no_str = f"${costs['buy_no_cost']:.2f}" if costs.get("buy_no_cost") is not None else "N/A"
-            sell_yes_str = f"${costs['sell_yes_proceeds']:.2f}" if costs.get("sell_yes_proceeds") is not None else "N/A"
-            sell_no_str = f"${costs['sell_no_proceeds']:.2f}" if costs.get("sell_no_proceeds") is not None else "N/A"
-            
-            cc1, cc2 = st.columns(2)
-            with cc1:
-                st.write("**Buy Estimates**")
-                st.write(f"Buy YES estimated cost: {buy_yes_str}")
-                st.write(f"Buy NO estimated cost: {buy_no_str}")
-                st.write(f"Max loss for buy side = estimated cost")
-            with cc2:
-                st.write("**Sell Estimates**")
-                st.write(f"Sell YES estimated proceeds: {sell_yes_str}")
-                st.write(f"Sell NO estimated proceeds: {sell_no_str}")
-                st.write(f"Max payout: ${costs['max_payout']:.2f}")
-                
-            st.button("Calculate Only", disabled=True, help="Paper calculation only")
-    else:
-        if status != "EMPTY":
-            st.info("No active KXHIGHMIA markets available.")
-            
-    # 9. Raw artifacts
-    st.divider()
-    st.subheader("🔍 Raw Artifacts")
-    with st.expander("Raw Market Snapshot JSON"):
-        st.json(m_data)
-    with st.expander("Raw Orderbook Snapshot JSON"):
-        st.json(o_data)
-    with st.expander("Raw Paper Signal JSON"):
-        st.json(s_data)
-
-
-def render_active_forecasts(p_data):
-    st.header("📊 Active Kalshi Contract Forecasts")
-    st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
-    
-    if p_data:
-        allow_rec = p_data.get("allow_paper_recommendations", True)
-        if not allow_rec:
-            st.error(f"🔴 **CRITICAL SAFETY GATING ACTIVE:** Trading recommendations are actively blocked.\n\n**Reason:** {p_data.get('no_trade_reason') or 'No-trade reason unspecified.'}")
-
-        best_sig = p_data.get("best_signal")
-        if best_sig:
-            if not allow_rec:
-                st.subheader("🚫 Best Signal (BLOCKED)")
-                st.info(f"**{best_sig.get('market_ticker', 'N/A')}** | Edge: {format_probability(best_sig.get('edge'), show_plus=True)} | Action: BLOCKED")
-            else:
-                st.subheader("🏆 Best Signal")
-                st.info(f"**{best_sig.get('market_ticker', 'N/A')}** | Edge: {format_probability(best_sig.get('edge'), show_plus=True)} | Action: {best_sig.get('paper_action', 'N/A')}")
-            
-            bs_c1, bs_c2, bs_c3, bs_c4 = st.columns(4)
-            bs_c1.metric("Model Prob", format_probability(best_sig.get('model_probability')))
-            bs_c2.metric("Market Prob", format_probability(best_sig.get('market_probability')))
-            bs_c3.metric("Edge", format_probability(best_sig.get('edge'), show_plus=True))
-            bs_c4.metric("Confidence", "BLOCKED" if not allow_rec else best_sig.get("confidence", "N/A").upper())
-
-        # Load Forecast Metadata
-        f_data = load_forecast_data(p_data.get("forecast_source"))
-        if f_data:
-            st.divider()
-            st.subheader("🤖 Model Insights")
-            mi_c1, mi_c2, mi_c3, mi_c4 = st.columns(4)
-            mi_c1.metric("Deterministic Anchor", format_temp(f_data.get('deterministic_anchor_f')))
-            mi_c2.metric("Distribution Mean", format_temp(f_data.get('final_distribution_mean_f')))
-            mi_c3.metric("Distribution Mode", format_temp(f_data.get('final_distribution_mode_f')))
-            mi_c4.metric("Suppression Shift", format_temp(f_data.get('weather_suppression_shift_f')))
-            
-            wi_c1, wi_c2, wi_c3, wi_c4 = st.columns(4)
-            wi_c1.metric("Observed Max", format_temp(f_data.get('observed_max_so_far_f')))
-            wi_c2.metric("Current Temp", format_temp(f_data.get('current_temp_f')))
-            wi_c3.metric("Forecast Weight", f"{f_data.get('forecast_weight', 'N/A')}")
-            wi_c4.metric("Climatology Weight", f"{f_data.get('climatology_weight', 'N/A')}")
-
-            st.subheader("📈 Distribution Support")
-            dist = f_data.get("integer_distribution", {})
-            dist_cdf = f_data.get("integer_distribution_cdf", {})
-            if dist:
-                support = [int(k) for k, v in dist.items() if float(v) > 0]
-                support_min = min(support) if support else "N/A"
-                support_max = max(support) if support else "N/A"
-                dist_sum = sum(float(v) for v in dist.values())
-                
-                # Probability of > 105
-                p_gt_105 = 0.0
-                if "105" in dist_cdf:
-                    p_gt_105 = 1.0 - float(dist_cdf["105"])
-                
-                ds_c1, ds_c2, ds_c3, ds_c4 = st.columns(4)
-                ds_c1.metric("Support Min", format_temp(support_min))
-                ds_c2.metric("Support Max", format_temp(support_max))
-                ds_c3.metric("P(>105°F)", f"{p_gt_105*100:.1f}%")
-                ds_c4.metric("Dist Sum", f"{dist_sum:.4f}")
-
-        st.divider()
-        signals = p_data.get("signals", [])
-        
-        all_no_trade = True
-        if signals:
-            for s in signals:
-                act = str(s.get("paper_action", "")).upper()
-                if "BUY" in act:
-                    all_no_trade = False
-                    break
-        else:
-            all_no_trade = True
-
-        if all_no_trade:
-            st.info("ℹ️ **No active paper trading candidates found.**")
-            reason = p_data.get("no_trade_reason") or "No active edge or risk parameters not met."
-            st.warning(f"**Reason:** {reason}")
-
-        if signals:
-            df_sig = pd.DataFrame(signals)
-            df_sig = normalize_signal_df(df_sig)
-            
-            col_map_sig = {
-                "market_ticker": "Ticker",
-                "market_title": "Contract",
-                "status": "Status",
-                "threshold_f": "Threshold",
-                "condition_type": "Condition",
-                "model_probability": "Model %",
-                "market_probability": "Market %",
-                "raw_edge": "Raw Edge",
-                "executable_edge": "Executable Edge",
-                "breakeven_probability": "Breakeven %",
-                "executable_price": "Exec Price",
-                "risk_decision": "Risk Decision",
-                "no_trade_reason": "No-Trade Reason",
-                "time_to_close_minutes": "Time to Close",
-                "speed_to_roi_score": "Speed-to-ROI",
-                "paper_action": "Paper Action"
-            }
-            
-            df_display_sig = df_sig.copy()
-            
-            # Ensure all columns exist
-            expected_cols = [
-                "model_probability", "market_probability", "edge", "raw_edge",
-                "executable_edge", "breakeven_probability", "executable_price",
-                "risk_decision", "no_trade_reason", "paper_action",
-                "threshold_f", "time_to_close_minutes"
-            ]
-            for c in expected_cols:
-                if c not in df_display_sig.columns:
-                    df_display_sig[c] = None
-
-            # Helper functions to convert formats safely
-            def format_rd(rd):
-                if not rd:
-                    return "PASS"
-                if isinstance(rd, dict):
-                    passed = rd.get("passed")
-                    if passed is None:
-                        passed = rd.get("all_passed", True)
-                    return "PASS" if passed else "BLOCK"
-                return str(rd)
-
-            def format_ntr(row):
-                reason = row.get("no_trade_reason")
-                if reason:
-                    return str(reason)
-                rd = row.get("risk_decision")
-                if isinstance(rd, dict):
-                    return rd.get("no_trade_reason") or rd.get("reason") or "None"
-                return "None"
-
-            df_display_sig["risk_decision"] = df_display_sig["risk_decision"].apply(format_rd)
-            df_display_sig["no_trade_reason"] = df_display_sig.apply(format_ntr, axis=1)
-
-            if not allow_rec:
-                df_display_sig["paper_action"] = "BLOCKED"
-
-            if "model_probability" in df_display_sig.columns:
-                df_display_sig["model_probability"] = df_display_sig["model_probability"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
-            if "market_probability" in df_display_sig.columns:
-                df_display_sig["market_probability"] = df_display_sig["market_probability"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A")
-            if "edge" in df_display_sig.columns:
-                df_display_sig["edge"] = df_display_sig["edge"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "—")
-            if "raw_edge" in df_display_sig.columns:
-                df_display_sig["raw_edge"] = df_display_sig["raw_edge"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "—")
-            if "executable_edge" in df_display_sig.columns:
-                df_display_sig["executable_edge"] = df_display_sig["executable_edge"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "—")
-            if "breakeven_probability" in df_display_sig.columns:
-                df_display_sig["breakeven_probability"] = df_display_sig["breakeven_probability"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "—")
-            if "executable_price" in df_display_sig.columns:
-                df_display_sig["executable_price"] = df_display_sig["executable_price"].apply(lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "—")
-            if "threshold_f" in df_display_sig.columns:
-                df_display_sig["threshold_f"] = df_display_sig["threshold_f"].apply(lambda x: f"{x:.1f}°F" if pd.notnull(x) else "—")
-            if "time_to_close_minutes" in df_display_sig.columns:
-                df_display_sig["time_to_close_minutes"] = df_display_sig["time_to_close_minutes"].apply(lambda x: f"{x:.1f}m" if pd.notnull(x) else "—")
-            
-            existing_cols_sig = [c for c in col_map_sig.keys() if c in df_display_sig.columns]
-            df_final = df_display_sig[existing_cols_sig].rename(columns=col_map_sig)
-            st.dataframe(df_final, use_container_width=True, hide_index=True)
-
-            # Risk gate summary per signal
-            blocked = [s for s in signals if isinstance(s.get("risk_decision"), dict) and not s["risk_decision"].get("passed", s["risk_decision"].get("all_passed", True))]
-            if blocked:
-                st.subheader("🚫 Risk Gate Blocks")
-                for s in blocked:
-                    rd = s["risk_decision"]
-                    reason = rd.get("no_trade_reason") or rd.get("blocking_reason") or rd.get("reason") or "Risk gate blocked"
-                    st.error(f"**{s.get('market_ticker', 'N/A')}**: {reason}")
-        else:
-            st.error(f"### STATUS: {p_data.get('status', 'NO_SIGNAL')}")
-            st.write(f"**Forecast Source:** `{p_data.get('forecast_source', 'N/A')}`")
-            st.write(f"**Market Snapshot:** `{p_data.get('market_snapshot_source', 'N/A')}`")
-            if p_data.get("warnings"):
-                for w in p_data["warnings"]:
-                    st.warning(w)
-            st.info("No active contract forecasts found in latest signal data.")
-    else:
-        st.warning("No active contract forecasts found. Run:")
-        st.code("bash scripts/update_kalshi_market_data.sh\nbash scripts/generate_paper_signal.sh")
-
-
-def render_paper_trading(perf, settlements, trades, app_state=None):
-    st.header("📈 Paper Trading Performance")
-    st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
-
-    # Render NWS Weather Freshness Gate Summary
-    gate = app_state.get("weather_gate", {}) if app_state else {}
-    if gate:
-        gate_status = gate.get("status", "UNKNOWN")
-        gate_emoji = {"OK": "🟢", "STALE": "🟡", "ERROR": "🔴", "MISSING": "⚪"}.get(gate_status, "❓")
-        allow_recommendations = gate.get("allow_paper_recommendations", False)
-        allow_emoji = "✅ ALLOWED" if allow_recommendations else "❌ BLOCKED"
-        age = gate.get("observation_age_minutes")
-        age_str = f"{age:.1f} minutes" if age is not None else "N/A"
-        
-        st.subheader("🌤️ Weather Freshness (NWS Gate)")
-        gcol1, gcol2, gcol3 = st.columns(3)
-        with gcol1:
-            st.metric("Gate Status", f"{gate_emoji} {gate_status}")
-        with gcol2:
-            st.metric("Trading Recommendations", allow_emoji)
-        with gcol3:
-            st.metric("Observation Age", age_str)
-            
-        if not allow_recommendations:
-            st.error(f"⚠️ **Gate Blocking Reason:** {gate.get('no_trade_reason') or 'No-trade reason unspecified.'}")
-        elif gate.get("warnings"):
-            for warning in gate["warnings"]:
-                st.warning(f"⚠️ {warning}")
-        st.divider()
-
-    # Account balance from canonical JSON ledger
-    if PAPER_LEDGER_FILE.exists():
-        try:
-            ledger_json = load_json(PAPER_LEDGER_FILE)
-            if ledger_json:
-                bal = ledger_json.get("account_balance")
-                if bal is not None:
-                    st.metric("Paper Account Balance", f"${bal:.2f}")
-        except Exception:
-            pass
-
-    if perf:
-        p_col1, p_col2, p_col3, p_col4 = st.columns(4)
-        p_col1.metric("Settled Trades", perf.get("total_settled_trades", 0))
-        p_col2.metric("Win Rate", f"{perf.get('win_rate', 0):.1%}")
-        p_col3.metric("Simulated PnL", f"${perf.get('total_simulated_pnl', 0):.2f}")
-        p_col4.metric("Pending Trades", perf.get("pending_trades", 0))
-    else:
-        st.info("No performance data available. Run `bash scripts/settle_paper_trades.sh`.")
-
-    st.divider()
-    
-    # 1. Open Positions
-    st.subheader("🏁 Open Positions")
-    open_trades = [t for t in trades if str(t.get("status", "")).lower() == "open"]
-    if open_trades:
-        df_open = pd.DataFrame(open_trades)
-        
-        # Format complex fields
-        def format_rd(rd):
-            if not rd: return "—"
-            if isinstance(rd, dict):
-                passed = rd.get("passed", rd.get("all_passed", True))
-                return "PASS" if passed else "BLOCK"
-            return str(rd)
-            
-        if "risk_decision" in df_open.columns:
-            df_open["risk_decision"] = df_open["risk_decision"].apply(format_rd)
-            
-        display_cols = ["timestamp_utc", "market_ticker", "target_date", "forecast_bin", "contract_range_label", "execution_price", "risk_decision", "no_trade_reason"]
-        available = [c for c in display_cols if c in df_open.columns]
-        st.dataframe(df_open[available].iloc[::-1], width="stretch", hide_index=True)
-    else:
-        st.info("No active open paper trades.")
-
-    st.divider()
-
-    # 2. Settled History
-    st.subheader("📜 Trade History")
-    settled_trades = [t for t in trades if str(t.get("status", "")).lower() == "settled"]
-    if settled_trades:
-        df_history = pd.DataFrame(settled_trades)
-        display_cols = ["target_date", "market_ticker", "contract_range_label", "status", "pnl", "settled_at_utc", "risk_decision", "no_trade_reason"]
-        available = [c for c in display_cols if c in df_history.columns]
-        
-        # Safe pre-formatting for PnL and status
-        df_display = df_history[available].copy()
-        if "pnl" in df_display.columns:
-            df_display["pnl"] = df_display["pnl"].apply(format_pnl)
-        if "status" in df_display.columns:
-            df_display["status"] = df_display["status"].apply(lambda x: str(x).upper() if x else "—")
-            
-        def format_rd(rd):
-            if not rd: return "—"
-            if isinstance(rd, dict):
-                passed = rd.get("passed", rd.get("all_passed", True))
-                return "PASS" if passed else "BLOCK"
-            return str(rd)
-            
-        if "risk_decision" in df_display.columns:
-            df_display["risk_decision"] = df_display["risk_decision"].apply(format_rd)
-            
-        st.dataframe(df_display.iloc[::-1], width="stretch", hide_index=True)
-    else:
-        st.write("No settled trades in history.")
-
-    st.divider()
-    with st.expander("Raw Ledger / Settlement Debug"):
-        st.subheader("Full Ledger (JSON)")
-        st.json(trades)
-        if settlements:
-            st.subheader("Legacy Settlement Log (JSONL)")
-            st.json(settlements)
-
-
-def render_weather_nws(w_data, n_data):
-    st.header("🌦️ Weather / NWS Live Data")
-    st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
-    
-    # Render detailed NWS Gate Status Card
-    from weather.nws_snapshot_contract import assess_nws_snapshot
-    try:
-        gate = assess_nws_snapshot(n_data)
-    except Exception as e:
-        gate = {
-            "available": False,
-            "allow_paper_recommendations": False,
-            "status": "ERROR",
-            "no_trade_reason": f"Assessment failed: {e}",
-            "warnings": [f"Assessment failed: {e}"],
-            "latest_observation_time": None,
-            "fetched_at_utc": None,
-            "observation_age_minutes": None
-        }
-        
-    gate_status = gate.get("status", "UNKNOWN")
-    gate_emoji = {"OK": "🟢", "STALE": "🟡", "ERROR": "🔴", "MISSING": "⚪"}.get(gate_status, "❓")
-    allow_recommendations = gate.get("allow_paper_recommendations", False)
-    allow_emoji = "✅ ALLOWED" if allow_recommendations else "❌ BLOCKED"
-    age = gate.get("observation_age_minutes")
-    age_str = f"{age:.1f} minutes" if age is not None else "N/A"
-    
-    st.subheader("🌤️ Weather Freshness (NWS Gate)")
-    gcol1, gcol2, gcol3 = st.columns(3)
-    with gcol1:
-        st.metric("Gate Status", f"{gate_emoji} {gate_status}")
-    with gcol2:
-        st.metric("Trading Recommendations", allow_emoji)
-    with gcol3:
-        st.metric("Observation Age", age_str)
-        
-    if not allow_recommendations:
-        st.error(f"⚠️ **Gate Blocking Reason:** {gate.get('no_trade_reason') or 'No-trade reason unspecified.'}")
-    elif gate.get("warnings"):
-        for warning in gate["warnings"]:
-            st.warning(f"⚠️ {warning}")
-            
-    st.divider()
-    
-    if n_data:
-        st.subheader("NWS Live Snapshot Metrics")
-        
-        nc1, nc2, nc3, nc4 = st.columns(4)
-        nc1.metric("Current Temp", format_temp(n_data.get('current_temp_f')))
-        nc2.metric("Observed Max Today", format_temp(n_data.get('observed_max_so_far_f')))
-        nc3.metric("Wind", f"{n_data.get('wind_direction_compass', '—')} {format_num(n_data.get('wind_speed_mph'), unit='mph')}")
-        nc4.metric("Stale Data Indicator", "Yes" if n_data.get("stale_data") else "No")
-        
-        st.write(f"**Latest Observation Time:** {n_data.get('latest_observation_time', 'N/A')} (UTC)")
-        if n_data.get("wind_gust_mph"):
-            st.write(f"**Recent Gust:** {n_data.get('wind_gust_mph')} mph")
-        if n_data.get("clouds_x100ft"):
-            st.write(f"**Clouds:** {n_data.get('clouds_x100ft')}")
-        
-        st.subheader("Recent Observations (KMIA)")
-        obs_rows = extract_nws_observation_rows(n_data)
-        if obs_rows:
-            df_obs = pd.DataFrame(obs_rows)
-            display_columns = [
-                "time_et",
-                "temperature_f",
-                "dewpoint_f",
-                "relative_humidity_pct",
-                "wind_direction_compass",
-                "wind_direction_degrees",
-                "wind_speed_mph",
-                "wind_gust_mph",
-                "sea_level_pressure_mb",
-                "barometric_pressure_mb",
-                "precipitation_last_hour_in",
-                "clouds_x100ft",
-            ]
-            # Prepare display dataframe as a clean copy
-            display_cols = [c for c in display_columns if c in df_obs.columns]
-            df_display = df_obs[display_cols].copy()
-            
-            # 4. Pre-format nullable display fields into safe scalar strings before calling st.dataframe
-            # temperatures: format_temp(value) -> "87.8°F" or "—"
-            if "temperature_f" in df_display.columns:
-                df_display["temperature_f"] = df_display["temperature_f"].apply(format_temp)
-            if "dewpoint_f" in df_display.columns:
-                df_display["dewpoint_f"] = df_display["dewpoint_f"].apply(format_temp)
-            
-            # humidity: format_num(value, "%") -> "62.0%" or "—"
-            if "relative_humidity_pct" in df_display.columns:
-                df_display["relative_humidity_pct"] = df_display["relative_humidity_pct"].apply(lambda x: format_num(x, unit="%"))
-            
-            # wind: format_num(value, "mph") -> "8.0 mph" or "—"
-            if "wind_speed_mph" in df_display.columns:
-                df_display["wind_speed_mph"] = df_display["wind_speed_mph"].apply(lambda x: format_num(x, unit="mph"))
-            if "wind_gust_mph" in df_display.columns:
-                df_display["wind_gust_mph"] = df_display["wind_gust_mph"].apply(lambda x: format_num(x, unit="mph"))
-            
-            # pressure: "1015.2 mb" or "—"
-            if "sea_level_pressure_mb" in df_display.columns:
-                df_display["sea_level_pressure_mb"] = df_display["sea_level_pressure_mb"].apply(lambda x: format_num(x, unit="mb"))
-            if "barometric_pressure_mb" in df_display.columns:
-                df_display["barometric_pressure_mb"] = df_display["barometric_pressure_mb"].apply(lambda x: format_num(x, unit="mb"))
-            
-            # precipitation: "0.0 in" or "—"
-            if "precipitation_last_hour_in" in df_display.columns:
-                df_display["precipitation_last_hour_in"] = df_display["precipitation_last_hour_in"].apply(
-                    lambda x: f"{float(x):.2f} in" if x is not None and x != "N/A" and x != "" else "—"
-                )
-            
-            # 5. Replace use_container_width=True with width="stretch" in the touched st.dataframe call
-            st.dataframe(df_display, width="stretch", hide_index=True)
-        else:
-            st.warning("NWS snapshot loaded, but no parsed observation rows were found.")
-            if isinstance(n_data, dict):
-                st.caption("Available NWS snapshot keys: " + ", ".join(n_data.keys()))
-        
-        if n_data.get("warnings"):
-            st.warning(" | ".join(n_data.get("warnings")))
-            
-        with st.expander("Links & Raw JSON"):
-            st.write(f"- [NWS Time Series (KMIA)]({n_data.get('timeseries_source_url')})")
-            st.write(f"- [API Observations URL]({n_data.get('api_observations_url')})")
-            st.json(n_data)
-    else:
-        st.info("No live NWS snapshot found. Run `bash scripts/update_nws_live_data.sh`.")
-
-    if w_data:
-        st.subheader("Daily Weather Ingestion Status")
-        with st.expander("View Daily Weather Status JSON"):
-            st.json(w_data)
-
-
-def render_calibration_learning(pq_data, pq_md, l_data, cal_json, cal_md):
-    st.header("🎓 Calibration & Learning")
-    st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
-    
-    st.subheader("Learning Summary")
-    if l_data:
-        l_col1, l_col2, l_col3, l_col4 = st.columns(4)
-        with l_col1:
-            st.metric("Learning Status", "Active")
-            st.write(f"**Trade Date:** {l_data.get('trade_date', 'N/A')}")
-        with l_col2:
-            st.metric("Win Rate", f"{l_data.get('win_rate', 0):.1%}")
-            st.write(f"**Settled Trades:** {l_data.get('settled_trades', 0)}")
-        with l_col3:
-            st.metric("Simulated PnL", f"${l_data.get('simulated_pnl', 0.0):.2f}")
-            st.write(f"**Model Lesson:** {l_data.get('model_lesson', 'Collecting more data...')}")
-        with l_col4:
-            st.metric("Next Action", "Monitor")
-            st.success(l_data.get('next_action', "Run generate_learning_summary.sh"))
-            
-        with st.expander("Best Signal Evaluated"):
-            st.json(l_data.get("best_signal", {}))
-    else:
-        st.info("No learning summary found. Run `bash scripts/generate_learning_summary.sh`.")
-
-    st.divider()
-    st.subheader("Prediction Quality Report")
-    if pq_data:
-        st.write(f"**Quality:** {pq_data.get('prediction_quality', 'Unknown')}")
-        pq_col1, pq_col2, pq_col3 = st.columns(3)
-        with pq_col1:
-            st.write(f"**Main Risk:** {pq_data.get('main_risk', 'None')}")
-        with pq_col2:
-            st.write(f"**Next Action:** {pq_data.get('next_action', 'N/A')}")
-        with pq_col3:
-            st.write(f"**Best Paper Signal:** `{pq_data.get('best_paper_signal', 'None')}`")
-        
-        if pq_data.get("data_quality_warnings"):
-            st.warning(" | ".join(pq_data["data_quality_warnings"]))
-            
-        if pq_md:
-            with st.expander("View Full Markdown Report"):
-                st.markdown(pq_md)
-    else:
-        st.info("No prediction quality report found. Run `bash scripts/generate_prediction_quality_report.sh`.")
-
-    if cal_md:
-        st.divider()
-        st.subheader("Aggregate Calibration")
-        with st.expander("View Calibration Markdown"):
-            st.markdown(cal_md)
-
-    corrections = load_manual_corrections()
-    if corrections:
-        st.divider()
-        st.subheader("🛠️ Manual Data Corrections")
-        for date, details in corrections.items():
-            status_text = details.get("settlement_status", "Active")
-            excluded = " (Excluded from Learning)" if details.get("exclude_from_learning") else ""
-            open_time = f" | Market Open: {details['market_open_time_et']} ET" if details.get("market_open_time_et") else ""
-            st.write(f"**{date}:** {status_text}{excluded}{open_time}")
-            if details.get("notes"):
-                for note in details["notes"]:
-                    st.write(f"- {note}")
-
-
-def render_backtesting():
-    st.header("🔬 Backtesting & Calibration (Phase 9)")
-    st.error("🚨 **NO REAL TRADING EXECUTION — DRY-RUN ONLY**")
-
-    # Load latest backtest report if available
-    backtest_dir = BACKTEST_REPORTS_DIR
-    latest_report = None
-    if backtest_dir.exists():
-        reports = list(backtest_dir.glob("backtest_report_*.json"))
-        if reports:
-            latest_report = max(reports, key=lambda p: p.stat().st_mtime)
-
-    if latest_report:
-        report = load_json(latest_report)
-        if report:
-            st.subheader("Latest Backtest Run")
-            meta_col1, meta_col2, meta_col3 = st.columns(3)
-            meta_col1.metric("Start Date", report.get("start_date", "N/A"))
-            meta_col2.metric("End Date", report.get("end_date", "N/A"))
-            meta_col3.metric("Days Simulated", report.get("days_simulated", "N/A"))
-
-            days_with_signal = report.get("days_with_signal", 0)
-            days_missing = report.get("days_missing_data", 0)
-            st.write(f"**Days With Signal:** {days_with_signal} | **Days Missing Data:** {days_missing}")
-
-            # Calibration metrics table
-            cal_metrics = report.get("calibration_metrics", {})
-            if cal_metrics:
-                st.subheader("Calibration Metrics")
-                m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-                brier = cal_metrics.get("brier_score")
-                crps = cal_metrics.get("crps")
-                ece = cal_metrics.get("expected_calibration_error")
-                log_l = cal_metrics.get("log_loss")
-                m_col1.metric("Brier Score", f"{brier:.4f}" if brier is not None else "N/A",
-                              help="Lower is better. Perfect = 0.")
-                m_col2.metric("CRPS", f"{crps:.4f}" if crps is not None else "N/A",
-                              help="Continuous Ranked Probability Score. Lower is better.")
-                m_col3.metric("ECE", f"{ece:.4f}" if ece is not None else "N/A",
-                              help="Expected Calibration Error. Lower is better.")
-                m_col4.metric("Log Loss", f"{log_l:.4f}" if log_l is not None else "N/A",
-                              help="Lower is better.")
-
-                top_hit = cal_metrics.get("top_bin_hit_rate")
-                if top_hit is not None:
-                    st.metric("Top-Bin Hit Rate", f"{top_hit:.1%}")
-
-            # Per-day results table
-            daily_results = report.get("daily_results", [])
-            if daily_results:
-                st.subheader("Per-Day Results")
-                df_days = pd.DataFrame(daily_results)
-                display_cols = [
-                    "trade_date", "actual_max_f", "predicted_bin",
-                    "model_probability", "brier_score", "result", "simulated_pnl"
-                ]
-                available = [c for c in display_cols if c in df_days.columns]
-                if available:
-                    df_show = df_days[available].copy()
-                    if "model_probability" in df_show.columns:
-                        df_show["model_probability"] = df_show["model_probability"].apply(
-                            lambda x: f"{x*100:.1f}%" if pd.notnull(x) else "N/A"
-                        )
-                    if "brier_score" in df_show.columns:
-                        df_show["brier_score"] = df_show["brier_score"].apply(
-                            lambda x: f"{x:.4f}" if pd.notnull(x) else "N/A"
-                        )
-                    st.dataframe(df_show.iloc[::-1], use_container_width=True, hide_index=True)
-                else:
-                    st.dataframe(df_days.iloc[::-1], use_container_width=True)
-
-            with st.expander("Raw Backtest Report JSON"):
-                st.json(report)
-        else:
-            st.warning(f"Could not parse backtest report: {latest_report.name}")
-    else:
-        st.info("No backtest report found.")
-        st.write("Run a backtest to generate a report:")
-        st.code("bash scripts/run_backtest.sh", language="bash")
-
-    st.divider()
-    st.subheader("📂 Available Backtest Reports")
-    if backtest_dir.exists():
-        reports_all = sorted(backtest_dir.glob("backtest_report_*.json"), reverse=True)
-        if reports_all:
-            for rpt in reports_all[:10]:
-                size_kb = rpt.stat().st_size / 1024
-                st.write(f"- `{rpt.name}` ({size_kb:.1f} KB)")
-        else:
-            st.write("No reports found in backtest directory.")
-    else:
-        st.write(f"Backtest reports directory does not exist yet: `{backtest_dir}`")
-
-
-def render_system_health(app_state):
-    st.header("⚙️ System Health & Raw Data")
-    
-    # Render detailed NWS Weather Gate telemetry at the top of System Health
-    gate = app_state.get("weather_gate", {})
-    if gate:
-        status_val = gate.get("status", "UNKNOWN")
-        allow_paper = gate.get("allow_paper_recommendations", False)
-        status_emoji = {"OK": "🟢 OK", "STALE": "🟡 STALE", "ERROR": "🔴 ERROR", "MISSING": "⚪ MISSING"}.get(status_val, "❓ UNKNOWN")
-        
-        st.subheader("🌤️ NWS Weather Gate Telemetry")
-        sgcol1, sgcol2, sgcol3 = st.columns(3)
-        with sgcol1:
-            st.metric("Freshness Gate Status", status_emoji)
-        with sgcol2:
-            st.metric("Trading Allowance", "✅ ALLOWED" if allow_paper else "❌ BLOCKED")
-        with sgcol3:
-            age = gate.get("observation_age_minutes")
-            st.metric("Observation Age", f"{age:.1f} minutes" if age is not None else "N/A")
-            
-        if not allow_paper:
-            st.error(f"⚠️ **Fail-Closed Gate Active:** Trading is blocked because: {gate.get('no_trade_reason') or 'No-trade reason unspecified.'}")
-            if gate.get("warnings"):
-                for w in gate["warnings"]:
-                    st.warning(f"Warning detail: {w}")
-        st.divider()
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Latest System Status")
-        if app_state["latest_status_json"]:
-            with st.expander("View Status JSON"):
-                st.json(load_json(app_state["latest_status_json"]))
-        if app_state["latest_status_md"]:
-            with st.expander("View Status MD"):
-                st.markdown(load_text(app_state["latest_status_md"]))
-                
-        st.subheader("Forecast Report")
-        if app_state["latest_forecast_md"]:
-            with st.expander("View Forecast MD"):
-                st.markdown(load_text(app_state["latest_forecast_md"]))
-                
-    with col2:
-        st.subheader("Kalshi Market Discovery")
-        if app_state["latest_kalshi_json"].exists():
-            with st.expander("View Kalshi JSON"):
-                st.json(load_json(app_state["latest_kalshi_json"]))
-
-        st.subheader("Latest Paper Trading Signal")
-        if LATEST_PAPER_SIGNAL.exists():
-            with st.expander("View Paper Signal JSON"):
-                st.json(load_json(LATEST_PAPER_SIGNAL))
-                
-        st.subheader("Operator Notes & Workflow")
-        st.write('''
-        ### Daily Commands
-        ```bash
-        bash scripts/run_kmia_daily_workflow.sh
-        bash scripts/generate_paper_signal.sh
-        bash scripts/record_paper_trade.sh
-        ```
-        ''')
-
-    st.divider()
-    st.subheader("Latest Workflow Logs")
-    if app_state["latest_log"]:
-        with st.expander("View Tail of Latest Log"):
-            st.code(load_text(app_state["latest_log"])[-5000:], language="text")
-
-    st.divider()
-    st.subheader("Discovered Processed Files")
-    file_info = []
-    for d in [STATUS_DIR, REPORTS_DIR, LOGS_DIR, CAL_DIR, KALSHI_DIR, PAPER_DIR]:
-        if d.exists():
-            for f in d.glob("*"):
-                if f.is_file():
-                    file_info.append({"Dir": d.name, "File": f.name, "Size": f.stat().st_size})
-    if file_info:
-        st.table(pd.DataFrame(file_info))
-
-
-# --- MAIN ---
 if __name__ == "__main__":
     st.set_page_config(
         page_title="KMIA Weather Console",
         page_icon="🌦️",
-        layout="wide"
+        layout="wide",
     )
 
     st.title("KMIA Kalshi Weather Console")
     st.error("🚨 **DRY-RUN / PAPER EVALUATION ONLY — NO REAL TRADING EXECUTION**")
 
-    # --- DATA LOADING (Centralized) ---
+    # --- DATA LOADING (centralized so renderers stay pure-ish) -----
     latest_status_json = latest_file(STATUS_DIR, "kmia_daily_status_*.json")
     latest_status_md = latest_file(STATUS_DIR, "kmia_daily_status_*.md")
-    
+
     latest_forecast_md = latest_file(REPORTS_DIR, "kmia_forecast_*rules_v2_climatology*.md")
     if not latest_forecast_md:
         latest_forecast_md = latest_file(REPORTS_DIR, "kmia_forecast_*.md")
 
     latest_kalshi_json = LATEST_KALSHI_MARKET_SNAPSHOT
     latest_log = latest_file(LOGS_DIR, "kmia_daily_workflow_*.log")
-    
+
     agg_cal_json_path = CAL_DIR / "aggregate_calibration.json"
     agg_cal_md_path = CAL_DIR / "aggregate_calibration.md"
     cal_json = load_json(agg_cal_json_path) if agg_cal_json_path.exists() else None
     cal_md = load_text(agg_cal_md_path) if agg_cal_md_path.exists() else None
 
-    # Weather
     latest_weather_json = WEATHER_INGESTION_DIR / "latest_weather_ingestion_status.json"
     w_data_status, w_path = load_latest_json(STATUS_DIR, "kmia_daily_status_*.json")
     w_data_ingest = load_json(latest_weather_json) if latest_weather_json.exists() else None
-    w_data = w_data_ingest or w_data_status # Combine or use what's available
-    
-    # NWS
+    w_data = w_data_ingest or w_data_status
+
     latest_nws_path = LATEST_NWS_KMIA_SNAPSHOT
     if not latest_nws_path.exists():
         latest_nws_path = latest_file(NWS_DIR, "nws_kmia_snapshot_*.json")
     n_data = load_json(latest_nws_path) if latest_nws_path else {}
 
-    # Paper Trading
     latest_paper_json = LATEST_PAPER_SIGNAL
     p_data = load_json(latest_paper_json) if latest_paper_json.exists() else {}
-    
+
     latest_orderbooks_json = LATEST_KALSHI_ORDERBOOKS
     o_data = load_json(latest_orderbooks_json) if latest_orderbooks_json.exists() else {}
-    
+
     PERF_FILE = PAPER_DIR / "latest_paper_trading_performance.json"
     perf = load_json(PERF_FILE) if PERF_FILE.exists() else {}
-    
-    # Read from canonical JSON ledger
-    trades = []
+
+    trades: list[dict] = []
     open_paper_trades = 0
     if PAPER_LEDGER_FILE.exists():
         try:
             ledger_json = load_json(PAPER_LEDGER_FILE)
             if ledger_json and isinstance(ledger_json.get("trades"), list):
                 trades = ledger_json["trades"]
-                # Filter for case-insensitive 'open' status
-                open_paper_trades = len([
-                    t for t in trades 
-                    if str(t.get("status", "")).lower() == "open"
-                ])
+                open_paper_trades = len(
+                    [t for t in trades if str(t.get("status", "")).lower() == "open"]
+                )
         except Exception as e:
             logger.error(f"Error loading Paper Ledger: {e}")
 
     SETTLE_FILE = PAPER_DIR / "paper_trade_settlements.jsonl"
-    settlements = []
+    settlements: list[dict] = []
     if SETTLE_FILE.exists():
         with open(SETTLE_FILE, "r") as f:
             for line in f:
                 if line.strip():
                     try:
                         settlements.append(json.loads(line))
-                    except:
+                    except Exception:
                         continue
 
-    # Learning & Prediction Quality
     latest_learning_json = LEARNING_DIR / "latest_learning_summary.json"
     l_data = load_json(latest_learning_json) if latest_learning_json.exists() else {}
-    
+
     pq_json = LEARNING_DIR / "latest_prediction_quality_report.json"
     pq_data = load_json(pq_json) if pq_json.exists() else {}
     pq_md = None
@@ -1530,8 +212,9 @@ if __name__ == "__main__":
         md_path = LEARNING_DIR / f"prediction_quality_report_{pq_data['trade_date']}.md"
         pq_md = load_text(md_path)
 
-    # Assess Weather Gate Freshness
+    # Weather gate freshness
     from weather.nws_snapshot_contract import assess_nws_snapshot
+
     weather_gate = None
     if isinstance(w_data_status, dict) and "weather_gate" in w_data_status:
         weather_gate = w_data_status["weather_gate"]
@@ -1547,15 +230,18 @@ if __name__ == "__main__":
                 "warnings": [f"Assessment failed: {e}"],
                 "latest_observation_time": None,
                 "fetched_at_utc": None,
-                "observation_age_minutes": None
+                "observation_age_minutes": None,
             }
 
-    # Render prominent top-level error/warning banner if recommendations are blocked
     if weather_gate and not weather_gate.get("allow_paper_recommendations", True):
-        st.error(f"🔴 **CRITICAL SAFETY GATING ACTIVE:** Trading recommendations are actively blocked because the NWS weather snapshot is invalid, stale, or missing.\n\n**Reason:** {weather_gate.get('no_trade_reason') or 'No-trade reason unspecified.'}")
+        st.error(
+            "🔴 **CRITICAL SAFETY GATING ACTIVE:** Trading recommendations are actively "
+            "blocked because the NWS weather snapshot is invalid, stale, or missing.\n\n"
+            f"**Reason:** {weather_gate.get('no_trade_reason') or 'No-trade reason unspecified.'}"
+        )
 
     # --- STATE DERIVATION ---
-    app_state = {
+    app_state: dict = {
         "system_status": "GREEN",
         "action_needed": "None. System is working.",
         "forecast_val": "Unknown",
@@ -1579,10 +265,9 @@ if __name__ == "__main__":
         "latest_status_md": latest_status_md,
         "latest_forecast_md": latest_forecast_md,
         "latest_kalshi_json": latest_kalshi_json,
-        "latest_log": latest_log
+        "latest_log": latest_log,
     }
 
-    # NWS live status
     if n_data:
         is_stale = n_data.get("stale_data", False)
         is_error = n_data.get("endpoint_status") == "ERROR"
@@ -1592,10 +277,11 @@ if __name__ == "__main__":
         else:
             app_state["nws_live"] = "⚠️ STALE"
 
-    # Kalshi status
-    mkts = {}
+    mkts: dict = {}
     if latest_kalshi_json.exists():
-        app_state["kalshi_last_upd"] = datetime.fromtimestamp(latest_kalshi_json.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+        app_state["kalshi_last_upd"] = datetime.fromtimestamp(
+            latest_kalshi_json.stat().st_mtime
+        ).strftime('%Y-%m-%d %H:%M')
         mkts = load_json(latest_kalshi_json)
         if mkts.get("selected_temperature_markets"):
             app_state["kalshi_status"] = "CONNECTED"
@@ -1611,23 +297,29 @@ if __name__ == "__main__":
         app_state["system_status"] = "YELLOW"
         app_state["action_needed"] = "Run: bash scripts/update_kalshi_market_data.sh"
 
-    # Evaluate System Health combined
-    if not latest_status_json or not latest_forecast_md or (w_data_status and w_data_status.get("is_stale")) or (n_data and n_data.get("stale_data")) or (weather_gate and not weather_gate.get("allow_paper_recommendations", True)):
+    if (
+        not latest_status_json
+        or not latest_forecast_md
+        or (w_data_status and w_data_status.get("is_stale"))
+        or (n_data and n_data.get("stale_data"))
+        or (weather_gate and not weather_gate.get("allow_paper_recommendations", True))
+    ):
         app_state["system_status"] = "YELLOW"
         reason = "Review missing files or stale weather data."
         if weather_gate and not weather_gate.get("allow_paper_recommendations", True):
             reason = f"NWS Weather Gate blocked recommendations: {weather_gate.get('no_trade_reason')}"
         app_state["action_needed"] = reason
 
-    # Forecast extraction
     status_data = load_json(latest_status_json) if latest_status_json else None
     if isinstance(status_data, dict):
         forecast_info = status_data.get("forecast", {})
         if not forecast_info:
             f_dict = status_data.get("forecasts", {})
             if isinstance(f_dict, dict):
-                forecast_info = f_dict.get("rules_v2_climatology") or (next(iter(f_dict.values())) if f_dict else {})
-                
+                forecast_info = f_dict.get("rules_v2_climatology") or (
+                    next(iter(f_dict.values())) if f_dict else {}
+                )
+
         if forecast_info:
             if isinstance(forecast_info, str):
                 summary = load_latest_forecast_summary(forecast_info)
@@ -1636,19 +328,17 @@ if __name__ == "__main__":
             elif isinstance(forecast_info, dict):
                 app_state["forecast_val"] = str(forecast_info.get("best_single_number", "Unknown"))
                 app_state["top_bin"] = forecast_info.get("top_probability_bin", "Unknown")
-    
+
     if app_state["forecast_val"] == "Unknown" or app_state["top_bin"] == "Unknown":
         summary = load_latest_forecast_summary(latest_forecast_md)
         app_state["forecast_val"] = summary.get("best_single_number", "Unknown")
         app_state["top_bin"] = summary.get("top_probability_bin", "Unknown")
 
-    # Paper signal latest action
     best_sig = p_data.get("best_signal")
     if isinstance(best_sig, dict):
         app_state["latest_signal_action"] = best_sig.get("paper_action", "Unknown")
         app_state["latest_signal_ticker"] = best_sig.get("market_ticker", "Unknown")
 
-    # Next action logic
     if app_state["system_status"] != "GREEN":
         app_state["next_action"] = "Check logs"
     elif app_state["pending_settlements"] > 0:
@@ -1668,20 +358,20 @@ if __name__ == "__main__":
         g_status = weather_gate.get("status", "UNKNOWN")
         g_emoji = {"OK": "🟢", "STALE": "🟡", "ERROR": "🔴", "MISSING": "⚪"}.get(g_status, "❓")
         st.sidebar.markdown(f"**NWS Gate Status:** {g_emoji} `{g_status}`")
-        
+
         allow_recommendations = weather_gate.get("allow_paper_recommendations", False)
         allow_str = "✅ ALLOWED" if allow_recommendations else "❌ BLOCKED"
         st.sidebar.markdown(f"**Trading:** `{allow_str}`")
-        
+
         age = weather_gate.get("observation_age_minutes")
         age_str = f"{age:.1f}m" if age is not None else "N/A"
         st.sidebar.markdown(f"**Obs Age:** `{age_str}`")
-        
+
         if weather_gate.get("warnings"):
             st.sidebar.warning(f"⚠️ {len(weather_gate['warnings'])} warnings active.")
     else:
         st.sidebar.markdown("**NWS Gate Status:** ⚪ `UNKNOWN`")
-    
+
     st.sidebar.divider()
 
     if latest_status_json:
@@ -1707,29 +397,22 @@ if __name__ == "__main__":
         "Weather / NWS",
         "Calibration / Learning",
         "Backtesting",
-        "System Health"
+        "System Health",
     ])
-    
+
     with tabs[0]:
         render_command_center(app_state, p_data, mkts)
-        
     with tabs[1]:
         render_kalshi_market_console(mkts, o_data, p_data)
-        
     with tabs[2]:
         render_active_forecasts(p_data)
-        
     with tabs[3]:
         render_paper_trading(perf, settlements, trades, app_state=app_state)
-        
     with tabs[4]:
         render_weather_nws(w_data, n_data)
-        
     with tabs[5]:
         render_calibration_learning(pq_data, pq_md, l_data, cal_json, cal_md)
-
     with tabs[6]:
         render_backtesting()
-
     with tabs[7]:
         render_system_health(app_state)

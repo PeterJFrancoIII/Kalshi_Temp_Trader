@@ -1,6 +1,6 @@
 # Refactoring Plan — KMIA Kalshi Predictor
 
-**Status:** Phase 3 (3.2 / 3.3 / 3.4) complete; 3.1 (`web_console.py` split) is the only remaining item.  
+**Status:** Phase 3 complete. All four phase-3 tasks delivered.  
 **Baseline:** `bash scripts/run_tests.sh` — all tests passing (2026-05-19)  
 **Scope:** Tighter code structure and governance. **No real-money trading.**
 
@@ -162,12 +162,20 @@ flowchart TB
 
 | ID | Task | Status |
 |----|------|--------|
-| 3.1 | Split `web_console.py` (~1.7k lines) into `console/pages/*` + shared loaders | Pending |
+| 3.1 | Split `web_console.py` (~1.7k lines) into `console/pages/*` + shared loaders | Done |
 | 3.2 | Merge `weather/nws_kmia_client` into ingestion orchestrator | Done |
 | 3.3 | Wire or explicitly defer LLM review in pipeline (config flag) | Done |
 | 3.4 | `jsonl_store` file locking or SQLite for paper history | Done |
 
 **Exit criteria:** No file > ~400 lines without documented reason; interface tests at module boundaries.
+
+**Phase 3.1 — web_console.py split (completed 2026-05-19):**
+
+- New `console/` package houses the dashboard:
+  - `console/data_helpers.py` — all pure helpers (file IO, formatters, domain extractors). The only Streamlit-aware function is `safe_dataframe`.
+  - `console/pages/<tab>.py` — one focused module per tab: `command_center`, `kalshi_market`, `active_forecasts`, `paper_trading`, `weather`, `calibration`, `backtesting`, `system_health`.
+- `web_console.py` shrinks from 1735 → ~420 lines. It now owns only Streamlit page config, the centralized data-loading + state derivation block, the sidebar, and tab dispatch. All helper and renderer names are re-exported at module scope so existing test imports (`from web_console import format_temp`, etc.) keep working.
+- New invariant `test_render_functions_live_under_console_pages_only` prevents `render_*` tab functions from being redefined outside `console/pages/`. The Streamlit auto-discovered multipage directory at `backend/src/pages/` is explicitly exempted (those modules own their own internal helpers).
 
 **Phase 3 batch completed 2026-05-19:**
 
