@@ -25,6 +25,14 @@ echo "Project Root: $PROJECT_ROOT"
 echo "NO REAL TRADING EXECUTION"
 echo "========================================================================"
 
+# 0. Fetch latest Kalshi markets
+echo "Fetching latest Kalshi markets..."
+if bash "$SCRIPT_DIR/fetch_kalshi_markets.sh"; then
+  echo "Kalshi market fetch completed successfully."
+else
+  echo "WARNING: Kalshi market fetch failed. Continuing workflow using existing or empty snapshot in restricted no-trade mode."
+fi
+
 # 1. Identify target dates from Kalshi snapshot
 echo "Identifying target dates from Kalshi snapshot..."
 if [ -x "$PROJECT_ROOT/.venv/bin/python3" ]; then

@@ -1,9 +1,9 @@
 import pytest
 from forecasting.rules_model import RulesBasedForecaster
 from datetime import datetime
-import pytz
+from zoneinfo import ZoneInfo
 
-ET = pytz.timezone('US/Eastern')
+ET = ZoneInfo('US/Eastern')
 
 def test_observed_max_82_zeros_lower_bins():
     forecaster = RulesBasedForecaster()

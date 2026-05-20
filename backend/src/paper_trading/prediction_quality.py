@@ -9,6 +9,8 @@ from pathlib import Path
 from shared.artifact_paths import PAPER_LEDGER_FILE
 from paper_trading.paper_ledger import PaperLedger
 
+from shared.timestamp_utils import extract_timestamp_from_filename
+
 ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = ROOT / "backend" / "data" / "processed"
 CONFIG_DIR = ROOT / "backend" / "config"
@@ -27,12 +29,16 @@ INPUT_PATHS = {
 OUTPUT_JSON = DATA_DIR / "learning" / "latest_prediction_quality_report.json"
 
 def load_json(path):
-    if path.exists():
-        try:
-            with open(path, "r") as f:
-                return json.load(f)
-        except Exception:
+    if path:
+        path = Path(path)
+        if path.suffix.lower() != '.json':
             return None
+        if path.exists():
+            try:
+                with open(path, "r") as f:
+                    return json.load(f)
+            except Exception:
+                return None
     return None
 
 def get_latest_file(directory, pattern):
@@ -41,7 +47,14 @@ def get_latest_file(directory, pattern):
     files = list(directory.glob(pattern))
     if not files:
         return None
-    return max(files, key=os.path.getmtime)
+    
+    def file_sort_key(filepath_path: Path) -> float:
+        ts = extract_timestamp_from_filename(filepath_path.name)
+        if ts:
+            return ts.timestamp()
+        return 0.0
+
+    return max(files, key=file_sort_key)
 
 def generate_report():
     generated_at = datetime.now(timezone.utc)

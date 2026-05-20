@@ -235,3 +235,30 @@ def test_build_observed_empty_reason_stale_data():
     assert "NWS and TWC observed/current-condition rows are both present" in reason
     assert "Latest NWS observation:" in reason
     assert "Latest TWC observation:" in reason
+
+
+def test_normalize_synoptic_observed():
+    page = load_page_module()
+    synoptic_data = {
+        "recent_observations_table": [
+            {
+                "time_utc": "2026-05-10T12:00:00Z",
+                "time_et": "2026-05-10 08:00:00 EDT",
+                "air_temp_f": 82.0,
+                "dew_point_f": 68.0,
+                "raw_temp_c": 27.78,
+                "raw_dewpoint_c": 20.0,
+                "qc_flags": {"some_check": [1, 1]}
+            }
+        ]
+    }
+    df = page.normalize_synoptic_observed(synoptic_data)
+    assert not df.empty
+    assert df.iloc[0]["provider"] == "Synoptic"
+    assert df.iloc[0]["type"] == "Observed"
+    assert df.iloc[0]["temperature_f"] == 82.0
+    assert df.iloc[0]["dewpoint_f"] == 68.0
+    assert df.iloc[0]["raw_temp_c"] == 27.78
+    assert df.iloc[0]["raw_dewpoint_c"] == 20.0
+    assert "some_check" in df.iloc[0]["qc_flags"]
+

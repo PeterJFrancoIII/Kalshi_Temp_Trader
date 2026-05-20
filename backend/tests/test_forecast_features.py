@@ -1,6 +1,5 @@
 import pytest
 from datetime import datetime, date
-import pytz
 from features.forecast_features import ForecastParser
 
 @pytest.fixture

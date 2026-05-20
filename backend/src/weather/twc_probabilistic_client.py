@@ -21,7 +21,7 @@ DEFAULT_PROCESSED_DIR = WEATHER_TWC_DIR
 PROCESSED_DIR = DEFAULT_PROCESSED_DIR
 
 def get_twc_api_key() -> Optional[str]:
-    return os.environ.get("TWC_API_KEY")
+    return os.environ.get("TWC_API_KEY") or os.environ.get("WEATHER_COMPANY_API_KEY")
 
 def build_unavailable_snapshot(api_status: str, warnings: str) -> Dict[str, Any]:
     return {
@@ -112,6 +112,13 @@ def save_snapshots(snapshot: Dict[str, Any], output_dir: Optional[Path] = None):
     output_dir = output_dir or PROCESSED_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    if snapshot.get("api_status") == "missing_credentials":
+        # Save ONLY to a clearly separate unavailable artifact
+        unavailable_path = output_dir / "unavailable_twc_probabilistic_kmia_snapshot.json"
+        with open(unavailable_path, "w") as f:
+            json.dump(snapshot, f, indent=2)
+        return
+        
     # Save latest
     latest_path = output_dir / "latest_twc_probabilistic_kmia_snapshot.json"
     with open(latest_path, "w") as f:
@@ -129,6 +136,9 @@ def run():
     save_snapshots(snapshot)
     print(f"Snapshots saved to {PROCESSED_DIR}")
     print(f"Status: {snapshot['api_status']}")
+    if snapshot.get("api_status") == "missing_credentials":
+        import sys
+        sys.exit(2)
 
 if __name__ == "__main__":
     run()

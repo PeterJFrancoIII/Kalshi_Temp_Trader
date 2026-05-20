@@ -34,6 +34,7 @@ from risk.risk_engine import evaluate_risk_gates, evaluate_risk_decision
 from forecasting.contract_probability_mapper import map_contract_probability
 from forecasting.distribution_utils import build_integer_distribution_from_bins
 from paper_trading.paper_ledger import PaperLedger
+from risk.money_distribution import distribute_money
 
 # Resolve ROOT
 ROOT = Path(__file__).resolve().parents[3]
@@ -545,7 +546,8 @@ def generate_paper_signal(
     prediction_timestamp: Optional[datetime] = None,
     output_dir: Optional[Path] = None,
     latest_path_override: Optional[Path] = None,
-    ledger_path_override: Optional[Path] = None
+    ledger_path_override: Optional[Path] = None,
+    allocation_mode: Optional[str] = None
 ):
     """Generates a quantitative edge report comparing model vs market using active contracts."""
     out_dir = output_dir if output_dir else OUTPUT_DIR
@@ -590,6 +592,63 @@ def generate_paper_signal(
             raise ValueError(f"Snapshot file {snapshot_path.name} is from the future.")
 
     all_discovered_markets = parse_kalshi_markets(snapshot_to_use)
+    if not all_discovered_markets:
+        msg = "No active Kalshi high-temperature contracts discovered."
+        logger.warning(msg)
+        global_warnings = [
+            "Kalshi market snapshot is missing or contains no active KXHIGHMIA markets. Running in restricted no-trade mode."
+        ]
+        
+        if ledger_path_override:
+            ledger = PaperLedger(ledger_path_override)
+        else:
+            ledger = PaperLedger()
+        ledger_summary = ledger.get_summary()
+        alloc_mode = allocation_mode or os.environ.get("KALSHI_ALLOCATION_MODE", "risk_adjusted").lower()
+        money_dist_report = distribute_money(
+            bankroll=ledger_summary.get("account_balance", 1000.0),
+            active_signals=[],
+            forecast_data={},
+            weather_gate=weather_gate,
+            ledger_summary=ledger_summary,
+            target_date=now_date_str,
+            mode=alloc_mode,
+            config=None
+        )
+
+        report = {
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "primary_event_date": now_date_str,
+            "status": "NO_SIGNAL",
+            "forecast_source": None,
+            "market_snapshot_source": str(snapshot_to_use.name) if snapshot_to_use else None,
+            "dynamic_contract_probabilities": {},
+            "signals": [],
+            "best_signal": None,
+            "events_by_date": {},
+            "money_distribution": money_dist_report,
+            "warnings": global_warnings,
+            "weather_gate": weather_gate,
+            "allow_paper_recommendations": False,
+            "no_trade_reason": msg,
+            "safety": {
+                "no_real_trading": True,
+                "no_order_execution": True,
+                "disclaimer": "NO REAL TRADING EXECUTION - PAPER ONLY"
+            }
+        }
+        
+        latest_path = latest_path_override if latest_path_override else LATEST_PAPER_SIGNAL
+        ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        ts_path = out_dir / f"paper_signal_{ts}.json"
+        
+        with open(latest_path, "w") as f:
+            json.dump(report, f, indent=2)
+        with open(ts_path, "w") as f:
+            json.dump(report, f, indent=2)
+            
+        return latest_path
+
     markets_by_date = {}
     for m in all_discovered_markets:
         ticker_date = parse_ticker_date(m.get("ticker"))
@@ -661,10 +720,22 @@ def generate_paper_signal(
                 if is_stale:
                     prob = 0.0
                 else:
-                    # 1. Try direct lookup in model_bins first for exact backwards-compatibility.
-                    prob = _resolve_model_probability_from_bins(model_bins, bin_str)
-                    # 2. Fall back to dynamic mapping.
-                    if prob is None and temp_dist_to_use is not None:
+                    prob = None
+                    # When the forecast JSON contains a real integer_distribution
+                    # (per-degree probabilities from the v2 climatology model),
+                    # integrate over the contract range first.  This handles
+                    # fine-grained Kalshi contracts (87-88, 89-90, 91-92, >=93,
+                    # <=84, etc.) that don’t appear as labels in the 6-bin
+                    # coarse model_bins.
+                    if integer_dist and temp_dist_to_use is not None:
+                        res_prob = map_contract_probability(temp_dist_to_use, mapping)
+                        prob = res_prob.get("model_probability")
+                    # Legacy path (v1 forecasts or tests): direct label lookup in
+                    # coarse model_bins.  Fall back to distribution reconstruction
+                    # only when the label is absent.
+                    if prob is None:
+                        prob = _resolve_model_probability_from_bins(model_bins, bin_str)
+                    if prob is None and not integer_dist and temp_dist_to_use is not None:
                         res_prob = map_contract_probability(temp_dist_to_use, mapping)
                         prob = res_prob.get("model_probability")
 
@@ -698,12 +769,15 @@ def generate_paper_signal(
                 )
                 prob = contract_prob_payload.get("model_probability")
 
-                # A bin is "explicitly missing" when model_bins exists but does
-                # not list this contract bin — we surface a warning and emit a
-                # NO_SIGNAL entry rather than silently using the distribution
-                # mapper's interpolation.
+                # A bin is "explicitly missing" only when there is NO real
+                # integer_distribution from the forecast AND the coarse model_bins
+                # does not list this contract bin.  When the JSON forecast provides
+                # integer_distribution, the range integration above already computed
+                # the correct probability — we must not override that with a label-
+                # lookup failure against the 6-bin coarse model_bins.
                 is_missing_from_model_bins = bool(
-                    model_bins
+                    not integer_dist              # no real integer distribution
+                    and model_bins                # but coarse bins exist
                     and bin_str
                     and _resolve_model_probability_from_bins(model_bins, bin_str) is None
                 )
@@ -816,6 +890,7 @@ def generate_paper_signal(
         events_by_date[event_date] = {
             "event_ticker": event_ticker,
             "forecast_source": str(f_file.name) if f_file else None,
+            "forecast_data": forecast_load.get("forecast_data", {}),
             "signals": event_signals,
             "dynamic_contract_probabilities": event_probs,
             "status": event_status,
@@ -835,6 +910,33 @@ def generate_paper_signal(
         
     primary_event = events_by_date.get(primary_date, {})
     
+    # Run Money Distribution Engine for primary event date
+    if ledger_path_override:
+        ledger = PaperLedger(ledger_path_override)
+    else:
+        ledger = PaperLedger()
+    ledger_summary = ledger.get_summary()
+    
+    primary_signals = [sig for sig in all_signals if parse_ticker_date(sig["market_ticker"]) == primary_date]
+    primary_forecast = primary_event.get("forecast_data", {})
+    
+    alloc_mode = allocation_mode
+    if not alloc_mode:
+        alloc_mode = os.environ.get("KALSHI_ALLOCATION_MODE", "risk_adjusted").lower()
+    if alloc_mode not in ("guarantee_profit", "risk_adjusted", "conservative"):
+        alloc_mode = "risk_adjusted"
+        
+    money_dist_report = distribute_money(
+        bankroll=ledger_summary.get("account_balance", 1000.0),
+        active_signals=primary_signals,
+        forecast_data=primary_forecast,
+        weather_gate=weather_gate,
+        ledger_summary=ledger_summary,
+        target_date=primary_date,
+        mode=alloc_mode,
+        config=None
+    )
+    
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "primary_event_date": primary_date,
@@ -845,6 +947,7 @@ def generate_paper_signal(
         "signals": all_signals,
         "best_signal": best_sig,
         "events_by_date": events_by_date,
+        "money_distribution": money_dist_report,
         "warnings": list(set(global_warnings)),
         "weather_gate": weather_gate,
         "allow_paper_recommendations": weather_gate.get("allow_paper_recommendations", False),

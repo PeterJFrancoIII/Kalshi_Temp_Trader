@@ -79,6 +79,7 @@ from shared.artifact_paths import (
     STATUS_DIR,
     WEATHER_NWS_DIR,
 )
+from shared.timestamp_utils import extract_embedded_timestamp, extract_timestamp_from_filename
 
 logger = logging.getLogger(__name__)
 
@@ -279,9 +280,13 @@ if __name__ == "__main__":
 
     mkts: dict = {}
     if latest_kalshi_json.exists():
-        app_state["kalshi_last_upd"] = datetime.fromtimestamp(
-            latest_kalshi_json.stat().st_mtime
-        ).strftime('%Y-%m-%d %H:%M')
+        ts = extract_embedded_timestamp(latest_kalshi_json)
+        if not ts:
+            ts = extract_timestamp_from_filename(latest_kalshi_json.name)
+        if ts:
+            app_state["kalshi_last_upd"] = ts.strftime('%Y-%m-%d %H:%M')
+        else:
+            app_state["kalshi_last_upd"] = "N/A"
         mkts = load_json(latest_kalshi_json)
         if mkts.get("selected_temperature_markets"):
             app_state["kalshi_status"] = "CONNECTED"
@@ -394,7 +399,6 @@ if __name__ == "__main__":
         "Kalshi Market Console",
         "Active Kalshi Forecasts",
         "Paper Trading",
-        "Weather / NWS",
         "Calibration / Learning",
         "Backtesting",
         "System Health",
@@ -409,10 +413,8 @@ if __name__ == "__main__":
     with tabs[3]:
         render_paper_trading(perf, settlements, trades, app_state=app_state)
     with tabs[4]:
-        render_weather_nws(w_data, n_data)
-    with tabs[5]:
         render_calibration_learning(pq_data, pq_md, l_data, cal_json, cal_md)
-    with tabs[6]:
+    with tabs[5]:
         render_backtesting()
-    with tabs[7]:
+    with tabs[6]:
         render_system_health(app_state)

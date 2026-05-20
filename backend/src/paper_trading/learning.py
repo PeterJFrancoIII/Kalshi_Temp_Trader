@@ -20,12 +20,15 @@ from paper_trading.paper_ledger import PaperLedger
 
 
 def load_json(path):
-    if os.path.exists(path):
-        try:
-            with open(path, 'r') as f:
-                return json.load(f)
-        except Exception:
+    if path:
+        if not str(path).lower().endswith('.json'):
             return {}
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                return {}
     return {}
 
 

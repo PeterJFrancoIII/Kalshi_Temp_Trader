@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from shared.timestamp_utils import extract_embedded_timestamp, extract_timestamp_from_filename
 
 import streamlit as st
 
@@ -70,7 +71,12 @@ def render_command_center(app_state, p_data, mkts):
         kc1, kc2, kc3 = st.columns(3)
         mtime = "N/A"
         if app_state.get("latest_kalshi_json") and app_state["latest_kalshi_json"].exists():
-            mtime = datetime.fromtimestamp(app_state["latest_kalshi_json"].stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+            latest_path = app_state["latest_kalshi_json"]
+            ts = extract_embedded_timestamp(latest_path)
+            if not ts:
+                ts = extract_timestamp_from_filename(latest_path.name)
+            if ts:
+                mtime = ts.strftime('%Y-%m-%d %H:%M')
         kc1.metric("Snapshot Time", mtime)
         kc2.metric("Total Markets", mkts.get("total_markets_returned", 0))
         kc3.metric("Active KXHIGHMIA", len(mkts.get("selected_temperature_markets", [])))
@@ -128,6 +134,220 @@ def render_command_center(app_state, p_data, mkts):
         if p_data.get("warnings"):
             for w in p_data["warnings"]:
                 st.warning(w)
+
+    import pandas as pd
+
+    # Get events grouped by date, with fallback to top-level fields for single-date compatibility
+    events_by_date = p_data.get("events_by_date")
+    if not events_by_date:
+        primary_date = p_data.get("primary_event_date") or "N/A"
+        events_by_date = {
+            primary_date: {
+                "event_ticker": "N/A",
+                "forecast_source": p_data.get("forecast_source"),
+                "signals": p_data.get("signals", []),
+                "dynamic_contract_probabilities": p_data.get("dynamic_contract_probabilities", {}),
+                "status": p_data.get("status", "NO_SIGNAL"),
+                "warnings": p_data.get("warnings", [])
+            }
+        }
+
+    sorted_dates = sorted(events_by_date.keys())
+
+    # Define a helper function to render a single market date's tables
+    def render_date_tables(date: str, date_data: dict, inside_expander: bool = False):
+        event_ticker = date_data.get("event_ticker", "N/A")
+        
+        # Display Bins & Probabilities
+        st.subheader("🔮 Kalshi Bins & Model Forecast Probabilities")
+        probs = date_data.get("dynamic_contract_probabilities")
+        if not probs:
+            st.warning(f"⚠️ No forecast probabilities available for {date}.")
+        else:
+            prob_rows = []
+            for bin_name, prob in probs.items():
+                prob_rows.append({
+                    "Kalshi Bin (Range)": bin_name,
+                    "Model Prob": prob * 100 if prob is not None else None
+                })
+            df_probs = pd.DataFrame(prob_rows)
+            st.dataframe(
+                df_probs,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Model Prob": st.column_config.NumberColumn(
+                        "Model Prob",
+                        format="%.2f%%"
+                    )
+                }
+            )
+
+        # Suggested Paper Contracts & Actions
+        st.subheader("📋 Suggested Paper Contracts & Actions")
+        signals = date_data.get("signals", [])
+        if signals:
+            sig_rows = []
+            for s in signals:
+                warnings_list = s.get("warnings", [])
+                warnings_str = ", ".join(warnings_list) if warnings_list else "None"
+                
+                sig_rows.append({
+                    "Market Date": date,
+                    "Market Ticker": event_ticker,
+                    "Contract Ticker": s.get("market_ticker") or "N/A",
+                    "Bin/Range": s.get("contract_range") or s.get("contract_range_label") or "N/A",
+                    "Model Prob": s.get("model_probability") * 100 if s.get("model_probability") is not None else None,
+                    "Market Prob": s.get("market_probability") * 100 if s.get("market_probability") is not None else None,
+                    "Raw Edge": s.get("raw_edge", 0) * 100 if s.get("raw_edge") is not None else None,
+                    "Executable Edge": s.get("executable_edge", s.get("edge", 0)) * 100 if s.get("executable_edge") is not None or s.get("edge") is not None else None,
+                    "Paper Action": s.get("paper_action", "NO TRADE"),
+                    "No-Trade Reason": s.get("no_trade_reason") or "Risk gate passed. Candidate for trade.",
+                    "Warnings": warnings_str
+                })
+            df_sig_rows = pd.DataFrame(sig_rows)
+            st.dataframe(
+                df_sig_rows,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Model Prob": st.column_config.NumberColumn("Model Prob", format="%.1f%%"),
+                    "Market Prob": st.column_config.NumberColumn("Market Prob", format="%.1f%%"),
+                    "Raw Edge": st.column_config.NumberColumn("Raw Edge", format="%+.1f%%"),
+                    "Executable Edge": st.column_config.NumberColumn("Executable Edge", format="%+.1f%%")
+                }
+            )
+        else:
+            st.info("No suggested paper contracts available.")
+
+        # Show date-specific warnings if available inside the expander/section
+        date_warnings = date_data.get("warnings", [])
+        if date_warnings:
+            with st.container():
+                for w in date_warnings:
+                    st.warning(f"⚠️ [{date}] {w}")
+
+    if len(sorted_dates) == 1:
+        # Preserve original layout exactly when only a single date is present
+        render_date_tables(sorted_dates[0], events_by_date[sorted_dates[0]], inside_expander=False)
+    else:
+        # Show collapsible expanders per active market/date if multiple are present
+        for date in sorted_dates:
+            ticker_suffix = f" ({events_by_date[date].get('event_ticker')})" if events_by_date[date].get('event_ticker') else ""
+            with st.expander(f"📅 Market Date: {date}{ticker_suffix}", expanded=True):
+                render_date_tables(date, events_by_date[date], inside_expander=True)
+
+    st.divider()
+
+    st.subheader("💰 Paper Money Distribution")
+    money_dist = p_data.get("money_distribution") if isinstance(p_data, dict) else None
+
+    default_bankroll = 1000.0
+    if money_dist and money_dist.get("total_available_dollars") is not None:
+        default_bankroll = float(money_dist["total_available_dollars"])
+
+    bankroll_input = st.number_input(
+        "Total available dollars (paper bankroll)",
+        min_value=0.0,
+        value=default_bankroll,
+        step=50.0,
+        help="Adjust to explore allocations. Recomputes from the latest signal "
+        "using the same forecast and risk gates (paper-only, no orders).",
+    )
+
+    if bankroll_input != default_bankroll and isinstance(p_data, dict):
+        try:
+            from risk.money_distribution import distribute_money
+
+            primary_date = p_data.get("primary_event_date") or "unknown"
+            primary_event = (p_data.get("events_by_date") or {}).get(primary_date, {})
+            signals = primary_event.get("signals") or p_data.get("signals") or []
+            forecast_data = primary_event.get("forecast_data") or {}
+            money_dist = distribute_money(
+                bankroll=float(bankroll_input),
+                active_signals=signals,
+                forecast_data=forecast_data,
+                weather_gate=p_data.get("weather_gate") or {},
+                ledger_summary={"daily_pnl": 0.0, "weekly_pnl": 0.0, "active_trades_by_date": {}},
+                target_date=primary_date,
+                mode=money_dist.get("allocation_mode", "risk_adjusted") if money_dist else "risk_adjusted",
+            )
+            st.caption("Showing live recomputation for the bankroll entered above.")
+        except Exception as exc:
+            st.error(f"Could not recompute money distribution: {exc}")
+
+    if money_dist:
+        md1, md2, md3, md4 = st.columns(4)
+        md1.metric("Bankroll", f"${money_dist.get('total_available_dollars', 0):,.2f}")
+        md2.metric("Allocated", f"${money_dist.get('total_allocated', 0):,.2f}")
+        md3.metric("Expected Profit", f"${money_dist.get('portfolio_expected_profit', 0):,.2f}")
+        prob_profit = money_dist.get("probability_of_profit")
+        md4.metric(
+            "Prob. of Profit",
+            f"{prob_profit * 100:.1f}%" if prob_profit is not None else "—",
+        )
+
+        guarantee = money_dist.get("guaranteed_profit_possible", False)
+        mode_label = money_dist.get("allocation_mode", "risk_adjusted")
+        if guarantee:
+            st.success(
+                f"Guaranteed net-positive allocation is mathematically possible "
+                f"(mode: `{mode_label}`)."
+            )
+        else:
+            st.warning(
+                "Guaranteed net-positive allocation not available; "
+                "showing best risk-adjusted paper allocation."
+            )
+
+        wc1, wc2, wc3 = st.columns(3)
+        wc1.metric("Worst Case", f"${money_dist.get('worst_case_profit', 0):,.2f}")
+        wc2.metric("Best Case", f"${money_dist.get('best_case_profit', 0):,.2f}")
+        wc3.metric("Cash Unallocated", f"${money_dist.get('cash_unallocated', 0):,.2f}")
+
+        rows = money_dist.get("rows") or []
+        if rows:
+            alloc_df = pd.DataFrame(
+                [
+                    {
+                        "Contract": r.get("contract_ticker"),
+                        "Bin": r.get("bin_range"),
+                        "Model Prob": (r.get("model_probability") or 0) * 100,
+                        "Edge": r.get("executable_edge"),
+                        "Allocation $": r.get("recommended_allocation_dollars"),
+                        "Est. Contracts": r.get("estimated_contracts"),
+                        "E[Profit] $": r.get("expected_profit"),
+                        "Max Loss $": r.get("max_loss"),
+                        "No-Trade Reason": r.get("no_trade_reason") or "—",
+                    }
+                    for r in rows
+                ]
+            )
+            st.dataframe(
+                alloc_df,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Model Prob": st.column_config.NumberColumn("Model Prob", format="%.1f%%"),
+                    "Allocation $": st.column_config.NumberColumn("Allocation $", format="$%.2f"),
+                    "E[Profit] $": st.column_config.NumberColumn("E[Profit] $", format="$%.2f"),
+                    "Max Loss $": st.column_config.NumberColumn("Max Loss $", format="$%.2f"),
+                },
+            )
+
+        outcomes = money_dist.get("pnl_by_outcome") or []
+        if outcomes:
+            with st.expander("PnL by Settlement Outcome", expanded=False):
+                st.dataframe(pd.DataFrame(outcomes), width="stretch", hide_index=True)
+
+        if money_dist.get("warnings"):
+            for w in money_dist["warnings"]:
+                st.warning(w)
+    else:
+        st.info(
+            "No money distribution block in the latest paper signal. "
+            "Run `generate_paper_signal` to populate allocations."
+        )
 
     st.divider()
 

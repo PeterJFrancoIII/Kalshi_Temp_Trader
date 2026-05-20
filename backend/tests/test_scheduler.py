@@ -1,19 +1,19 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime, date, timezone
-from backend.src.scheduler.jobs import refresh_live_observations
-from backend.src.scheduler.run_daily_prediction import run_prediction_pipeline
-from backend.src.scheduler.settlement_check import run_settlement_check
-from backend.src.db.models import LiveObservation, DailyPrediction, ClimiaReport, WeatherSnapshot
+from scheduler.jobs import refresh_live_observations
+from scheduler.run_daily_prediction import run_prediction_pipeline
+from scheduler.settlement_check import run_settlement_check
+from db.models import LiveObservation, DailyPrediction, ClimiaReport, WeatherSnapshot
 
 @pytest.fixture
 def mock_db():
     db = MagicMock()
     return db
 
-@patch('backend.src.scheduler.jobs.SessionLocal')
-@patch('backend.src.scheduler.jobs.fetch_wrh_timeseries')
-@patch('backend.src.scheduler.jobs.parse_wrh_timeseries')
+@patch('scheduler.jobs.SessionLocal')
+@patch('scheduler.jobs.fetch_wrh_timeseries')
+@patch('scheduler.jobs.parse_wrh_timeseries')
 def test_refresh_live_observations(mock_parse, mock_fetch, mock_session_local, mock_db):
     mock_session_local.return_value = mock_db
     
@@ -40,8 +40,8 @@ def test_refresh_live_observations(mock_parse, mock_fetch, mock_session_local, m
     assert isinstance(added_obj, LiveObservation)
     assert added_obj.temperature_f == 82
 
-@patch('backend.src.scheduler.run_daily_prediction.SessionLocal')
-@patch('backend.src.scheduler.run_daily_prediction.RulesBasedForecaster')
+@patch('scheduler.run_daily_prediction.SessionLocal')
+@patch('scheduler.run_daily_prediction.RulesBasedForecaster')
 def test_run_prediction_pipeline(mock_forecaster_cls, mock_session_local, mock_db):
     mock_session_local.return_value = mock_db
     
@@ -78,9 +78,9 @@ def test_run_prediction_pipeline(mock_forecaster_cls, mock_session_local, mock_d
     # Verify prediction was saved
     assert mock_db.add.call_count >= 2 # WeatherSnapshot and DailyPrediction
     
-@patch('backend.src.scheduler.settlement_check.SessionLocal')
-@patch('backend.src.scheduler.settlement_check.fetch_climia_report')
-@patch('backend.src.scheduler.settlement_check.parse_climia_report')
+@patch('scheduler.settlement_check.SessionLocal')
+@patch('scheduler.settlement_check.fetch_climia_report')
+@patch('scheduler.settlement_check.parse_climia_report')
 def test_run_settlement_check(mock_parse, mock_fetch, mock_session_local, mock_db):
     mock_session_local.return_value = mock_db
     

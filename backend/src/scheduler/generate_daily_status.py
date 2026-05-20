@@ -16,11 +16,20 @@ from shared.artifact_paths import (
     LATEST_NWS_KMIA_SNAPSHOT
 )
 
+from shared.timestamp_utils import extract_timestamp_from_filename
+
 def get_latest_file(pattern: str) -> Optional[str]:
     files = glob.glob(pattern)
     if not files:
         return None
-    return max(files, key=os.path.getmtime)
+        
+    def file_sort_key(filepath_str: str) -> float:
+        ts = extract_timestamp_from_filename(os.path.basename(filepath_str))
+        if ts:
+            return ts.timestamp()
+        return 0.0
+
+    return max(files, key=file_sort_key)
 
 def get_daily_status():
     today = datetime.now().strftime('%Y-%m-%d')

@@ -177,6 +177,13 @@ def forecast_daily_high_bins_v2(
     overcast_flag = input_features.get("overcast_flag", False)
     thunderstorm_severity = input_features.get("thunderstorm_severity", "none")
 
+    # Run latent temperature inference if recent observations are available
+    latent_inference = None
+    recent_obs = input_features.get("recent_observations")
+    if recent_obs:
+        from forecasting.asos_quantization import infer_latent_temperature_from_rh, apply_latent_observation_adjustment
+        latent_inference = infer_latent_temperature_from_rh(recent_obs)
+
     if integer_dist:
         integer_dist = apply_weather_suppression_integer(
             integer_dist,
@@ -196,8 +203,37 @@ def forecast_daily_high_bins_v2(
         # Apply Hard live constraint (observed max)
         if observed_max_so_far_f is not None and observed_max_so_far_f > 0:
             integer_dist = zero_impossible_temps(integer_dist, observed_max_so_far_f)
+            
+            # Apply latent temperature adjustment if active
+            if latent_inference and latent_inference.get("rh_tiebreaker_signal") == "LIKELY_UPPER_BUCKET_WARMING":
+                integer_dist = apply_latent_observation_adjustment(integer_dist, latent_inference)
+                # Re-apply observed max truncation for strict safety
+                integer_dist = zero_impossible_temps(integer_dist, observed_max_so_far_f)
+                
+                # Add drivers and warnings/explanations
+                conf = latent_inference.get("confidence", "none")
+                inferred = latent_inference.get("latent_observed_max_inferred_f")
+                main_drivers.append(
+                    f"Applied latent temperature adjustment ({conf} confidence) based on relative humidity tie-breaker: "
+                    f"inferred true temperature {inferred}F vs reported {observed_max_so_far_f}F."
+                )
+                if latent_inference.get("quantization_warning"):
+                    warnings.append(
+                        f"Celsius quantization detected. Inferred latent temp {inferred}F may touch the next Kalshi boundary."
+                    )
         else:
             integer_dist = normalize_probability_mass(integer_dist)
+            
+            # Apply latent temperature adjustment if active
+            if latent_inference and latent_inference.get("rh_tiebreaker_signal") == "LIKELY_UPPER_BUCKET_WARMING":
+                integer_dist = apply_latent_observation_adjustment(integer_dist, latent_inference)
+                conf = latent_inference.get("confidence", "none")
+                inferred = latent_inference.get("latent_observed_max_inferred_f")
+                main_drivers.append(
+                    f"Applied latent temperature adjustment ({conf} confidence) based on relative humidity tie-breaker: "
+                    f"inferred true temperature {inferred}F."
+                )
+                
             if observed_max_so_far_f is None:
                 warnings.append("No same-day NWS observations available; skipping lower-tail truncation.")
 
@@ -260,5 +296,6 @@ def forecast_daily_high_bins_v2(
         "forecast_high_f": forecast_high_f,
         "confidence": confidence,
         "main_drivers": main_drivers,
-        "warnings": warnings
+        "warnings": warnings,
+        "latent_inference": latent_inference
     }

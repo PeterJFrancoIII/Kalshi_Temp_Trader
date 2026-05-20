@@ -1,9 +1,13 @@
 import os
 import unittest
+from pathlib import Path
 
 class TestOperatorDocs(unittest.TestCase):
     def setUp(self):
-        self.docs_path = os.path.join(os.getcwd(), "docs", "TROUBLESHOOTING_SIMPLE.md")
+        # Resolve the root path relative to the test file location
+        self.root = Path(__file__).resolve().parents[2]
+        self.docs_dir = self.root / "docs"
+        self.docs_path = os.path.join(self.docs_dir, "TROUBLESHOOTING_SIMPLE.md")
 
     def test_troubleshooting_doc_exists(self):
         """Verify that docs/TROUBLESHOOTING_SIMPLE.md exists."""
@@ -22,7 +26,7 @@ class TestOperatorDocs(unittest.TestCase):
 
     def test_git_hygiene_doc_content(self):
         """Verify the content of docs/GIT_HYGIENE.md."""
-        path = os.path.join(os.getcwd(), "docs", "GIT_HYGIENE.md")
+        path = os.path.join(self.docs_dir, "GIT_HYGIENE.md")
         if os.path.exists(path):
             with open(path, "r") as f:
                 content = f.read()
@@ -31,7 +35,7 @@ class TestOperatorDocs(unittest.TestCase):
 
     def test_health_checks_doc_content(self):
         """Verify the content of docs/HEALTH_CHECKS.md."""
-        path = os.path.join(os.getcwd(), "docs", "HEALTH_CHECKS.md")
+        path = os.path.join(self.docs_dir, "HEALTH_CHECKS.md")
         if os.path.exists(path):
             with open(path, "r") as f:
                 content = f.read()
@@ -39,11 +43,11 @@ class TestOperatorDocs(unittest.TestCase):
 
     def test_paper_trading_doc_exists(self):
         """Verify that docs/PAPER_TRADING_FEEDBACK.md exists."""
-        self.assertTrue(os.path.exists(os.path.join(os.getcwd(), "docs", "PAPER_TRADING_FEEDBACK.md")))
+        self.assertTrue(os.path.exists(os.path.join(self.docs_dir, "PAPER_TRADING_FEEDBACK.md")))
 
     def test_paper_trading_doc_content(self):
         """Verify the content of docs/PAPER_TRADING_FEEDBACK.md."""
-        with open(os.path.join(os.getcwd(), "docs", "PAPER_TRADING_FEEDBACK.md"), "r") as f:
+        with open(os.path.join(self.docs_dir, "PAPER_TRADING_FEEDBACK.md"), "r") as f:
             content = f.read()
         self.assertIn("NO REAL TRADING EXECUTION", content)
         self.assertIn("PAPER SIGNAL", content)
@@ -52,11 +56,11 @@ class TestOperatorDocs(unittest.TestCase):
 
     def test_automated_paper_loop_doc_exists(self):
         """Verify that docs/AUTOMATED_PAPER_LOOP.md exists."""
-        self.assertTrue(os.path.exists(os.path.join(os.getcwd(), "docs", "AUTOMATED_PAPER_LOOP.md")))
+        self.assertTrue(os.path.exists(os.path.join(self.docs_dir, "AUTOMATED_PAPER_LOOP.md")))
 
     def test_automated_paper_loop_doc_content(self):
         """Verify the content of docs/AUTOMATED_PAPER_LOOP.md."""
-        with open(os.path.join(os.getcwd(), "docs", "AUTOMATED_PAPER_LOOP.md"), "r") as f:
+        with open(os.path.join(self.docs_dir, "AUTOMATED_PAPER_LOOP.md"), "r") as f:
             content = f.read()
         self.assertIn("NO REAL TRADING EXECUTION", content)
         self.assertIn("paper-only", content)
@@ -65,11 +69,11 @@ class TestOperatorDocs(unittest.TestCase):
 
     def test_deploy_guide_exists(self):
         """Verify that docs/DEPLOY_SIMPLE.md exists."""
-        self.assertTrue(os.path.exists(os.path.join(os.getcwd(), "docs", "DEPLOY_SIMPLE.md")))
+        self.assertTrue(os.path.exists(os.path.join(self.docs_dir, "DEPLOY_SIMPLE.md")))
 
     def test_deploy_guide_content(self):
         """Verify the content of docs/DEPLOY_SIMPLE.md."""
-        with open(os.path.join(os.getcwd(), "docs", "DEPLOY_SIMPLE.md"), "r") as f:
+        with open(os.path.join(self.docs_dir, "DEPLOY_SIMPLE.md"), "r") as f:
             content = f.read()
         self.assertIn("NO REAL TRADING EXECUTION", content)
         self.assertIn("deploy_from_mac.sh", content)

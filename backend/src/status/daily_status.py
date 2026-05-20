@@ -4,12 +4,21 @@ import glob
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
+from shared.timestamp_utils import extract_timestamp_from_filename
+
 def get_latest_file(pattern: str) -> Optional[str]:
-    """Returns the latest file matching the pattern by modification time."""
+    """Returns the latest file matching the pattern by parsed timestamp."""
     files = glob.glob(pattern)
     if not files:
         return None
-    return max(files, key=os.path.getmtime)
+        
+    def file_sort_key(filepath_str: str) -> float:
+        ts = extract_timestamp_from_filename(os.path.basename(filepath_str))
+        if ts:
+            return ts.timestamp()
+        return 0.0
+
+    return max(files, key=file_sort_key)
 
 def build_daily_status(
     target_date: str | None = None,

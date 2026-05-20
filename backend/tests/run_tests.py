@@ -267,6 +267,7 @@ from test_weather_ingestion import (
 from test_paper_ledger import TestPaperLedger
 from test_risk_engine import TestRiskEngine
 from test_edge_engine import TestEdgeEngine
+from test_money_distribution import TestMoneyDistribution
 
 from test_health_summary import (
     test_health_summary_script_exists,
@@ -320,6 +321,7 @@ from test_kmia_distribution_blender import TestKMIADistributionBlender
 from test_kmia_observation_bias_corrector import TestKmiaObservationBiasCorrector
 from test_twc_daily_max_distribution import TestTWCDailyMaxDistribution
 from test_twc_probabilistic_client import TestTWCProbabilisticClient
+from test_synoptic_kmia_client import TestSynopticKMIAClient
 from test_twc_kmia_client import (
     test_normalize_current_handles_missing_input,
     test_normalize_current_maps_common_twc_fields,
@@ -512,6 +514,7 @@ tests = [
     lambda: run_unittest_class(TestPaperLedger),
     lambda: run_unittest_class(TestRiskEngine),
     lambda: run_unittest_class(TestEdgeEngine),
+    lambda: run_unittest_class(TestMoneyDistribution),
     test_scripts_contain_safety_disclaimer,
     test_check_sync_status_runs,
     test_health_summary_script_exists,
@@ -609,6 +612,7 @@ tests = [
     lambda: run_unittest_class(TestKmiaObservationBiasCorrector),
     lambda: run_unittest_class(TestTWCDailyMaxDistribution),
     lambda: run_unittest_class(TestTWCProbabilisticClient),
+    lambda: run_unittest_class(TestSynopticKMIAClient),
     lambda: run_unittest_class(TestDistributionUtils),
     # TWC KMIA client — weather data normalization correctness
     test_normalize_current_handles_missing_input,

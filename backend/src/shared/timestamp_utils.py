@@ -64,6 +64,8 @@ def extract_embedded_timestamp(filepath: Path) -> Optional[datetime]:
     Callers must treat a None return as "timestamp unknown — exclude this
     file from point-in-time selection."
     """
+    if filepath.suffix.lower() != '.json':
+        return None
     try:
         with open(filepath, "r") as f:
             data = json.load(f)
@@ -120,6 +122,8 @@ def select_snapshot_as_of(
     candidates: List[Tuple[datetime, Path]] = []
 
     for filepath in directory.glob(glob_pattern):
+        if filepath.suffix.lower() != '.json':
+            continue
         embedded_ts = extract_embedded_timestamp(filepath)
         if embedded_ts is None:
             if warn_on_missing_ts:
@@ -146,3 +150,44 @@ def select_snapshot_as_of(
         f"(embedded_ts={chosen_ts.isoformat()}, as_of={as_of_time.isoformat()})"
     )
     return chosen_path
+
+
+def extract_timestamp_from_filename(filename: str) -> Optional[datetime]:
+    """
+    Parses a datetime object from a filename containing standard date/time pattern.
+    Supports formats like:
+      - kmia_forecast_YYYY-MM-DD_rules_vX_HHMMSS.md / .json
+      - kmia_comparison_YYYY-MM-DD_HHMMSS.md
+      - kmia_daily_status_YYYY-MM-DD.json / .md
+      - kmia_daily_workflow_YYYY-MM-DD.log
+      - run_YYYYMMDD_HHMMSS (backtest run directories)
+    """
+    # 1. Match YYYY-MM-DD and HHMMSS (e.g. 2026-05-12 and 205608)
+    match = re.search(r"(\d{4}-\d{2}-\d{2}).*?(\d{6})", filename)
+    if match:
+        date_str, time_str = match.groups()
+        try:
+            return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H%M%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    # 2. Match YYYYMMDD_HHMMSS (e.g., 20260515_003705)
+    match_run = re.search(r"(\d{8})_(\d{6})", filename)
+    if match_run:
+        date_str, time_str = match_run.groups()
+        try:
+            return datetime.strptime(f"{date_str} {time_str}", "%Y%m%d %H%M%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    # 3. Match YYYY-MM-DD (e.g. 2026-05-12)
+    match_date = re.search(r"(\d{4}-\d{2}-\d{2})", filename)
+    if match_date:
+        date_str = match_date.group(1)
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    return None
+

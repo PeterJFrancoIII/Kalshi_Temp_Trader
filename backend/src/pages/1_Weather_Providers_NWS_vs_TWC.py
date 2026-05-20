@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -11,17 +12,23 @@ import streamlit as st
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
 
+from shared.timestamp_utils import extract_embedded_timestamp, extract_timestamp_from_filename
+
 ROOT = Path(__file__).resolve().parents[3]
 DATA = ROOT / "backend" / "data" / "processed"
 NWS_DIR = DATA / "weather_nws"
 TWC_DIR = DATA / "weather_company"
+SYNOPTIC_DIR = DATA / "synoptic"
 NWS_UPDATE_SCRIPT = ROOT / "scripts" / "update_nws_live_data.sh"
 TWC_UPDATE_SCRIPT = ROOT / "scripts" / "update_twc_kmia_data.sh"
+SYNOPTIC_UPDATE_SCRIPT = ROOT / "scripts" / "update_synoptic_kmia_data.sh"
+
 
 DEFAULT_AUTO_REFRESH_SECONDS = int(os.getenv("WEATHER_PROVIDERS_AUTO_REFRESH_SECONDS", "60"))
 MIN_UPDATE_SECONDS = int(os.getenv("WEATHER_PROVIDER_MIN_UPDATE_SECONDS", "45"))
 NWS_STALE_SECONDS = int(os.getenv("NWS_PROVIDER_STALE_SECONDS", "900"))
 TWC_STALE_SECONDS = int(os.getenv("TWC_PROVIDER_STALE_SECONDS", "1800"))
+SYNOPTIC_STALE_SECONDS = int(os.getenv("SYNOPTIC_PROVIDER_STALE_SECONDS", "1800"))
 
 DISPLAY_COLUMNS = [
     "Time ET", "Provider", "Type", "Temp °F", "Dewpoint °F", "RH %", "Wind",
@@ -34,17 +41,50 @@ def latest_file(directory: Path, pattern: str) -> Optional[Path]:
     if not directory.exists():
         return None
     files = list(directory.glob(pattern))
-    return max(files, key=lambda p: p.stat().st_mtime) if files else None
+    if not files:
+        return None
+
+    candidates = []
+    for f in files:
+        ts = None
+        if f.suffix.lower() == '.json':
+            ts = extract_embedded_timestamp(f)
+        if ts is None:
+            ts = extract_timestamp_from_filename(f.name)
+        if ts is not None:
+            candidates.append((ts, f))
+
+    if candidates:
+        candidates.sort(reverse=True)
+        return candidates[0][1]
+
+    return None
 
 
 def file_age_seconds(path: Optional[Path]) -> Optional[float]:
-    return max(0.0, time.time() - path.stat().st_mtime) if path and path.exists() else None
+    if path and path.exists():
+        ts = None
+        if path.suffix.lower() == '.json':
+            ts = extract_embedded_timestamp(path)
+        if ts is None:
+            ts = extract_timestamp_from_filename(path.name)
+        if ts is not None:
+            age = (datetime.now(timezone.utc) - ts).total_seconds()
+            return max(0.0, age)
+    return None
 
 
 def load_json(path: Optional[Path]) -> Dict[str, Any]:
-    if path and path.exists():
-        with path.open("r") as f:
-            return json.load(f)
+    if path:
+        path = Path(path)
+        if path.suffix.lower() != '.json':
+            return {}
+        if path.exists():
+            try:
+                with path.open("r") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, ValueError, OSError):
+                return {}
     return {}
 
 
@@ -78,10 +118,14 @@ def maybe_update_provider(path: Optional[Path], stale_seconds: int, script: Path
         new_path = NWS_DIR / "latest_nws_kmia_snapshot.json"
         if not new_path.exists():
             new_path = latest_file(NWS_DIR, "nws_kmia_snapshot_*.json")
-    else:
+    elif label == "TWC":
         new_path = TWC_DIR / "latest_twc_kmia_snapshot.json"
         if not new_path.exists():
             new_path = latest_file(TWC_DIR, "twc_kmia_snapshot_*.json")
+    else:
+        new_path = SYNOPTIC_DIR / "latest_synoptic_kmia_snapshot.json"
+        if not new_path.exists():
+            new_path = latest_file(SYNOPTIC_DIR, "synoptic_kmia_snapshot_*.json")
     return new_path, msg
 
 
@@ -166,6 +210,13 @@ def provider_status(value: Dict[str, Any], provider: str) -> str:
         if value.get("stale_data"):
             return "STALE"
         return "CONNECTED"
+    if provider == "synoptic":
+        status = value.get("endpoint_status")
+        if status in ("ERROR", "MISSING_CREDENTIALS"):
+            return status
+        if value.get("stale_data"):
+            return "STALE"
+        return "CONNECTED"
     if value.get("quality_flags"):
         return "CHECK FLAGS"
     return "CONNECTED"
@@ -185,17 +236,25 @@ def normalize_rows(rows: List[Dict[str, Any]], provider: str, row_type: str) -> 
         ts = parse_ts(row.get("timestamp_utc") or row.get("valid_time_utc") or row.get("validTimeUtc") or row.get("time_utc") or row.get("startTime") or row.get("start_time"))
         if ts is None and row.get("date_et") and row.get("time_et"):
             ts = parse_ts(f"{row.get('date_et')} {row.get('time_et')}")
-        temp = first_number(row, "temperature_f", "current_temp_f", "temperature", "temp", "temperatureMax")
+        temp = first_number(row, "temperature_f", "air_temp_f", "current_temp_f", "temperature", "temp", "temperatureMax")
+        wind_deg = first_number(row, "wind_direction_degrees", "wind_direction_deg", "windDirection", "wdir")
         wind_dir = row.get("wind_direction_compass") or row.get("wind_direction_cardinal") or row.get("windDirectionCardinal") or row.get("windDirection") or row.get("windDirectionText")
+        if not wind_dir and wind_deg is not None:
+            try:
+                val = int((float(wind_deg) / 22.5) + .5)
+                arr = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+                wind_dir = arr[(val % 16)]
+            except Exception:
+                pass
         normalized.append({
             "provider": provider,
             "type": row_type,
             "time_utc": ts,
             "time_et": format_et(ts) if ts is not None else row.get("time_et") or row.get("valid_time_local") or row.get("validTimeLocal") or "N/A",
             "temperature_f": temp,
-            "dewpoint_f": first_number(row, "dewpoint_f", "temperatureDewPoint", "dewPoint", "dewpt"),
+            "dewpoint_f": first_number(row, "dewpoint_f", "dew_point_f", "temperatureDewPoint", "dewPoint", "dewpt"),
             "relative_humidity_pct": first_number(row, "relative_humidity_pct", "relativeHumidity", "humidity"),
-            "wind_direction_degrees": first_number(row, "wind_direction_degrees", "windDirection", "wdir"),
+            "wind_direction_degrees": wind_deg,
             "wind_direction": wind_dir,
             "wind_speed_mph": first_number(row, "wind_speed_mph", "windSpeed", "wspd"),
             "wind_gust_mph": first_number(row, "wind_gust_mph", "windGust", "gust"),
@@ -249,6 +308,25 @@ def normalize_twc_observed(twc: Dict[str, Any]) -> pd.DataFrame:
         "phrase": current.get("phrase") or current.get("wxPhraseLong") or current.get("narrative") or current.get("phrase"),
     }
     return pd.DataFrame([row])
+
+
+def normalize_synoptic_observed(synoptic: Dict[str, Any]) -> pd.DataFrame:
+    if not isinstance(synoptic, dict):
+        return pd.DataFrame()
+    rows = synoptic.get("recent_observations_table", [])
+    df = normalize_rows([r for r in rows if isinstance(r, dict)], "Synoptic", "Observed")
+    if not df.empty:
+        time_to_row = {}
+        for r in rows:
+            if isinstance(r, dict):
+                parsed_t = parse_ts(r.get("time_utc"))
+                if parsed_t is not None:
+                    time_to_row[parsed_t] = r
+        df["raw_temp_c"] = df["time_utc"].map(lambda t: time_to_row.get(t, {}).get("raw_temp_c"))
+        df["raw_dewpoint_c"] = df["time_utc"].map(lambda t: time_to_row.get(t, {}).get("raw_dewpoint_c"))
+        df["qc_flags"] = df["time_utc"].map(lambda t: json.dumps(time_to_row.get(t, {}).get("qc_flags")) if time_to_row.get(t, {}).get("qc_flags") else None)
+    return df
+
 
 
 def normalize_nws_forecast(nws: Dict[str, Any]) -> pd.DataFrame:
@@ -331,12 +409,26 @@ def to_display_df(df: pd.DataFrame, provider_label: Optional[str] = None, max_ro
         "Precip %": display_df["precip_probability_pct"].map(lambda v: compact_num(v)) if "precip_probability_pct" in display_df else None,
         "Phrase / Raw": display_df["phrase"],
     })
-    return out[DISPLAY_COLUMNS]
+    cols = list(DISPLAY_COLUMNS)
+    if "raw_temp_c" in display_df.columns:
+        out["Temp °C"] = display_df["raw_temp_c"].map(lambda v: compact_num(v))
+        cols.append("Temp °C")
+    if "raw_dewpoint_c" in display_df.columns:
+        out["Dewpoint °C"] = display_df["raw_dewpoint_c"].map(lambda v: compact_num(v))
+        cols.append("Dewpoint °C")
+    if "qc_flags" in display_df.columns:
+        out["QC Flags"] = display_df["qc_flags"]
+        cols.append("QC Flags")
+    return out[[c for c in cols if c in out.columns]]
+
 
 
 def normalize_time_utc_for_merge(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df.copy()
+    if df.empty or "time_utc" not in df.columns:
+        df_copy = df.copy()
+        if "time_utc" not in df_copy.columns:
+            df_copy["time_utc"] = pd.Series(dtype="datetime64[ns, UTC]")
+        return df_copy
     df_copy = df.copy()
     df_copy["time_utc"] = pd.to_datetime(df_copy["time_utc"], utc=True).astype("datetime64[ns, UTC]")
     df_copy = df_copy.dropna(subset=["time_utc"]).sort_values("time_utc")
@@ -485,23 +577,51 @@ def matched_columns(groups: List[str]) -> List[str]:
     return cols
 
 
-def render_summary(nws: Dict[str, Any], twc: Dict[str, Any], matched: pd.DataFrame, nws_age: Optional[float], twc_age: Optional[float]) -> None:
+def render_summary(nws: Dict[str, Any], twc: Dict[str, Any], synoptic: Dict[str, Any], matched: pd.DataFrame, nws_age: Optional[float], twc_age: Optional[float], synoptic_age: Optional[float]) -> None:
     features = twc.get("derived_features", {}) if isinstance(twc, dict) else {}
     st.header("🌦️ Forecast Providers: NWS KMIA vs The Weather Company")
     st.error("🚨 NO REAL TRADING EXECUTION — DRY-RUN / PAPER EVALUATION ONLY")
     st.info("Forecast rows are compared separately from observed/verification rows. NWS KMIA observations remain the official verification target.")
-    cols = st.columns(4)
-    cols[0].metric("NWS Observed Temp", f"{nws.get('current_temp_f', 'N/A')}°F")
-    cols[1].metric("NWS Observed Max", f"{nws.get('observed_max_so_far_f', 'N/A')}°F")
-    cols[2].metric("TWC Forecast High", f"{features.get('forecast_high_f', 'N/A')}°F")
-    cols[3].metric("TWC Hourly Max", f"{features.get('hourly_max_temp_f', 'N/A')}°F")
-    cols2 = st.columns(4)
+
+    def fmt_temp(val):
+        return f"{val}°F" if val is not None else "N/A"
+
+    cols = st.columns(6)
+    cols[0].metric("NWS Observed Temp", fmt_temp(nws.get('current_temp_f')))
+    cols[1].metric("NWS Observed Max", fmt_temp(nws.get('observed_max_so_far_f')))
+    cols[2].metric("Synoptic Observed Temp", fmt_temp(synoptic.get('current_temp_f')))
+    cols[3].metric("Synoptic Observed Max", fmt_temp(synoptic.get('observed_max_so_far_f')))
+    cols[4].metric("TWC Forecast High", fmt_temp(features.get('forecast_high_f')))
+    cols[5].metric("TWC Hourly Max", fmt_temp(features.get('hourly_max_temp_f')))
+
+    cols2 = st.columns(5)
     cols2[0].metric("NWS Status", provider_status(nws, "nws"))
     cols2[1].metric("TWC Status", provider_status(twc, "twc"))
-    cols2[2].metric("Matched Forecast Intervals", len(matched))
+    cols2[2].metric("Synoptic Status", provider_status(synoptic, "synoptic"))
+    cols2[3].metric("Matched Forecast Intervals", len(matched))
     med = matched["Forecast Spread"].dropna().median() if not matched.empty and "Forecast Spread" in matched else None
-    cols2[3].metric("Median Forecast Spread", f"{med:+.1f}°F" if med is not None and pd.notna(med) else "N/A")
-    st.caption(f"Snapshot age — NWS: {int(nws_age or 0)}s | TWC: {int(twc_age or 0)}s")
+    cols2[4].metric("Median Forecast Spread", f"{med:+.1f}°F" if med is not None and pd.notna(med) else "N/A")
+    st.caption(f"Snapshot age — NWS: {int(nws_age or 0)}s | TWC: {int(twc_age or 0)}s | Synoptic: {int(synoptic_age or 0)}s")
+
+    st.write("---")
+    st.subheader("Synoptic Integration & Current Conditions")
+    status = provider_status(synoptic, "synoptic")
+
+    # Render warnings / missing credentials
+    if status == "MISSING_CREDENTIALS":
+        st.warning("⚠️ **Synoptic API Credentials Missing:** Please set the `SYNOPTIC_TOKEN` or `SYNOPTIC_API_TOKEN` environment variable to fetch live observations.")
+    elif status == "ERROR":
+        warnings = synoptic.get("warnings", [])
+        st.error(f"🚨 **Synoptic API Error:** {', '.join(warnings) if warnings else 'Unknown error'}")
+    elif synoptic.get("warnings"):
+        st.warning(f"⚠️ **Synoptic Warnings:** {', '.join(synoptic.get('warnings', []))}")
+
+    s_cols = st.columns(4)
+    s_cols[0].metric("Synoptic Endpoint Status", status)
+    s_cols[1].metric("Current Temp", fmt_temp(synoptic.get('current_temp_f')))
+    s_cols[2].metric("Today Max / Recent Max", f"{fmt_temp(synoptic.get('observed_max_so_far_f'))} / {fmt_temp(synoptic.get('recent_window_max_temp_f'))}")
+    s_cols[3].metric("Latest Observation Time", synoptic.get('latest_observation_time') or "N/A")
+
 
 
 def render_provider_tables(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.DataFrame, matched: pd.DataFrame, groups: List[str]) -> None:
@@ -519,9 +639,9 @@ def render_provider_tables(nws_forecast_df: pd.DataFrame, twc_forecast_df: pd.Da
         st.dataframe(to_display_df(twc_forecast_df, "TWC", max_rows=72), width="stretch", hide_index=True)
 
 
-def render_observed_tables(nws_observed_df: pd.DataFrame, twc_observed_df: pd.DataFrame, matched_observed: pd.DataFrame, twc: Dict[str, Any], tolerance: int) -> None:
+def render_observed_tables(nws_observed_df: pd.DataFrame, twc_observed_df: pd.DataFrame, synoptic_observed_df: pd.DataFrame, matched_observed: pd.DataFrame, twc: Dict[str, Any], synoptic: Dict[str, Any], tolerance: int) -> None:
     st.subheader("Observed Tables")
-    tab1, tab2, tab3 = st.tabs(["Matched Hourly Observed Interval Comparison", "NWS Observed", "TWC Observed"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Matched Hourly Observed Interval Comparison", "NWS Observed", "TWC Observed", "Synoptic Observed"])
     with tab1:
         if matched_observed.empty:
             reason = build_observed_empty_reason(nws_observed_df, twc_observed_df, tolerance)
@@ -541,6 +661,40 @@ def render_observed_tables(nws_observed_df: pd.DataFrame, twc_observed_df: pd.Da
             st.json(status)
         else:
             st.dataframe(to_display_df(twc_observed_df.sort_values("time_utc", ascending=False), "TWC", max_rows=48), width="stretch", hide_index=True)
+    with tab4:
+        if synoptic_observed_df.empty:
+            status = synoptic.get("endpoint_status") or "MISSING"
+            st.warning(f"No Synoptic observed rows are available. Status: {status}")
+            if isinstance(synoptic.get("warnings"), list) and synoptic.get("warnings"):
+                st.write(synoptic["warnings"])
+        else:
+            # Metadata block
+            meta = synoptic.get("endpoint_metadata", {})
+            st.markdown(
+                f"**Station:** `{synoptic.get('station', 'N/A')}` | "
+                f"**Network:** `{meta.get('network_name', 'ASOS/AWOS')} (MNET: {meta.get('mnet_id', 'N/A')})` | "
+                f"**Elevation:** `{meta.get('elevation_ft', 'N/A')} ft` | "
+                f"**Coordinates:** `{meta.get('latitude', 'N/A')}, {meta.get('longitude', 'N/A')}`"
+            )
+            
+            st.markdown(
+                f"**Temporal Resolution Claim:** `{synoptic.get('temporal_resolution_claim', '1-minute/HF-ASOS')}` | "
+                f"**Observed Cadence:** `{synoptic.get('cadence_observed_minutes', 'N/A')} min` | "
+                f"**Ingestion Latency:** `{synoptic.get('latency_minutes', 'N/A')} min` | "
+                f"**Underlying Feed:** `{synoptic.get('underlying_feed', 'N/A')}`"
+            )
+            
+            qc_sum = synoptic.get("qc_summary")
+            if qc_sum:
+                applied_str = ", ".join(qc_sum.get("qc_checks_applied", [])) or "None"
+                st.markdown(
+                    f"**QC Summary:** `{qc_sum.get('total_observations_flagged', 0)}` flagged observations "
+                    f"({qc_sum.get('percent_of_total_observations_flagged', 0.0)}%) | "
+                    f"**Applied Checks:** `{applied_str}`"
+                )
+                
+            st.dataframe(to_display_df(synoptic_observed_df.sort_values("time_utc", ascending=False), "Synoptic", max_rows=48), width="stretch", hide_index=True)
+
 
 
 def render_matched_table(matched: pd.DataFrame, groups: List[str]) -> None:
@@ -589,24 +743,34 @@ def main() -> None:
     latest_twc = TWC_DIR / "latest_twc_kmia_snapshot.json"
     if not latest_twc.exists():
         latest_twc = latest_file(TWC_DIR, "twc_kmia_snapshot_*.json")
+    latest_synoptic = SYNOPTIC_DIR / "latest_synoptic_kmia_snapshot.json"
+    if not latest_synoptic.exists():
+        latest_synoptic = latest_file(SYNOPTIC_DIR, "synoptic_kmia_snapshot_*.json")
     if st.sidebar.button("Refresh provider data now"):
         latest_nws, nws_msg = maybe_update_provider(latest_nws, 0, NWS_UPDATE_SCRIPT, "NWS", force=True)
         latest_twc, twc_msg = maybe_update_provider(latest_twc, 0, TWC_UPDATE_SCRIPT, "TWC", force=True)
+        latest_synoptic, synoptic_msg = maybe_update_provider(latest_synoptic, 0, SYNOPTIC_UPDATE_SCRIPT, "Synoptic", force=True)
         with st.expander("Manual refresh log", expanded=True):
-            st.text((nws_msg or "") + "\n" + (twc_msg or ""))
+            st.text((nws_msg or "") + "\n" + (twc_msg or "") + "\n" + (synoptic_msg or ""))
     if auto_update:
         latest_nws, nws_msg = maybe_update_provider(latest_nws, NWS_STALE_SECONDS, NWS_UPDATE_SCRIPT, "NWS")
         latest_twc, twc_msg = maybe_update_provider(latest_twc, TWC_STALE_SECONDS, TWC_UPDATE_SCRIPT, "TWC")
+        latest_synoptic, synoptic_msg = maybe_update_provider(latest_synoptic, SYNOPTIC_STALE_SECONDS, SYNOPTIC_UPDATE_SCRIPT, "Synoptic")
         if nws_msg and "UPDATE COMPLETE" not in nws_msg and "throttled" not in nws_msg:
             st.sidebar.warning(nws_msg[:500])
         if twc_msg and "UPDATE COMPLETE" not in twc_msg and "throttled" not in twc_msg:
             st.sidebar.warning(twc_msg[:500])
+        if synoptic_msg and "UPDATE COMPLETE" not in synoptic_msg and "throttled" not in synoptic_msg:
+            st.sidebar.warning(synoptic_msg[:500])
     nws = load_json(latest_nws)
     twc = load_json(latest_twc)
+    synoptic = load_json(latest_synoptic)
     nws_age = file_age_seconds(latest_nws)
     twc_age = file_age_seconds(latest_twc)
+    synoptic_age = file_age_seconds(latest_synoptic)
     nws_observed_df = normalize_nws_observed(nws)
     twc_observed_df = normalize_twc_observed(twc)
+    synoptic_observed_df = normalize_synoptic_observed(synoptic)
     nws_forecast_df = normalize_nws_forecast(nws)
     twc_forecast_df = normalize_twc_forecast(twc)
     matched = build_matched_table(nws_forecast_df, twc_forecast_df, tolerance, direction)
@@ -616,19 +780,22 @@ def main() -> None:
     matched_daily = build_daily_match(nws_daily, twc_daily)
     st.caption(f"NWS source: {latest_nws.name if latest_nws else 'missing'}")
     st.caption(f"TWC source: {latest_twc.name if latest_twc else 'missing'}")
-    render_summary(nws, twc, matched, nws_age, twc_age)
+    st.caption(f"Synoptic source: {latest_synoptic.name if latest_synoptic else 'missing'}")
+    render_summary(nws, twc, synoptic, matched, nws_age, twc_age, synoptic_age)
     st.divider()
     render_provider_tables(nws_forecast_df, twc_forecast_df, matched, groups)
     st.divider()
     render_daily_forecasts(nws_daily, twc_daily, matched_daily)
     st.divider()
-    render_observed_tables(nws_observed_df, twc_observed_df, matched_observed, twc, tolerance)
+    render_observed_tables(nws_observed_df, twc_observed_df, synoptic_observed_df, matched_observed, twc, synoptic, tolerance)
     if show_raw:
         st.divider()
         with st.expander("NWS raw JSON"):
             st.json(nws)
         with st.expander("TWC raw JSON"):
             st.json(twc)
+        with st.expander("Synoptic raw JSON"):
+            st.json(synoptic)
     st.divider()
     st.subheader("Historical variance objective")
     st.write("Compare forecast-vs-forecast by issue/valid time, then separately score both providers against official NWS KMIA observed max at settlement.")

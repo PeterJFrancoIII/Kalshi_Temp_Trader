@@ -177,6 +177,25 @@ def run_prediction_pipeline(
                 .first()
             )
 
+            # Fetch recent observations (limit 20) for RH tie-breaker logic
+            recent_obs = db.query(LiveObservation).filter(
+                LiveObservation.station == "KMIA"
+            ).order_by(desc(LiveObservation.timestamp)).limit(20).all()
+            
+            recent_obs_list = []
+            for obs in recent_obs:
+                recent_obs_list.append({
+                    "timestamp": obs.timestamp.isoformat() if obs.timestamp else None,
+                    "temperature_f": obs.temperature_f,
+                    "observed_max_so_far_f": obs.observed_max_so_far_f,
+                    "dewpoint_f": obs.dewpoint_f,
+                    "wind_direction": obs.wind_direction,
+                    "wind_speed_mph": obs.wind_speed_mph,
+                    "rain_flag": obs.rain_flag,
+                    "thunderstorm_flag": obs.thunderstorm_flag,
+                    "overcast_flag": obs.overcast_flag,
+                })
+
             features = {
                 "observed_max_so_far_f": int(latest_obs.observed_max_so_far_f),
                 "current_temp_f": int(latest_obs.temperature_f),
@@ -187,7 +206,8 @@ def run_prediction_pipeline(
                 "overcast_flag": latest_obs.overcast_flag,
                 "current_time_et": datetime.now(tz.gettz('US/Eastern')),
                 "live_data_stale": (datetime.now(timezone.utc) - latest_obs.timestamp.replace(tzinfo=timezone.utc)).total_seconds() > 3600,
-                "target_date": target_date.isoformat()
+                "target_date": target_date.isoformat(),
+                "recent_observations": recent_obs_list
             }
         except Exception as e:
             logger.error(f"Error fetching data from DB: {e}")

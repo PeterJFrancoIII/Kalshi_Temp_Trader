@@ -919,5 +919,48 @@ class TestPaperSignalGenerator(unittest.TestCase):
         self.assertEqual(sig["paper_action"], "NO TRADE")
         self.assertIn("stale", sig["no_trade_reason"].lower())
 
+    def test_missing_or_empty_snapshot_graceful_fallback(self):
+        """Verify that a missing or empty Kalshi market snapshot yields a restricted no-trade report."""
+        import paper_trading.signal_generator as sg
+        
+        forecast_path = self.temp_dir / "kmia_forecast_2026-05-15_rules_v2_climatology_120000.json"
+        forecast_data = {
+            "date": "2026-05-15",
+            "probability_bins": {">=93": 0.95},
+            "generated_at_utc": "2026-05-15T12:00:00Z"
+        }
+        with open(forecast_path, "w") as f:
+            json.dump(forecast_data, f)
+            
+        # Point to a non-existent Kalshi market snapshot
+        snapshot_path = self.temp_dir / "does_not_exist_snapshot.json"
+        sg.LATEST_KALSHI_MARKET_SNAPSHOT = snapshot_path
+        
+        nws_path = self.temp_dir / "latest_nws_kmia_snapshot.json"
+        self._create_valid_nws_snapshot(nws_path, "2026-05-15")
+        sg.NWS_SNAPSHOT_FILE = nws_path
+        
+        test_now = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
+        latest_path = self.temp_dir / "latest_paper_signal.json"
+        
+        generate_paper_signal(
+            forecast_path=forecast_path,
+            snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
+            output_dir=self.temp_dir,
+            latest_path_override=str(latest_path)
+        )
+        
+        with open(latest_path, "r") as f:
+            report = json.load(f)
+            
+        # Top-level fields
+        self.assertFalse(report["allow_paper_recommendations"])
+        self.assertEqual(report["no_trade_reason"], "No active Kalshi high-temperature contracts discovered.")
+        self.assertEqual(report["status"], "NO_SIGNAL")
+        self.assertEqual(len(report["signals"]), 0)
+        self.assertEqual(report["dynamic_contract_probabilities"], {})
+        self.assertIn("Kalshi market snapshot is missing or contains no active KXHIGHMIA markets.", report["warnings"][0])
+
 if __name__ == "__main__":
     unittest.main()

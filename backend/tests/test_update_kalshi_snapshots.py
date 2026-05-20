@@ -238,5 +238,62 @@ class TestUpdateKalshiSnapshots(unittest.TestCase):
                 
         self.assertTrue(found_fallback)
 
+    def test_fetch_script_exists_and_executable(self):
+        """Verify that scripts/fetch_kalshi_markets.sh exists, is executable, and references the real python updater."""
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+        fetch_script = os.path.join(base_dir, "scripts/fetch_kalshi_markets.sh")
+        
+        # Verify existence
+        self.assertTrue(os.path.exists(fetch_script), f"Fetch script {fetch_script} is missing.")
+        
+        # Verify executable permissions on POSIX systems
+        if os.name == 'posix':
+            self.assertTrue(os.access(fetch_script, os.X_OK), f"Fetch script {fetch_script} is not executable.")
+            
+        # Verify contents
+        with open(fetch_script, 'r') as f:
+            content = f.read()
+            
+        # Verify standard NO REAL TRADING banner/comments
+        self.assertIn("NO REAL TRADING EXECUTION", content)
+        self.assertIn("DRY-RUN / PAPER EVALUATION ONLY", content)
+        self.assertIn("Read-only Kalshi public market fetch only.", content)
+        
+        # Verify correct Python invocation
+        self.assertIn("market_data.update_kalshi_snapshots", content)
+        self.assertIn("PYTHONPATH", content)
+
+    def test_daily_workflow_references_fetch_script(self):
+        """Verify that scripts/run_kmia_daily_workflow.sh references scripts/fetch_kalshi_markets.sh."""
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+        workflow_script = os.path.join(base_dir, "scripts/run_kmia_daily_workflow.sh")
+        
+        self.assertTrue(os.path.exists(workflow_script), f"Daily workflow script {workflow_script} is missing.")
+        
+        with open(workflow_script, 'r') as f:
+            content = f.read()
+            
+        self.assertIn("fetch_kalshi_markets.sh", content, "Daily workflow script does not reference fetch_kalshi_markets.sh")
+
+    def test_safety_constraints_no_write_methods(self):
+        """Verify no requests.post/put/delete/patch or place/create/cancel_order exist in market_data source code."""
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+        src_dir = os.path.join(base_dir, "backend/src/market_data")
+        
+        forbidden_terms = [
+            "requests.post", "requests.put", "requests.delete", "requests.patch",
+            "create_order", "place_order", "cancel_order"
+        ]
+        
+        for root, _, files in os.walk(src_dir):
+            for file in files:
+                if file.endswith(".py"):
+                    file_path = os.path.join(root, file)
+                    with open(file_path, "r", errors="ignore") as f:
+                        content = f.read()
+                    for term in forbidden_terms:
+                        self.assertNotIn(term, content, f"Forbidden term '{term}' found in {file_path}")
+
 if __name__ == '__main__':
     unittest.main()
+

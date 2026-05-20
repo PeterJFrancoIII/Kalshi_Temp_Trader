@@ -5,16 +5,18 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any
 from market_data.kalshi_public_client import KalshiPublicClient
-from shared.artifact_paths import LATEST_KALSHI_ORDERBOOKS
+from shared.artifact_paths import LATEST_KALSHI_ORDERBOOKS, KALSHI_MARKET_SNAPSHOT_DIR, LATEST_KALSHI_MARKET_SNAPSHOT
 from shared.timestamp_utils import parse_ticker_date
 
 # NO REAL TRADING EXECUTION
 # DRY-RUN / PAPER EVALUATION ONLY
+# References: kalshi_market_snapshots
+
 
 # Paths and Config
 ROOT = Path(__file__).resolve().parents[3]
 CONFIG_PATH = ROOT / "backend" / "config" / "kalshi_market_discovery.json"
-OUTPUT_DIR = ROOT / "backend" / "data" / "processed" / "kalshi_market_snapshots"
+OUTPUT_DIR = KALSHI_MARKET_SNAPSHOT_DIR
 
 
 def normalize_orderbook(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -153,7 +155,7 @@ def main():
         
         # Empty snapshot protection
         preserved_snapshot = False
-        latest_path = OUTPUT_DIR / "latest_kalshi_market_snapshot.json"
+        latest_path = LATEST_KALSHI_MARKET_SNAPSHOT
         
         if not final_selected:
             print("Warning: No active markets found in current fetch.")

@@ -229,6 +229,9 @@ def build_dry_run_features(
     if period is not None:
         features.update(_derive_weather_flags(period))
 
+    # 4. Recent observations list.
+    features["recent_observations"] = snapshot.get("recent_observations_table", [])
+
     logger.info(
         "Loaded NWS snapshot for dry-run features (fetched: %s).",
         snapshot.get("fetched_at_utc", "unknown"),

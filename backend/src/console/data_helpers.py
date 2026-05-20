@@ -33,7 +33,7 @@ import pandas as pd
 import streamlit as st
 
 from shared.artifact_paths import REPORTS_DIR
-from shared.timestamp_utils import parse_ticker_date
+from shared.timestamp_utils import parse_ticker_date, extract_embedded_timestamp, extract_timestamp_from_filename
 
 
 # --- File / JSON ----------------------------------------------------------
@@ -44,7 +44,22 @@ def latest_file(directory: Path, pattern: str) -> Optional[Path]:
     files = list(directory.glob(pattern))
     if not files:
         return None
-    return max(files, key=os.path.getmtime)
+
+    candidates = []
+    for f in files:
+        ts = None
+        if f.suffix.lower() == '.json':
+            ts = extract_embedded_timestamp(f)
+        if ts is None:
+            ts = extract_timestamp_from_filename(f.name)
+        if ts is not None:
+            candidates.append((ts, f))
+
+    if candidates:
+        candidates.sort(reverse=True)
+        return candidates[0][1]
+
+    return None
 
 
 def load_text(path):
@@ -55,9 +70,16 @@ def load_text(path):
 
 
 def load_json(path):
-    if path and path.exists():
-        with open(path, 'r') as f:
-            return json.load(f)
+    if path:
+        path = Path(path)
+        if path.suffix.lower() != '.json':
+            return None
+        if path.exists():
+            try:
+                with open(path, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, ValueError, OSError):
+                return None
     return None
 
 
@@ -195,10 +217,10 @@ def safe_dataframe(df, display_columns, fallback_message="No displayable columns
                         df_display[col] = df_display[col].apply(
                             lambda x: fmt.format(x) if x is not None and not pd.isna(x) else "—"
                         )
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        st.dataframe(df_display, width="stretch", hide_index=True)
     else:
         st.info(fallback_message)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
 
 
 def load_latest_forecast_summary(report_path):

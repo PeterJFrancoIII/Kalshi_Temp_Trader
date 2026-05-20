@@ -1357,3 +1357,147 @@ Push `69ccad1` to origin (on explicit user instruction), then execute dry-run pi
 - **No live trading**: No order placement or HTTP write methods.
 - **Agent 1** reviews phase/local changes.
 - **Agent 8** handles system-wide Go/No-Go and consolidation.
+
+---
+
+# Agent 2 Report — Weather P1 Safety & Freshness Fixes (Phase 10 Continuation)
+
+## Status: COMPLETED
+
+**Date:** 2026-05-19
+**Model:** Gemini 3.5 Flash High
+**Task:** post-refactor-agent2-weather-p1-fix
+
+## Summary of Fixes
+
+### 1. TWC Probabilistic Missing-Credential Protection
+* **Safe Ingestion**: Updated `backend/src/weather/twc_probabilistic_client.py` to gracefully handle cases where `TWC_API_KEY` (or `WEATHER_COMPANY_API_KEY`) is missing.
+* **Preserve Latest Data**: If credentials are missing, the client writes the status to a separate file `unavailable_twc_probabilistic_kmia_snapshot.json` in the processed directory and exits with code `2`. This ensures any existing valid `latest_twc_probabilistic_kmia_snapshot.json` remains untouched on disk.
+* **Bash Guard**: Added a shell-level credential verification guard to `scripts/update_twc_probabilistic_data.sh`.
+* **Testing**: Added unit tests to `backend/tests/test_twc_probabilistic_client.py` covering credential-missing behavior.
+
+### 2. Embedded Timestamp UI/Status Selection
+* **Data Helpers**: Refactored `latest_file()` in `backend/src/console/data_helpers.py` to sort files by their embedded JSON timestamps, completely eliminating fallback to filesystem modification time (`mtime`).
+* **Weather Providers UI**: Refactored `latest_file()` and `file_age_seconds()` in `backend/src/pages/1_Weather_Providers_NWS_vs_TWC.py` to extract embedded timestamps and perform timezone-aware arithmetic.
+* **New Tests**: Created `backend/tests/test_embedded_timestamp_selection.py` to verify that file selection correctly handles embedded timestamps even when filesystem mtimes are inverted.
+
+## Test Results
+* **ALL TESTS PASSED** (`tests/run_tests.py` ran successfully).
+* Tested with empty credentials manually and verified graceful exit and `unavailable` snapshot generation.
+
+## Remaining mtime Dependencies (Owned by Other Agents)
+The following files still reference `mtime`/`getmtime` and should be addressed by their respective owners:
+- `backend/src/console/pages/backtesting.py` (Agent 7)
+- `backend/src/console/pages/command_center.py` (Agent 8 / Agent 7)
+- `backend/src/paper_trading/prediction_quality.py` (Agent 4)
+- `backend/src/scheduler/generate_daily_status.py` (Agent 8)
+- `backend/src/status/daily_status.py` (Agent 8)
+- `backend/src/web_console.py` (Agent 8)
+
+## Machine-Readable Summary
+```json
+{
+  "agent": "Agent 2 - Weather Data Agent",
+  "task_id": "post-refactor-agent2-weather-p1-fix",
+  "scope": "Close Agent-2-owned P1 weather/freshness blockers (TWC probabilistic credentials and st_mtime UI dependencies).",
+  "inputs_read": [
+    "MASTER_CONTEXT.md",
+    "CODE_GOVERNANCE.md",
+    "DATA_SOURCES.md",
+    "WEATHER_MODEL_SPEC.md",
+    "AGENTS.md"
+  ],
+  "files_inspected": [
+    "backend/src/weather/twc_probabilistic_client.py",
+    "scripts/update_twc_probabilistic_data.sh",
+    "backend/src/shared/timestamp_utils.py",
+    "backend/src/console/data_helpers.py",
+    "backend/src/pages/1_Weather_Providers_NWS_vs_TWC.py"
+  ],
+  "files_changed": [
+    "backend/src/weather/twc_probabilistic_client.py",
+    "scripts/update_twc_probabilistic_data.sh",
+    "backend/src/console/data_helpers.py",
+    "backend/src/pages/1_Weather_Providers_NWS_vs_TWC.py",
+    "backend/tests/test_twc_probabilistic_client.py",
+    "backend/tests/test_embedded_timestamp_selection.py"
+  ],
+  "tests_run": [
+    {
+      "command": "PYTHONPATH=src ../.venv/bin/python3 -m unittest tests/test_twc_probabilistic_client.py",
+      "result": "PASSED",
+      "pass_count": 7,
+      "fail_count": 0
+    },
+    {
+      "command": "PYTHONPATH=src ../.venv/bin/python3 -m unittest tests/test_embedded_timestamp_selection.py",
+      "result": "PASSED",
+      "pass_count": 3,
+      "fail_count": 0
+    },
+    {
+      "command": "PYTHONPATH=src ../.venv/bin/python3 tests/run_tests.py",
+      "result": "PASSED",
+      "pass_count": 226,
+      "fail_count": 0
+    }
+  ],
+  "safety_findings": [
+    "Confirmed no real-money trading execution paths exist in any weather-related modules.",
+    "Confirmed zero HTTP write methods exist in the updated weather client code (only GET requests to TWC/NWS)."
+  ],
+  "lookahead_findings": [
+    "Transitioned UI and status page file selections to retrieve the latest snapshots using internal/embedded JSON timestamps via extract_embedded_timestamp().",
+    "Eliminated os.path.getmtime and st_mtime fallback from console/data_helpers.py and 1_Weather_Providers_NWS_vs_TWC.py."
+  ],
+  "risk_findings": [
+    "TWC probabilistic client now exits gracefully with code 2 on missing credentials and writes an unavailable warning snapshot to a separate file (unavailable_twc_probabilistic_kmia_snapshot.json), preventing it from overwriting active, valid data."
+  ],
+  "assumptions": [],
+  "blockers": [],
+  "remaining_gaps_by_severity": {
+    "C0": [],
+    "C1": [],
+    "P1": [],
+    "P2": [
+      "Remaining mtime dependencies in command_center.py, backtesting.py, prediction_quality.py, daily_status.py, and web_console.py (owned by other agents)."
+    ]
+  },
+  "next_task": {
+    "owner": "Agent 8 / Coordinator",
+    "task": "Perform consolidation audit, review remaining non-weather mtime dependencies, and prepare the branch integration.",
+    "reason": "Weather P1 fixes are complete and verified; the next step is system-wide roll-up and coordination."
+  },
+  "status_or_verdict": "APPROVED_TO_PROCEED"
+}
+```
+
+
+---
+
+# Agent 6 — Money Distribution Engine (LINEAR)
+
+**Date:** 2026-05-12 | **Model:** Sonnet 4.6 | **Status:** MONEY_DISTRIBUTION_ENGINE_COMPLETE
+
+## Summary
+
+Paper-only Money Distribution Engine implemented in `backend/src/risk/money_distribution.py`, integrated into `signal_generator.py` (`money_distribution` block on `latest_paper_signal.json`), displayed in Command Center with interactive bankroll input.
+
+## Math
+
+- Per contract: cost = ask + Kalshi fee + slippage; shares = alloc/cost; E[PnL] = p×profit_if_wins + (1-p)×loss_if_loses
+- Kelly: f = kelly_fraction × max(0, (b×p − (1−p)) / b), b = (1−cost)/cost
+- Portfolio: PnL evaluated per integer °F outcome; `guaranteed_profit_possible` only when exhaustive partition AND sum(cost)<1 AND min(outcome PnL)>0
+- Current live data: **guaranteed_profit_possible = false** (normal — spreads/fees prevent dutching)
+
+## Tests
+
+248 PASS, 0 FAIL (`bash scripts/run_tests.sh`). `TestMoneyDistribution`: 11/11 OK.
+
+## Safety
+
+No HTTP writes, no order placement, `no_real_trading` + `no_order_execution` on all outputs.
+
+```json
+{"agent":"Agent 6","task":"Money Distribution Engine","status":"MONEY_DISTRIBUTION_ENGINE_COMPLETE","test_result":{"pass_count":248,"fail_count":0}}
+```
