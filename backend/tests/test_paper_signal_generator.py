@@ -231,13 +231,13 @@ class TestPaperSignalGenerator(unittest.TestCase):
         self.assertEqual(report["status"], "NO_SIGNAL")
 
     def test_generate_signal_stale_ticker(self):
-        """Verify that stale tickers are marked as NO SIGNAL."""
+        """Verify CLOSED-window contracts stay visible but are untradeable (stale)."""
         md_path = self.temp_dir / "kmia_forecast_2026-05-08_rules_v2_climatology_120000.md"
         md_path.write_text("## Probability Bins\n| 85-86 | 50.0% |")
         
         snapshot_path = self.temp_dir / "latest_kalshi_market_snapshot.json"
         snapshot_data = {
-            "generated_at_utc": "2026-05-08T12:00:00Z",
+            "generated_at_utc": "2026-05-09T08:00:00Z",
             "selected_temperature_markets": [
                 {
                     "ticker": "KXHIGHMIA-26MAY07-B86.5",
@@ -252,19 +252,24 @@ class TestPaperSignalGenerator(unittest.TestCase):
         }
         with open(snapshot_path, "w") as f:
             json.dump(snapshot_data, f)
+
+        # After May 9 01:00 ET the May 7 market is CLOSED (no calendar-day heuristic).
+        test_now = datetime(2026, 5, 9, 10, 0, 0, tzinfo=timezone.utc)
             
         latest_path = self.temp_dir / "latest_paper_signal.json"
         report_path = generate_paper_signal(
             forecast_path=md_path,
             snapshot_path=snapshot_path,
+            prediction_timestamp=test_now,
             output_dir=self.temp_dir,
             latest_path_override=str(latest_path)
         )
         with open(report_path, "r") as f:
             report = json.load(f)
             
-        self.assertEqual(len(report["signals"]), 0)
-        self.assertEqual(report["status"], "NO_SIGNAL")
+        self.assertEqual(len(report["signals"]), 1)
+        self.assertEqual(report["events_by_date"]["2026-05-07"]["market_status"], "CLOSED")
+        self.assertTrue(report["signals"][0]["stale"])
 
     def test_generate_signal_missing_prob_warning(self):
         """Verify that current ticker with missing probability still emits mapping warning."""

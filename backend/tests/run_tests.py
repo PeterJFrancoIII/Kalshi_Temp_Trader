@@ -301,6 +301,7 @@ from test_nws_live_client import (
 )
 
 from test_kalshi_contract_mapper import TestKalshiContractMapper
+from test_kalshi_market_window import TestKalshiMarketWindow, TestOpenContractSignalIntegration
 from test_kalshi_public_client import TestKalshiPublicClient
 from test_paper_signal_enhanced import TestPaperSignalEnhanced
 from test_distribution_utils import TestDistributionUtils
@@ -545,6 +546,8 @@ tests = [
     test_stale_data_detection,
     test_missing_fields_no_crash,
     lambda: run_unittest_class(TestKalshiContractMapper),
+    lambda: run_unittest_class(TestKalshiMarketWindow),
+    lambda: run_unittest_class(TestOpenContractSignalIntegration),
     lambda: run_unittest_class(TestPaperSignalEnhanced),
     test_normalize_time_utc_for_merge,
     test_build_matched_table_with_mixed_resolutions,

@@ -29,6 +29,17 @@ from shared.artifact_paths import (
 )
 from shared.timestamp_utils import extract_embedded_timestamp, parse_ticker_date
 from shared.normalization import normalize_contract_key
+from shared.kalshi_market_window import (
+    MARKET_STATUS_CLOSED,
+    MARKET_STATUS_MISSING_FORECAST,
+    MARKET_STATUS_OPEN,
+    MARKET_STATUS_PRE_OPEN,
+    assess_kalshi_snapshot_freshness,
+    classify_market_window,
+    is_tradable_market_status,
+    is_visible_active_market_status,
+    resolve_event_market_status,
+)
 from trading.edge_engine import calculate_edge, calculate_expected_value, calculate_speed_to_roi, compute_edge
 from risk.risk_engine import evaluate_risk_gates, evaluate_risk_decision
 from forecasting.contract_probability_mapper import map_contract_probability
@@ -409,6 +420,101 @@ def _load_event_forecast(
     return result
 
 
+def _forecast_has_distribution(model_bins: Dict[str, float], integer_dist: Dict[int, float]) -> bool:
+    """True when a forecast artifact has bins or integer_distribution for mapping."""
+    return bool(integer_dist) or bool(model_bins)
+
+
+def _build_event_contracts(markets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Lightweight contract list for events_by_date visibility (no fake prices)."""
+    contracts: List[Dict[str, Any]] = []
+    for m in markets:
+        mapping = m.get("contract_mapping", {})
+        contract_bin = m.get("contract_bin") or {}
+        bin_str = contract_bin.get("label") if contract_bin else mapping_to_bin_string(mapping)
+        contracts.append({
+            "ticker": m.get("ticker"),
+            "event_ticker": m.get("event_ticker"),
+            "kalshi_status": m.get("status"),
+            "contract_range": mapping.get("contract_range"),
+            "forecast_bin_label": bin_str,
+            "title": m.get("title"),
+        })
+    return contracts
+
+
+def _contract_untradeable_for_window(market_status: str) -> bool:
+    """Contracts on CLOSED/PRE_OPEN dates are not paper-tradable."""
+    return market_status in (MARKET_STATUS_CLOSED, MARKET_STATUS_PRE_OPEN)
+
+
+def _append_contract_rows_without_forecast(
+    markets: List[Dict[str, Any]],
+    all_orderbooks: Dict[str, Any],
+    event_date: str,
+    market_status: str,
+    event_warnings: List[str],
+    event_signals: List[Dict[str, Any]],
+    weather_gate: Dict[str, Any],
+) -> None:
+    """Emit one signal row per contract when forecast distribution is missing (no fake probs)."""
+    msg = f"Forecast distribution missing for {event_date}"
+    if msg not in event_warnings:
+        event_warnings.append(msg)
+
+    untradeable = _contract_untradeable_for_window(market_status)
+
+    for m in markets:
+        ticker = m.get("ticker")
+        mapping = m.get("contract_mapping", {})
+        bin_str = m.get("contract_bin", {}).get("label") if m.get("contract_bin") else mapping_to_bin_string(mapping)
+        prices = _extract_market_pricing(m, all_orderbooks.get(ticker, {}))
+        ask, bid, last = prices["ask"], prices["bid"], prices["last"]
+        executable_price = select_executable_price(ask, last)
+
+        if executable_price is None or executable_price == 0:
+            event_warnings.append(f"{ticker}: No usable price data.")
+            continue
+
+        if not weather_gate.get("allow_paper_recommendations", False):
+            p_action = "NO TRADE"
+            p_risk_dec: Any = "BLOCK"
+            p_no_trade_reason = weather_gate.get("no_trade_reason")
+        elif untradeable:
+            p_action = "NO SIGNAL"
+            p_risk_dec = {"decision": "BLOCK", "reason": f"Market window status: {market_status}"}
+            p_no_trade_reason = f"Market window status: {market_status}"
+        else:
+            p_action = "NO SIGNAL"
+            p_risk_dec = None
+            p_no_trade_reason = msg
+
+        event_signals.append({
+            "market_ticker": ticker,
+            "event_ticker": m.get("event_ticker"),
+            "market_title": m.get("title"),
+            "status": m.get("status"),
+            "condition_type": mapping.get("condition_type"),
+            "threshold_f": mapping.get("threshold_f"),
+            "range_high_f": mapping.get("range_high_f"),
+            "contract_range": mapping.get("contract_range"),
+            "forecast_bin_label": bin_str,
+            "model_probability": None,
+            "market_probability": round(executable_price, 4),
+            "executable_price": round(executable_price, 4),
+            "paper_action": p_action,
+            "risk_decision": p_risk_dec,
+            "no_trade_reason": p_no_trade_reason,
+            "weather_gate_status": weather_gate.get("status"),
+            "market_status": market_status,
+            "yes_ask": ask,
+            "yes_bid": bid,
+            "last_price": last,
+            "stale": untradeable,
+            "warnings": [msg],
+        })
+
+
 def _resolve_temp_distribution(
     model_bins: Dict[str, float],
     integer_dist: Dict[int, float],
@@ -655,10 +761,14 @@ def generate_paper_signal(
         if ticker_date:
             markets_by_date.setdefault(ticker_date, []).append(m)
 
+    snapshot_freshness = assess_kalshi_snapshot_freshness(
+        snapshot_to_use, now_utc=prediction_timestamp
+    )
+    global_warnings: List[str] = list(snapshot_freshness.get("warnings", []))
+
     # 4. Process each event date
     events_by_date = {}
     all_signals = []
-    global_warnings = []
     
     # Sort dates so we process today then tomorrow
     target_dates = sorted(list(markets_by_date.keys()))
@@ -684,7 +794,11 @@ def generate_paper_signal(
 
     for event_date in target_dates:
         markets = markets_by_date[event_date]
-        event_ticker = markets[0].get("event_ticker")
+        event_ticker = markets[0].get("event_ticker") if markets else None
+        contracts_meta = _build_event_contracts(markets)
+
+        window_info = classify_market_window(event_date, prediction_timestamp)
+        window_status = window_info["market_status"]
 
         forecast_load = _load_event_forecast(
             event_date=event_date,
@@ -699,8 +813,21 @@ def generate_paper_signal(
         event_signals: List[Dict[str, Any]] = []
         event_probs: Dict[str, float] = {}
 
+        has_forecast_dist = _forecast_has_distribution(model_bins, integer_dist)
+        if not has_forecast_dist and forecast_load["status"] == "OK":
+            event_status = "NO_SIGNAL"
+            event_warnings.append(f"Forecast distribution missing for {event_date}")
+
+        market_status = resolve_event_market_status(
+            window_status=window_status,
+            snapshot_stale=snapshot_freshness.get("is_stale", False),
+            has_contracts=bool(markets),
+            has_forecast_distribution=has_forecast_dist,
+        )
+        contract_untradeable = _contract_untradeable_for_window(market_status)
+
         # Calculate probabilities and signals for this date
-        if model_bins or integer_dist:
+        if has_forecast_dist:
             temp_dist_to_use = _resolve_temp_distribution(
                 model_bins=model_bins,
                 integer_dist=integer_dist,
@@ -714,10 +841,9 @@ def generate_paper_signal(
                 mapping = m.get("contract_mapping", {})
                 contract_bin_data = m.get("contract_bin")
 
-                is_stale = (event_date < now_date_str)
                 bin_str = contract_bin_data.get("label") if contract_bin_data else mapping_to_bin_string(mapping)
 
-                if is_stale:
+                if contract_untradeable:
                     prob = 0.0
                 else:
                     prob = None
@@ -757,15 +883,13 @@ def generate_paper_signal(
                     event_warnings.append(f"{ticker}: No usable price data.")
                     continue
 
-                is_stale = (event_date < now_date_str)
-
                 contract_prob_payload = _build_contract_probability_payload(
                     market=m,
                     mapping=mapping,
                     temp_dist=temp_dist_to_use,
                     model_bins=model_bins,
                     bin_str=bin_str,
-                    is_stale=is_stale,
+                    is_stale=contract_untradeable,
                 )
                 prob = contract_prob_payload.get("model_probability")
 
@@ -807,9 +931,12 @@ def generate_paper_signal(
                         "risk_decision": p_risk_dec,
                         "no_trade_reason": p_no_trade_reason,
                         "weather_gate_status": weather_gate.get("status"),
-                        "yes_ask": ask, "yes_bid": bid, "last_price": last,
-                        "stale": is_stale,
-                        "warnings": [f"Probability for bin {bin_str} not found in forecast"]
+                        "yes_ask": ask,
+                        "yes_bid": bid,
+                        "last_price": last,
+                        "market_status": market_status,
+                        "stale": contract_untradeable,
+                        "warnings": [f"Probability for bin {bin_str} not found in forecast"],
                     })
                     continue
 
@@ -840,14 +967,14 @@ def generate_paper_signal(
                     near_boundary_risk=False,
                 )
 
-                # Stale markets get sentinel edge/EV values so they sort last.
-                if is_stale:
+                # Closed/pre-open markets get sentinel edge/EV values so they sort last.
+                if contract_untradeable:
                     edge = -999.0
                     ev = -999.0
 
                 action_info = _decide_paper_action(
                     edge=edge,
-                    is_stale=is_stale,
+                    is_stale=contract_untradeable,
                     risk_decision=risk_decision,
                     weather_gate=weather_gate,
                 )
@@ -881,20 +1008,39 @@ def generate_paper_signal(
                     "yes_bid": bid,
                     "last_price": last,
                     "market_open_time_et": get_market_open_time_et(event_date),
-                    "stale": is_stale,
+                    "market_status": market_status,
+                    "stale": contract_untradeable,
                     "warnings": list(set(contract_prob_payload.get("warnings", []) + edge_payload.get("warnings", [])))
                 })
+
+        else:
+            _append_contract_rows_without_forecast(
+                markets=markets,
+                all_orderbooks=all_orderbooks,
+                event_date=event_date,
+                market_status=market_status,
+                event_warnings=event_warnings,
+                event_signals=event_signals,
+                weather_gate=weather_gate,
+            )
 
         event_signals.sort(key=lambda x: x["edge"] if x.get("edge") is not None else -999.0, reverse=True)
         
         events_by_date[event_date] = {
+            "market_date": event_date,
             "event_ticker": event_ticker,
+            "market_status": market_status,
+            "open_start_et": window_info["open_start_et"],
+            "open_end_et": window_info["open_end_et"],
+            "snapshot_fetched_at_utc": snapshot_freshness.get("fetched_at_utc"),
+            "snapshot_age_minutes": snapshot_freshness.get("snapshot_age_minutes"),
+            "contracts": contracts_meta,
             "forecast_source": str(f_file.name) if f_file else None,
             "forecast_data": forecast_load.get("forecast_data", {}),
             "signals": event_signals,
-            "dynamic_contract_probabilities": event_probs,
+            "dynamic_contract_probabilities": event_probs if has_forecast_dist else {},
             "status": event_status,
-            "warnings": event_warnings
+            "warnings": event_warnings,
         }
         all_signals.extend(event_signals)
         global_warnings.extend(event_warnings)
@@ -917,7 +1063,12 @@ def generate_paper_signal(
         ledger = PaperLedger()
     ledger_summary = ledger.get_summary()
     
-    primary_signals = [sig for sig in all_signals if parse_ticker_date(sig["market_ticker"]) == primary_date]
+    primary_event_status = primary_event.get("market_status", "")
+    primary_signals = [
+        sig for sig in all_signals
+        if parse_ticker_date(sig["market_ticker"]) == primary_date
+        and is_tradable_market_status(primary_event_status)
+    ]
     primary_forecast = primary_event.get("forecast_data", {})
     
     alloc_mode = allocation_mode
@@ -937,12 +1088,25 @@ def generate_paper_signal(
         config=None
     )
     
+    open_market_dates = sorted(
+        d for d, ev in events_by_date.items()
+        if is_visible_active_market_status(ev.get("market_status", ""))
+    )
+
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "primary_event_date": primary_date,
         "status": primary_event.get("status", "NO_SIGNAL"),
         "forecast_source": primary_event.get("forecast_source"),
         "market_snapshot_source": str(snapshot_to_use.name) if snapshot_to_use else None,
+        "market_snapshot": {
+            "path": str(snapshot_to_use) if snapshot_to_use else None,
+            "fetched_at_utc": snapshot_freshness.get("fetched_at_utc"),
+            "snapshot_age_minutes": snapshot_freshness.get("snapshot_age_minutes"),
+            "max_age_minutes": snapshot_freshness.get("max_age_minutes"),
+            "is_stale": snapshot_freshness.get("is_stale", False),
+        },
+        "open_market_dates": open_market_dates,
         "dynamic_contract_probabilities": primary_event.get("dynamic_contract_probabilities", {}),
         "signals": all_signals,
         "best_signal": best_sig,
