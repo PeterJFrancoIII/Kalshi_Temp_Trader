@@ -13,6 +13,8 @@ mock_expander.__enter__.return_value = mock_expander
 def mock_columns(n):
     return [MagicMock() for _ in range(n)]
 mock_st.columns.side_effect = mock_columns
+mock_st.selectbox.return_value = "risk_adjusted_mode"
+mock_st.number_input.return_value = 1000.0
 
 # Assign mock streamlit to sys.modules
 sys.modules['streamlit'] = mock_st
@@ -26,6 +28,8 @@ class TestDashboardGrouping(unittest.TestCase):
         # Reset mock after each test
         mock_st.reset_mock()
         mock_expander.reset_mock()
+        mock_st.selectbox.return_value = "risk_adjusted_mode"
+        mock_st.number_input.return_value = 1000.0
         
         # Standard app state and mock market snaps
         self.app_state = {
@@ -343,6 +347,178 @@ class TestDashboardGrouping(unittest.TestCase):
         # Verify NumberColumn formatter was configured with correct parameters
         number_column_calls = mock_st.column_config.NumberColumn.call_args_list
         self.assertTrue(any(c[0][0] == "Model Prob" and c[1].get("format") == "%.1f%%" for c in number_column_calls))
+
+    def _money_distribution_fixture(self):
+        return {
+            "generated_at_utc": "2026-05-20T12:00:00+00:00",
+            "market_date": "2026-05-20",
+            "total_available_dollars": 1000.0,
+            "allocation_mode": "risk_adjusted",
+            "guaranteed_profit_possible": False,
+            "portfolio_expected_profit": 12.5,
+            "probability_of_profit": 0.455,
+            "worst_case_profit": -103.52,
+            "best_case_profit": 85.0,
+            "total_allocated": 103.52,
+            "cash_unallocated": 896.48,
+            "rows": [
+                {
+                    "contract_ticker": "KXHIGHMIA-26MAY20-B88.5",
+                    "bin_range": "88.0-89.0",
+                    "model_probability": 0.55,
+                    "market_probability": 0.40,
+                    "executable_price": 0.42,
+                    "executable_edge": 0.13,
+                    "recommended_allocation_dollars": 50.0,
+                    "estimated_contracts": 119,
+                    "expected_profit": 8.2,
+                    "max_loss": 50.0,
+                    "no_trade_reason": None,
+                },
+                {
+                    "contract_ticker": "KXHIGHMIA-26MAY20-T86",
+                    "bin_range": "86.0-87.0",
+                    "model_probability": 0.21,
+                    "market_probability": 0.25,
+                    "executable_price": 0.28,
+                    "executable_edge": -0.07,
+                    "recommended_allocation_dollars": 0.0,
+                    "estimated_contracts": 0,
+                    "expected_profit": 0.0,
+                    "max_loss": 0.0,
+                    "no_trade_reason": "Insufficient executable edge",
+                },
+            ],
+            "pnl_by_outcome": [
+                {
+                    "outcome_bin": "88.0-89.0",
+                    "probability": 0.55,
+                    "payout": 120.0,
+                    "total_cost": 103.52,
+                    "net_pnl": 16.48,
+                },
+                {
+                    "outcome_bin": "uncovered",
+                    "probability": 0.10,
+                    "payout": 0.0,
+                    "total_cost": 103.52,
+                    "net_pnl": -103.52,
+                },
+            ],
+            "warnings": [
+                "Guaranteed net-positive allocation not available; showing best risk-adjusted paper allocation."
+            ],
+            "safety": {
+                "no_real_trading": True,
+                "no_order_execution": True,
+                "disclaimer": "NO REAL TRADING EXECUTION - PAPER ONLY",
+            },
+        }
+
+    def test_money_distribution_panel_renders(self):
+        """Money Distribution panel shows title, inputs, tables, and guarantee-false warning."""
+        p_data = {
+            "primary_event_date": "2026-05-20",
+            "forecast_source": "f_20",
+            "signals": self.mock_signals,
+            "dynamic_contract_probabilities": {"88-89": 0.55},
+            "status": "OK",
+            "money_distribution": self._money_distribution_fixture(),
+        }
+
+        mock_st.reset_mock()
+        render_command_center(self.app_state, p_data, self.mkts)
+
+        subheader_titles = [c[0][0] for c in mock_st.subheader.call_args_list]
+        self.assertIn("💰 Paper Money Distribution by Bin", subheader_titles)
+
+        mock_st.number_input.assert_called()
+        mock_st.selectbox.assert_called()
+        select_labels = [c[1].get("label") for c in mock_st.selectbox.call_args_list if c[1]]
+        self.assertTrue(
+            any("Allocation Mode" in str(x) for x in select_labels)
+            or mock_st.selectbox.called
+        )
+
+        warning_msgs = [c[0][0] for c in mock_st.warning.call_args_list]
+        self.assertTrue(
+            any("Guaranteed net-positive allocation unavailable" in w for w in warning_msgs)
+        )
+
+        df_calls = [c for c in mock_st.dataframe.call_args_list]
+        alloc_df = None
+        outcome_df = None
+        bins_df = None
+        for call in df_calls:
+            df = call[0][0]
+            if not isinstance(df, pd.DataFrame):
+                continue
+            cols = list(df.columns)
+            if "Recommended Paper Allocation" in cols:
+                alloc_df = df
+            elif "Settlement Outcome" in cols:
+                outcome_df = df
+            elif cols == ["Kalshi Bin (Range)", "Model Prob"]:
+                bins_df = df
+
+        self.assertIsNotNone(alloc_df, "Allocation table not rendered")
+        self.assertEqual(len(alloc_df), 2)
+        self.assertTrue(pd.api.types.is_numeric_dtype(alloc_df["Model Prob"]))
+        self.assertTrue(alloc_df["Model Prob"].max() <= 1.0)
+
+        self.assertIsNotNone(outcome_df, "Outcome table not rendered")
+        self.assertIn("Portfolio PnL", outcome_df.columns)
+        self.assertIn("Profitable?", outcome_df.columns)
+        self.assertTrue(pd.api.types.is_numeric_dtype(outcome_df["Outcome Probability"]))
+
+        self.assertIsNotNone(bins_df, "Kalshi Bins table should remain unchanged")
+
+    def test_money_distribution_primary_date_only_note(self):
+        """When events_by_date has multiple dates, show primary-date-only allocation note."""
+        p_data = {
+            "primary_event_date": "2026-05-20",
+            "events_by_date": {
+                "2026-05-20": {
+                    "event_ticker": "KXHIGHMIA-26MAY20",
+                    "signals": self.mock_signals,
+                    "dynamic_contract_probabilities": {"88-89": 0.55},
+                },
+                "2026-05-21": {
+                    "event_ticker": "KXHIGHMIA-26MAY21",
+                    "signals": [],
+                    "dynamic_contract_probabilities": {},
+                },
+            },
+            "money_distribution": self._money_distribution_fixture(),
+        }
+
+        mock_st.reset_mock()
+        render_command_center(self.app_state, p_data, self.mkts)
+
+        info_msgs = [c[0][0] for c in mock_st.info.call_args_list]
+        self.assertTrue(
+            any("primary date 2026-05-20" in m and "2026-05-21" in m for m in info_msgs)
+        )
+
+    def test_money_distribution_no_live_order_buttons(self):
+        """Money distribution section must not add order placement controls."""
+        p_data = {
+            "primary_event_date": "2026-05-20",
+            "signals": self.mock_signals,
+            "dynamic_contract_probabilities": {"88-89": 0.55},
+            "money_distribution": self._money_distribution_fixture(),
+        }
+
+        mock_st.reset_mock()
+        render_command_center(self.app_state, p_data, self.mkts)
+
+        button_labels = [c[0][0] for c in mock_st.button.call_args_list if c[0]]
+        for label in button_labels:
+            low = str(label).lower()
+            self.assertNotIn("place order", low)
+            self.assertNotIn("buy now", low)
+            self.assertNotIn("execute", low)
+
 
 if __name__ == "__main__":
     unittest.main()

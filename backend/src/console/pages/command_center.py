@@ -16,6 +16,285 @@ from console.data_helpers import (
     load_json,
 )
 
+# UI allocation mode keys → engine mode strings (read-only display recomputation).
+_ALLOCATION_MODE_OPTIONS = (
+    ("guarantee_profit_mode", "guarantee_profit", "Guarantee Profit Mode"),
+    ("risk_adjusted_mode", "risk_adjusted", "Risk-Adjusted Mode"),
+    ("conservative_mode", "conservative", "Conservative Mode"),
+)
+_ALLOCATION_MODE_LABELS = {uk: lbl for uk, _em, lbl in _ALLOCATION_MODE_OPTIONS}
+
+
+def _engine_mode_to_ui_key(engine_mode: str) -> str:
+    if not engine_mode:
+        return "risk_adjusted_mode"
+    if engine_mode.startswith("guarantee_profit"):
+        return "guarantee_profit_mode"
+    if engine_mode == "conservative":
+        return "conservative_mode"
+    return "risk_adjusted_mode"
+
+
+def _guaranteed_profit_reason(money_dist: dict) -> str:
+    explicit = money_dist.get("guaranteed_profit_reason")
+    if explicit:
+        return str(explicit)
+    if money_dist.get("guaranteed_profit_possible"):
+        return (
+            "Active contracts partition the outcome space with combined executable cost "
+            "below $1.00 — dutch-book style allocation is feasible."
+        )
+    for warning in money_dist.get("warnings") or []:
+        if "guaranteed" in str(warning).lower():
+            return str(warning)
+    return (
+        "Guaranteed net-positive allocation is not mathematically available: "
+        "contracts do not form a full partition below $1.00 combined cost, or "
+        "risk gates block dutch allocation. Showing best risk-adjusted paper sizing."
+    )
+
+
+def _recompute_money_distribution(
+    p_data: dict,
+    bankroll: float,
+    engine_mode: str,
+) -> dict:
+    """Display-only recomputation; does not persist bankroll or place orders."""
+    from risk.money_distribution import distribute_money
+
+    primary_date = p_data.get("primary_event_date") or "unknown"
+    primary_event = (p_data.get("events_by_date") or {}).get(primary_date, {})
+    signals = primary_event.get("signals") or p_data.get("signals") or []
+    forecast_data = primary_event.get("forecast_data") or {}
+    return distribute_money(
+        bankroll=float(bankroll),
+        active_signals=signals,
+        forecast_data=forecast_data,
+        weather_gate=p_data.get("weather_gate") or {},
+        ledger_summary={"daily_pnl": 0.0, "weekly_pnl": 0.0, "active_trades_by_date": {}},
+        target_date=primary_date,
+        mode=engine_mode,
+    )
+
+
+def _render_money_distribution_panel(p_data: dict) -> None:
+    """Paper-only capital allocation explorer (UI read-only; no orders or ledger writes)."""
+    import pandas as pd
+
+    st.subheader("💰 Paper Money Distribution by Bin")
+    st.caption(
+        "DRY-RUN / PAPER EVALUATION ONLY — no real trading, no order execution. "
+        "Adjust bankroll or mode to explore allocations; nothing is saved to the ledger."
+    )
+
+    snapshot_dist = p_data.get("money_distribution") if isinstance(p_data, dict) else None
+    default_bankroll = 1000.0
+    if snapshot_dist and snapshot_dist.get("total_available_dollars") is not None:
+        default_bankroll = float(snapshot_dist["total_available_dollars"])
+
+    default_ui_mode = _engine_mode_to_ui_key(
+        (snapshot_dist or {}).get("allocation_mode", "risk_adjusted")
+    )
+    ui_mode_keys = [opt[0] for opt in _ALLOCATION_MODE_OPTIONS]
+    default_mode_index = ui_mode_keys.index(default_ui_mode) if default_ui_mode in ui_mode_keys else 1
+
+    inp_col1, inp_col2 = st.columns(2)
+    with inp_col1:
+        bankroll_input = st.number_input(
+            "Total Available Dollars",
+            min_value=0.0,
+            value=default_bankroll,
+            step=50.0,
+            help="Paper bankroll for display sizing only (not persisted).",
+        )
+    with inp_col2:
+        selected_ui_mode = st.selectbox(
+            "Allocation Mode",
+            options=ui_mode_keys,
+            index=default_mode_index,
+            format_func=lambda k: _ALLOCATION_MODE_LABELS.get(k, k),
+        )
+
+    if selected_ui_mode not in ui_mode_keys:
+        selected_ui_mode = default_ui_mode
+    engine_mode = next(
+        (em for uk, em, _ in _ALLOCATION_MODE_OPTIONS if uk == selected_ui_mode),
+        "risk_adjusted",
+    )
+
+    money_dist = snapshot_dist
+    recompute = (
+        isinstance(p_data, dict)
+        and (
+            abs(bankroll_input - default_bankroll) > 0.01
+            or selected_ui_mode != default_ui_mode
+        )
+    )
+    if recompute:
+        try:
+            money_dist = _recompute_money_distribution(p_data, bankroll_input, engine_mode)
+            st.caption("Showing live recomputation for the bankroll and mode selected above.")
+        except Exception as exc:
+            st.error(f"Could not recompute money distribution: {exc}")
+            money_dist = snapshot_dist
+
+    if not money_dist:
+        st.info(
+            "No money distribution block in the latest paper signal. "
+            "Run `bash scripts/generate_paper_signal.sh` to populate allocations."
+        )
+        return
+
+    safety = money_dist.get("safety") or {}
+    if safety.get("no_real_trading") is not False and safety.get("no_order_execution") is not False:
+        st.success(
+            "Paper-only safety: no_real_trading=true, no_order_execution=true — "
+            "this panel does not place or modify orders."
+        )
+
+    guarantee = bool(money_dist.get("guaranteed_profit_possible"))
+    guarantee_reason = _guaranteed_profit_reason(money_dist)
+    market_date = money_dist.get("market_date") or p_data.get("primary_event_date") or "N/A"
+
+    st.markdown("**Summary**")
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Guaranteed Profit Possible", "Yes" if guarantee else "No")
+    s2.metric("Total Allocated", f"${money_dist.get('total_allocated', 0):,.2f}")
+    s3.metric("Cash Unallocated", f"${money_dist.get('cash_unallocated', 0):,.2f}")
+    prob_profit = money_dist.get("probability_of_profit")
+    s4.metric(
+        "Probability of Profit",
+        f"{prob_profit * 100:.1f}%" if prob_profit is not None else "—",
+        help="Fraction of model probability mass on net-positive portfolio outcomes.",
+    )
+
+    s5, s6, s7, s8 = st.columns(4)
+    s5.metric("Portfolio Expected Profit", f"${money_dist.get('portfolio_expected_profit', 0):,.2f}")
+    s6.metric("Worst Case Profit", f"${money_dist.get('worst_case_profit', 0):,.2f}")
+    s7.metric("Best Case Profit", f"${money_dist.get('best_case_profit', 0):,.2f}")
+    s8.metric("Market Date", market_date)
+
+    st.write(f"**Guaranteed Profit Reason:** {guarantee_reason}")
+    st.write(f"**Allocation Mode (engine):** `{money_dist.get('allocation_mode', 'N/A')}`")
+
+    if guarantee:
+        st.success("Guaranteed net-positive allocation is mathematically possible for this contract set.")
+    else:
+        st.warning(
+            "Guaranteed net-positive allocation unavailable — "
+            "allocations use risk-adjusted or conservative paper sizing."
+        )
+
+    events_by_date = p_data.get("events_by_date") or {}
+    primary_date = p_data.get("primary_event_date")
+    other_dates = sorted(d for d in events_by_date if d != primary_date)
+    if other_dates and primary_date:
+        st.info(
+            f"Money distribution covers **primary date {primary_date}** only. "
+            f"Other active market dates in this signal: {', '.join(other_dates)}."
+        )
+
+    liquidity_warnings = [
+        w for w in (money_dist.get("warnings") or [])
+        if "liquid" in str(w).lower() or "depth" in str(w).lower()
+    ]
+    if liquidity_warnings:
+        for w in liquidity_warnings:
+            st.warning(w)
+    else:
+        st.caption(
+            "Liquidity / orderbook depth is not wired into money_distribution; "
+            "allocation uses model edge and risk gates only."
+        )
+
+    rows = money_dist.get("rows") or []
+    if rows:
+        st.markdown("**Allocation by Contract**")
+        alloc_df = pd.DataFrame(
+            [
+                {
+                    "Contract": r.get("contract_ticker"),
+                    "Market Date": market_date,
+                    "Bin / Range": r.get("bin_range"),
+                    "Model Prob": r.get("model_probability"),
+                    "Market Prob": r.get("market_probability"),
+                    "Executable Price": r.get("executable_price"),
+                    "Executable Edge": r.get("executable_edge"),
+                    "Recommended Paper Allocation": r.get("recommended_allocation_dollars"),
+                    "Estimated Contracts": r.get("estimated_contracts"),
+                    "Expected Profit": r.get("expected_profit"),
+                    "Max Loss": r.get("max_loss"),
+                    "No-Trade Reason": r.get("no_trade_reason") or "—",
+                }
+                for r in rows
+            ]
+        )
+        st.dataframe(
+            alloc_df,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Model Prob": st.column_config.NumberColumn("Model Prob", format="%.1%"),
+                "Market Prob": st.column_config.NumberColumn("Market Prob", format="%.1%"),
+                "Executable Price": st.column_config.NumberColumn(
+                    "Executable Price", format="%.3f"
+                ),
+                "Executable Edge": st.column_config.NumberColumn(
+                    "Executable Edge", format="%+.3f"
+                ),
+                "Recommended Paper Allocation": st.column_config.NumberColumn(
+                    "Recommended Paper Allocation", format="$%.2f"
+                ),
+                "Estimated Contracts": st.column_config.NumberColumn(
+                    "Estimated Contracts", format="%d"
+                ),
+                "Expected Profit": st.column_config.NumberColumn(
+                    "Expected Profit", format="$%.2f"
+                ),
+                "Max Loss": st.column_config.NumberColumn("Max Loss", format="$%.2f"),
+            },
+        )
+
+    outcomes = money_dist.get("pnl_by_outcome") or []
+    if outcomes:
+        st.markdown("**Portfolio PnL by Settlement Outcome**")
+        outcome_df = pd.DataFrame(
+            [
+                {
+                    "Settlement Outcome": o.get("outcome_bin"),
+                    "Outcome Probability": o.get("probability"),
+                    "Portfolio PnL": o.get("net_pnl"),
+                    "Profitable?": 1 if (o.get("net_pnl") or 0) > 0.0001 else 0,
+                }
+                for o in outcomes
+            ]
+        )
+        st.dataframe(
+            outcome_df,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Outcome Probability": st.column_config.NumberColumn(
+                    "Outcome Probability", format="%.1%"
+                ),
+                "Portfolio PnL": st.column_config.NumberColumn(
+                    "Portfolio PnL", format="$%.2f"
+                ),
+                "Profitable?": st.column_config.NumberColumn(
+                    "Profitable?", format="%d", help="1 = profitable, 0 = not profitable"
+                ),
+            },
+        )
+
+    extra_warnings = [
+        w for w in (money_dist.get("warnings") or [])
+        if w not in liquidity_warnings
+    ]
+    if extra_warnings:
+        st.markdown("**Distribution Warnings**")
+        for w in extra_warnings:
+            st.warning(w)
+
 
 def render_command_center(app_state, p_data, mkts):
     st.header("🏠 Command Center")
@@ -239,115 +518,7 @@ def render_command_center(app_state, p_data, mkts):
 
     st.divider()
 
-    st.subheader("💰 Paper Money Distribution")
-    money_dist = p_data.get("money_distribution") if isinstance(p_data, dict) else None
-
-    default_bankroll = 1000.0
-    if money_dist and money_dist.get("total_available_dollars") is not None:
-        default_bankroll = float(money_dist["total_available_dollars"])
-
-    bankroll_input = st.number_input(
-        "Total available dollars (paper bankroll)",
-        min_value=0.0,
-        value=default_bankroll,
-        step=50.0,
-        help="Adjust to explore allocations. Recomputes from the latest signal "
-        "using the same forecast and risk gates (paper-only, no orders).",
-    )
-
-    if bankroll_input != default_bankroll and isinstance(p_data, dict):
-        try:
-            from risk.money_distribution import distribute_money
-
-            primary_date = p_data.get("primary_event_date") or "unknown"
-            primary_event = (p_data.get("events_by_date") or {}).get(primary_date, {})
-            signals = primary_event.get("signals") or p_data.get("signals") or []
-            forecast_data = primary_event.get("forecast_data") or {}
-            money_dist = distribute_money(
-                bankroll=float(bankroll_input),
-                active_signals=signals,
-                forecast_data=forecast_data,
-                weather_gate=p_data.get("weather_gate") or {},
-                ledger_summary={"daily_pnl": 0.0, "weekly_pnl": 0.0, "active_trades_by_date": {}},
-                target_date=primary_date,
-                mode=money_dist.get("allocation_mode", "risk_adjusted") if money_dist else "risk_adjusted",
-            )
-            st.caption("Showing live recomputation for the bankroll entered above.")
-        except Exception as exc:
-            st.error(f"Could not recompute money distribution: {exc}")
-
-    if money_dist:
-        md1, md2, md3, md4 = st.columns(4)
-        md1.metric("Bankroll", f"${money_dist.get('total_available_dollars', 0):,.2f}")
-        md2.metric("Allocated", f"${money_dist.get('total_allocated', 0):,.2f}")
-        md3.metric("Expected Profit", f"${money_dist.get('portfolio_expected_profit', 0):,.2f}")
-        prob_profit = money_dist.get("probability_of_profit")
-        md4.metric(
-            "Prob. of Profit",
-            f"{prob_profit * 100:.1f}%" if prob_profit is not None else "—",
-        )
-
-        guarantee = money_dist.get("guaranteed_profit_possible", False)
-        mode_label = money_dist.get("allocation_mode", "risk_adjusted")
-        if guarantee:
-            st.success(
-                f"Guaranteed net-positive allocation is mathematically possible "
-                f"(mode: `{mode_label}`)."
-            )
-        else:
-            st.warning(
-                "Guaranteed net-positive allocation not available; "
-                "showing best risk-adjusted paper allocation."
-            )
-
-        wc1, wc2, wc3 = st.columns(3)
-        wc1.metric("Worst Case", f"${money_dist.get('worst_case_profit', 0):,.2f}")
-        wc2.metric("Best Case", f"${money_dist.get('best_case_profit', 0):,.2f}")
-        wc3.metric("Cash Unallocated", f"${money_dist.get('cash_unallocated', 0):,.2f}")
-
-        rows = money_dist.get("rows") or []
-        if rows:
-            alloc_df = pd.DataFrame(
-                [
-                    {
-                        "Contract": r.get("contract_ticker"),
-                        "Bin": r.get("bin_range"),
-                        "Model Prob": (r.get("model_probability") or 0) * 100,
-                        "Edge": r.get("executable_edge"),
-                        "Allocation $": r.get("recommended_allocation_dollars"),
-                        "Est. Contracts": r.get("estimated_contracts"),
-                        "E[Profit] $": r.get("expected_profit"),
-                        "Max Loss $": r.get("max_loss"),
-                        "No-Trade Reason": r.get("no_trade_reason") or "—",
-                    }
-                    for r in rows
-                ]
-            )
-            st.dataframe(
-                alloc_df,
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "Model Prob": st.column_config.NumberColumn("Model Prob", format="%.1f%%"),
-                    "Allocation $": st.column_config.NumberColumn("Allocation $", format="$%.2f"),
-                    "E[Profit] $": st.column_config.NumberColumn("E[Profit] $", format="$%.2f"),
-                    "Max Loss $": st.column_config.NumberColumn("Max Loss $", format="$%.2f"),
-                },
-            )
-
-        outcomes = money_dist.get("pnl_by_outcome") or []
-        if outcomes:
-            with st.expander("PnL by Settlement Outcome", expanded=False):
-                st.dataframe(pd.DataFrame(outcomes), width="stretch", hide_index=True)
-
-        if money_dist.get("warnings"):
-            for w in money_dist["warnings"]:
-                st.warning(w)
-    else:
-        st.info(
-            "No money distribution block in the latest paper signal. "
-            "Run `generate_paper_signal` to populate allocations."
-        )
+    _render_money_distribution_panel(p_data if isinstance(p_data, dict) else {})
 
     st.divider()
 
