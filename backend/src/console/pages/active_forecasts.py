@@ -11,34 +11,81 @@ from console.data_helpers import (
     load_forecast_data,
     normalize_signal_df,
 )
+from console.market_visibility import (
+    MARKET_STATUS_CLOSED,
+    MARKET_STATUS_MISSING_FORECAST,
+    MARKET_STATUS_STALE_MARKET_DATA,
+    build_kalshi_bins_rows,
+    format_snapshot_age_line,
+    is_tradable_status,
+    partition_market_dates,
+    status_banner_message,
+    status_badge,
+)
 
 
-def render_date_forecasts(date: str, date_data: dict, inside_expander: bool, use_11_cols: bool, allow_rec: bool):
-    """Renders all forecast-related tables and metrics for a specific market date."""
-    # 1. Display Bins & Probabilities
-    st.subheader("🔮 Model Forecast Probabilities per Bin")
-    probs = date_data.get("dynamic_contract_probabilities")
-    if not probs:
-        st.warning(f"⚠️ No forecast probabilities available for {date}.")
+def _render_bins_for_date(
+    date: str,
+    date_data: dict,
+    market_snapshot: dict,
+) -> None:
+    """Model forecast probabilities per bin with market-status visibility."""
+    market_status = date_data.get("market_status", "")
+    if not date_data.get("max_age_minutes") and market_snapshot:
+        date_data = {**date_data, "max_age_minutes": market_snapshot.get("max_age_minutes")}
+
+    st.markdown(f"#### {date} — {status_badge(market_status)}")
+    if not is_tradable_status(market_status):
+        st.caption("Not tradable for active paper allocation.")
+
+    snap_line = format_snapshot_age_line(date_data, market_snapshot)
+    if snap_line:
+        st.caption(f"Snapshot: {snap_line}")
+
+    banner = status_banner_message(date, date_data, market_status)
+    if banner:
+        if market_status == MARKET_STATUS_STALE_MARKET_DATA:
+            st.error(banner)
+        elif market_status == MARKET_STATUS_MISSING_FORECAST:
+            st.warning(banner)
+        elif market_status == MARKET_STATUS_CLOSED:
+            st.info(banner)
+        else:
+            st.warning(banner)
+
+    prob_rows = build_kalshi_bins_rows(date_data)
+    contracts = date_data.get("contracts") or []
+    if not prob_rows and market_status == MARKET_STATUS_MISSING_FORECAST and contracts:
+        st.warning(
+            f"Forecast distribution missing for {date}. "
+            f"Showing {len(contracts)} contract(s) without fabricated probabilities."
+        )
+    elif not prob_rows:
+        st.warning(f"⚠️ No contracts or forecast probabilities available for {date}.")
     else:
-        prob_rows = []
-        for bin_name, prob in probs.items():
-            prob_rows.append({
-                "Kalshi Bin (Range)": bin_name,
-                "Model Prob": prob * 100 if prob is not None else None
-            })
         df_probs = pd.DataFrame(prob_rows)
         st.dataframe(
             df_probs,
             width="stretch",
             hide_index=True,
             column_config={
-                "Model Prob": st.column_config.NumberColumn(
-                    "Model Prob",
-                    format="%.2f%%"
-                )
-            }
+                "Model Prob": st.column_config.NumberColumn("Model Prob", format="%.2f%%"),
+            },
         )
+
+
+def render_date_forecasts(
+    date: str,
+    date_data: dict,
+    inside_expander: bool,
+    use_11_cols: bool,
+    allow_rec: bool,
+    market_snapshot: dict | None = None,
+):
+    """Renders all forecast-related tables and metrics for a specific market date."""
+    market_snapshot = market_snapshot or {}
+
+    _render_bins_for_date(date, date_data, market_snapshot)
 
     # 2. Display Model Insights & Distribution Support if forecast source data exists
     forecast_src = date_data.get("forecast_source")
@@ -273,29 +320,67 @@ def render_active_forecasts(p_data):
             }
         }
 
-    sorted_dates = sorted(events_by_date.keys())
+    market_snapshot = p_data.get("market_snapshot") or {}
+    open_market_dates = p_data.get("open_market_dates") or []
+    primary_dates, pre_open_dates, closed_dates = partition_market_dates(
+        events_by_date, open_market_dates
+    )
 
-    if len(sorted_dates) == 1:
-        # Preserve original layout exactly when only a single date is present (using original 16 cols)
+    if open_market_dates:
+        st.success(f"**Open market dates:** {', '.join(open_market_dates)}")
+
+    if market_snapshot.get("is_stale"):
+        st.warning(
+            "Global Kalshi market snapshot is stale — refresh before paper evaluation."
+        )
+
+    st.subheader("🔮 Model Forecast Probabilities per Bin")
+
+    if len(events_by_date) == 1:
+        only_date = next(iter(events_by_date))
         render_date_forecasts(
-            sorted_dates[0],
-            events_by_date[sorted_dates[0]],
+            only_date,
+            events_by_date[only_date],
             inside_expander=False,
             use_11_cols=False,
-            allow_rec=allow_rec
+            allow_rec=allow_rec,
+            market_snapshot=market_snapshot,
         )
     else:
-        # Show collapsible expanders per active market/date if multiple are present
-        for date in sorted_dates:
-            ticker_suffix = f" ({events_by_date[date].get('event_ticker')})" if events_by_date[date].get('event_ticker') else ""
-            with st.expander(f"📅 Market Date: {date}{ticker_suffix}", expanded=True):
-                render_date_forecasts(
-                    date,
-                    events_by_date[date],
-                    inside_expander=True,
-                    use_11_cols=True,
-                    allow_rec=allow_rec
-                )
+        for date in primary_dates:
+            render_date_forecasts(
+                date,
+                events_by_date[date],
+                inside_expander=False,
+                use_11_cols=True,
+                allow_rec=allow_rec,
+                market_snapshot=market_snapshot,
+            )
+        if pre_open_dates:
+            with st.expander("Pre-open markets (secondary)", expanded=False):
+                for date in pre_open_dates:
+                    render_date_forecasts(
+                        date,
+                        events_by_date[date],
+                        inside_expander=True,
+                        use_11_cols=True,
+                        allow_rec=allow_rec,
+                        market_snapshot=market_snapshot,
+                    )
+        if closed_dates:
+            with st.expander(
+                "Closed / historical markets — not used for active allocation",
+                expanded=False,
+            ):
+                for date in closed_dates:
+                    render_date_forecasts(
+                        date,
+                        events_by_date[date],
+                        inside_expander=True,
+                        use_11_cols=True,
+                        allow_rec=allow_rec,
+                        market_snapshot=market_snapshot,
+                    )
 
 
 __all__ = ["render_active_forecasts"]

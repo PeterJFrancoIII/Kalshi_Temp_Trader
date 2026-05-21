@@ -15,6 +15,17 @@ from console.data_helpers import (
     is_signal_stale_or_mismatched,
     load_json,
 )
+from console.market_visibility import (
+    MARKET_STATUS_CLOSED,
+    MARKET_STATUS_MISSING_FORECAST,
+    MARKET_STATUS_STALE_MARKET_DATA,
+    build_kalshi_bins_rows,
+    format_snapshot_age_line,
+    is_tradable_status,
+    partition_market_dates,
+    status_banner_message,
+    status_badge,
+)
 
 # UI allocation mode keys → engine mode strings (read-only display recomputation).
 _ALLOCATION_MODE_OPTIONS = (
@@ -296,6 +307,161 @@ def _render_money_distribution_panel(p_data: dict) -> None:
             st.warning(w)
 
 
+def _render_suggested_paper_contracts_table(date: str, date_data: dict) -> None:
+    """Suggested Paper Contracts & Actions table for one event date."""
+    import pandas as pd
+
+    st.subheader("📋 Suggested Paper Contracts & Actions")
+    event_ticker = date_data.get("event_ticker", "N/A")
+    market_status = date_data.get("market_status", "")
+    signals = date_data.get("signals", [])
+    tradable = is_tradable_status(market_status)
+
+    if signals:
+        sig_rows = []
+        for s in signals:
+            warnings_list = s.get("warnings", [])
+            warnings_str = ", ".join(warnings_list) if warnings_list else "None"
+            paper_action = s.get("paper_action", "NO TRADE")
+            if not tradable and "BUY" in str(paper_action).upper():
+                paper_action = "NO TRADE (market not tradable)"
+
+            sig_rows.append({
+                "Market Date": date,
+                "Market Ticker": event_ticker,
+                "Contract Ticker": s.get("market_ticker") or "N/A",
+                "Bin/Range": s.get("contract_range") or s.get("contract_range_label") or "N/A",
+                "Model Prob": s.get("model_probability") * 100 if s.get("model_probability") is not None else None,
+                "Market Prob": s.get("market_probability") * 100 if s.get("market_probability") is not None else None,
+                "Raw Edge": s.get("raw_edge", 0) * 100 if s.get("raw_edge") is not None else None,
+                "Executable Edge": s.get("executable_edge", s.get("edge", 0)) * 100
+                if s.get("executable_edge") is not None or s.get("edge") is not None
+                else None,
+                "Paper Action": paper_action,
+                "No-Trade Reason": s.get("no_trade_reason") or "Risk gate passed. Candidate for trade.",
+                "Warnings": warnings_str,
+            })
+        df_sig_rows = pd.DataFrame(sig_rows)
+        st.dataframe(
+            df_sig_rows,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Model Prob": st.column_config.NumberColumn("Model Prob", format="%.1f%%"),
+                "Market Prob": st.column_config.NumberColumn("Market Prob", format="%.1f%%"),
+                "Raw Edge": st.column_config.NumberColumn("Raw Edge", format="%+.1f%%"),
+                "Executable Edge": st.column_config.NumberColumn("Executable Edge", format="%+.1f%%"),
+            },
+        )
+    else:
+        st.info("No suggested paper contracts available.")
+
+    date_warnings = date_data.get("warnings", [])
+    for w in date_warnings:
+        st.warning(f"⚠️ [{date}] {w}")
+
+
+def _render_kalshi_bins_for_date(
+    date: str,
+    date_data: dict,
+    market_snapshot: dict,
+) -> None:
+    """Kalshi Bins table and status banners for one event date."""
+    import pandas as pd
+
+    market_status = date_data.get("market_status", "")
+    if not date_data.get("max_age_minutes") and market_snapshot:
+        date_data = {**date_data, "max_age_minutes": market_snapshot.get("max_age_minutes")}
+
+    st.markdown(f"#### {date} — {status_badge(market_status)}")
+    if not is_tradable_status(market_status):
+        st.caption("Not tradable for active paper allocation.")
+
+    snap_line = format_snapshot_age_line(date_data, market_snapshot)
+    if snap_line:
+        st.caption(f"Snapshot: {snap_line}")
+
+    if date_data.get("open_start_et") or date_data.get("open_end_et"):
+        st.caption(
+            f"Market window (ET): {date_data.get('open_start_et', '—')} → "
+            f"{date_data.get('open_end_et', '—')}"
+        )
+
+    banner = status_banner_message(date, date_data, market_status)
+    if banner:
+        if market_status == MARKET_STATUS_STALE_MARKET_DATA:
+            st.error(banner)
+        elif market_status == MARKET_STATUS_MISSING_FORECAST:
+            st.warning(banner)
+        elif market_status == MARKET_STATUS_CLOSED:
+            st.info(banner)
+        else:
+            st.warning(banner)
+
+    prob_rows = build_kalshi_bins_rows(date_data)
+    contracts = date_data.get("contracts") or []
+    if not prob_rows and market_status == MARKET_STATUS_MISSING_FORECAST and contracts:
+        st.warning(
+            f"Forecast distribution missing for {date}. "
+            f"Showing {len(contracts)} open contract(s) without fabricated model probabilities."
+        )
+    elif not prob_rows:
+        st.warning(f"⚠️ No contracts or forecast probabilities available for {date}.")
+    else:
+        df_probs = pd.DataFrame(prob_rows)
+        st.dataframe(
+            df_probs,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Model Prob": st.column_config.NumberColumn("Model Prob", format="%.2f%%"),
+            },
+        )
+
+    _render_suggested_paper_contracts_table(date, date_data)
+
+
+def _render_kalshi_bins_and_contracts_section(p_data: dict, events_by_date: dict) -> None:
+    """Open / stale / missing / closed market visibility for Kalshi bins."""
+    market_snapshot = p_data.get("market_snapshot") if isinstance(p_data, dict) else {}
+    if not isinstance(market_snapshot, dict):
+        market_snapshot = {}
+
+    open_market_dates = p_data.get("open_market_dates") or []
+    primary_dates, pre_open_dates, closed_dates = partition_market_dates(
+        events_by_date, open_market_dates
+    )
+
+    st.subheader("🔮 Kalshi Bins & Model Forecast Probabilities")
+
+    if open_market_dates:
+        st.success(f"**Open market dates:** {', '.join(open_market_dates)}")
+
+    if market_snapshot.get("is_stale"):
+        st.warning(
+            "Global Kalshi market snapshot is stale "
+            f"({market_snapshot.get('snapshot_age_minutes', '—')} min old, "
+            f"max {market_snapshot.get('max_age_minutes', '—')} min). "
+            "Refresh before paper evaluation."
+        )
+
+    for date in primary_dates:
+        _render_kalshi_bins_for_date(date, events_by_date[date], market_snapshot)
+
+    if pre_open_dates:
+        with st.expander("Pre-open markets (secondary)", expanded=False):
+            for date in pre_open_dates:
+                _render_kalshi_bins_for_date(date, events_by_date[date], market_snapshot)
+
+    if closed_dates:
+        with st.expander(
+            "Closed / historical markets — not used for active allocation",
+            expanded=False,
+        ):
+            for date in closed_dates:
+                _render_kalshi_bins_for_date(date, events_by_date[date], market_snapshot)
+
+
 def render_command_center(app_state, p_data, mkts):
     st.header("🏠 Command Center")
 
@@ -414,9 +580,6 @@ def render_command_center(app_state, p_data, mkts):
             for w in p_data["warnings"]:
                 st.warning(w)
 
-    import pandas as pd
-
-    # Get events grouped by date, with fallback to top-level fields for single-date compatibility
     events_by_date = p_data.get("events_by_date")
     if not events_by_date:
         primary_date = p_data.get("primary_event_date") or "N/A"
@@ -426,95 +589,13 @@ def render_command_center(app_state, p_data, mkts):
                 "forecast_source": p_data.get("forecast_source"),
                 "signals": p_data.get("signals", []),
                 "dynamic_contract_probabilities": p_data.get("dynamic_contract_probabilities", {}),
+                "market_status": p_data.get("market_status", "OPEN"),
                 "status": p_data.get("status", "NO_SIGNAL"),
-                "warnings": p_data.get("warnings", [])
+                "warnings": p_data.get("warnings", []),
             }
         }
 
-    sorted_dates = sorted(events_by_date.keys())
-
-    # Define a helper function to render a single market date's tables
-    def render_date_tables(date: str, date_data: dict, inside_expander: bool = False):
-        event_ticker = date_data.get("event_ticker", "N/A")
-        
-        # Display Bins & Probabilities
-        st.subheader("🔮 Kalshi Bins & Model Forecast Probabilities")
-        probs = date_data.get("dynamic_contract_probabilities")
-        if not probs:
-            st.warning(f"⚠️ No forecast probabilities available for {date}.")
-        else:
-            prob_rows = []
-            for bin_name, prob in probs.items():
-                prob_rows.append({
-                    "Kalshi Bin (Range)": bin_name,
-                    "Model Prob": prob * 100 if prob is not None else None
-                })
-            df_probs = pd.DataFrame(prob_rows)
-            st.dataframe(
-                df_probs,
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "Model Prob": st.column_config.NumberColumn(
-                        "Model Prob",
-                        format="%.2f%%"
-                    )
-                }
-            )
-
-        # Suggested Paper Contracts & Actions
-        st.subheader("📋 Suggested Paper Contracts & Actions")
-        signals = date_data.get("signals", [])
-        if signals:
-            sig_rows = []
-            for s in signals:
-                warnings_list = s.get("warnings", [])
-                warnings_str = ", ".join(warnings_list) if warnings_list else "None"
-                
-                sig_rows.append({
-                    "Market Date": date,
-                    "Market Ticker": event_ticker,
-                    "Contract Ticker": s.get("market_ticker") or "N/A",
-                    "Bin/Range": s.get("contract_range") or s.get("contract_range_label") or "N/A",
-                    "Model Prob": s.get("model_probability") * 100 if s.get("model_probability") is not None else None,
-                    "Market Prob": s.get("market_probability") * 100 if s.get("market_probability") is not None else None,
-                    "Raw Edge": s.get("raw_edge", 0) * 100 if s.get("raw_edge") is not None else None,
-                    "Executable Edge": s.get("executable_edge", s.get("edge", 0)) * 100 if s.get("executable_edge") is not None or s.get("edge") is not None else None,
-                    "Paper Action": s.get("paper_action", "NO TRADE"),
-                    "No-Trade Reason": s.get("no_trade_reason") or "Risk gate passed. Candidate for trade.",
-                    "Warnings": warnings_str
-                })
-            df_sig_rows = pd.DataFrame(sig_rows)
-            st.dataframe(
-                df_sig_rows,
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "Model Prob": st.column_config.NumberColumn("Model Prob", format="%.1f%%"),
-                    "Market Prob": st.column_config.NumberColumn("Market Prob", format="%.1f%%"),
-                    "Raw Edge": st.column_config.NumberColumn("Raw Edge", format="%+.1f%%"),
-                    "Executable Edge": st.column_config.NumberColumn("Executable Edge", format="%+.1f%%")
-                }
-            )
-        else:
-            st.info("No suggested paper contracts available.")
-
-        # Show date-specific warnings if available inside the expander/section
-        date_warnings = date_data.get("warnings", [])
-        if date_warnings:
-            with st.container():
-                for w in date_warnings:
-                    st.warning(f"⚠️ [{date}] {w}")
-
-    if len(sorted_dates) == 1:
-        # Preserve original layout exactly when only a single date is present
-        render_date_tables(sorted_dates[0], events_by_date[sorted_dates[0]], inside_expander=False)
-    else:
-        # Show collapsible expanders per active market/date if multiple are present
-        for date in sorted_dates:
-            ticker_suffix = f" ({events_by_date[date].get('event_ticker')})" if events_by_date[date].get('event_ticker') else ""
-            with st.expander(f"📅 Market Date: {date}{ticker_suffix}", expanded=True):
-                render_date_tables(date, events_by_date[date], inside_expander=True)
+    _render_kalshi_bins_and_contracts_section(p_data, events_by_date)
 
     st.divider()
 
